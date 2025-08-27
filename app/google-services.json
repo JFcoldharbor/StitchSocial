@@ -1,0 +1,154 @@
+{
+  "project_info": {
+    "project_number": "854189118304",
+    "project_id": "stitchbeta-8bbfe",
+    "storage_bucket": "stitchbeta-8bbfe.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854189118304:android:e750993573997d70078405",
+        "android_client_info": {
+          "package_name": "com.StitchSocialMe.finalstitch"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUDqkyZwZ9iU5Uk0ZAgxXNEx2lpQVFW-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "854189118304-32drctej3g2mipl1h5bd92ctjhvhdvbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "coldharbor.StitchSocial"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854189118304:android:c6f7e599a616192b078405",
+        "android_client_info": {
+          "package_name": "com.example.finalstitch"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUDqkyZwZ9iU5Uk0ZAgxXNEx2lpQVFW-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "854189118304-32drctej3g2mipl1h5bd92ctjhvhdvbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "coldharbor.StitchSocial"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854189118304:android:a63c56e421345ec3078405",
+        "android_client_info": {
+          "package_name": "com.example.myapplication"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUDqkyZwZ9iU5Uk0ZAgxXNEx2lpQVFW-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "854189118304-32drctej3g2mipl1h5bd92ctjhvhdvbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "coldharbor.StitchSocial"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854189118304:android:ad8aebdc7349d25a078405",
+        "android_client_info": {
+          "package_name": "com.example.stitchsocialclub"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUDqkyZwZ9iU5Uk0ZAgxXNEx2lpQVFW-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "854189118304-32drctej3g2mipl1h5bd92ctjhvhdvbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "coldharbor.StitchSocial"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
