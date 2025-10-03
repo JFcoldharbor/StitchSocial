@@ -148,6 +148,42 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854189118304:android:0581a342839ecad3078405",
+        "android_client_info": {
+          "package_name": "com.stitchsocial.club"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUDqkyZwZ9iU5Uk0ZAgxXNEx2lpQVFW-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "854189118304-32drctej3g2mipl1h5bd92ctjhvhdvbu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "coldharbor.StitchSocial"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

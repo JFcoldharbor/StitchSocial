@@ -7,19 +7,29 @@ plugins {
 }
 
 android {
-    namespace = "com.example.stitchsocialclub"
+    namespace = "com.stitchsocial.club"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.stitchsocialclub"
+        applicationId = "com.stitchsocial.club"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
+        versionCode = 4
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    // SIGNING CONFIGURATION
+    signingConfigs {
+        create("release") {
+            storeFile = file("C:\\Users\\james\\stitch-release.keystore")
+            storePassword = "Stitchsocial2026"  // Replace with your actual password
+            keyAlias = "StitchMean"
+            keyPassword = "Stitchsocial2026"    // Replace with your actual password
         }
     }
 
@@ -33,6 +43,8 @@ android {
             isMinifyEnabled = false
             buildConfigField("String", "BUILD_TYPE", "\"release\"")
             buildConfigField("boolean", "DEBUG", "false")
+            // ADD SIGNING CONFIG TO RELEASE
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -120,6 +132,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
     implementation("androidx.camera:camera-video:1.3.1")
+    implementation("androidx.camera:camera-extensions:1.3.1")
 
     // Permission handling
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
