@@ -5,9 +5,10 @@
  * Layer 8: Views - Authentication interface
  * CRITICAL FIX: Uses rememberCoroutineScope instead of LaunchedEffect
  * This prevents scope cancellation during Firebase auth calls
+ * ✅ PACKAGE FIXED: com.stitchsocial.club.views
  */
 
-package com.example.stitchsocialclub.views
+package com.stitchsocial.club
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*

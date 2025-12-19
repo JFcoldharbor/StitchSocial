@@ -1,5 +1,6 @@
-package package com.stitchsocial.clubimport org.junit.Test
+package com.stitchsocial.club
 
+import org.junit.Test
 import org.junit.Assert.*
 
 /**

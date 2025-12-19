@@ -1,19 +1,22 @@
 /*
- * VideoPlayerComposable.kt - FIXED IPHONE VIDEO STRETCHING + RECORDING STATE INTEGRATION
+ * VideoPlayerComposable.kt - WITH PAUSE BROADCAST RECEIVER
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 8: Views - ExoPlayer Compose Video Player
  * Dependencies: ExoPlayer, Foundation types, VideoManager
- * Features: TikTok-style autoplay, seamless looping, gesture controls, recording state awareness
+ * Features: TikTok-style autoplay, seamless looping, gesture controls, pause broadcast listener
  *
+ * ✅ ADDED: Pause broadcast receiver for camera integration
+ * ✅ REMOVED: Loading/buffering indicator for smoother experience
  * ✅ FIXED: iPhone video stretching with proper resize mode
  * ✅ FIXED: Proper background video pause management
- * ✅ FIXED: Edge-to-edge immersion like TikTok
  * ✅ ADDED: Recording state integration for automatic video cleanup
  */
 
 package com.stitchsocial.club.views
 
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -44,9 +48,7 @@ import com.stitchsocial.club.VideoManager
 
 /**
  * ExoPlayer-powered video player for TikTok-style feed
- * ✅ FIXED: iPhone video stretching with proper resize mode
- * ✅ FIXED: Proper background video pause management
- * ✅ ADDED: Recording state integration for automatic cleanup
+ * ✅ Listens for pause broadcasts from stitch button
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -67,7 +69,7 @@ fun VideoPlayerComposable(
     val videoTitle = getVideoProperty(video, "title") ?: "Unknown Video"
     val videoId = getVideoProperty(video, "id") ?: "unknown_id"
 
-    // ADDED: Listen for recording state from VideoManager
+    // Listen for recording state from VideoManager
     val isRecordingActive by VideoManager.isRecordingActive.collectAsState()
 
     // Create ExoPlayer instance
@@ -77,7 +79,7 @@ fun VideoPlayerComposable(
             .apply {
                 // Configure for seamless looping
                 repeatMode = Player.REPEAT_MODE_ONE
-                playWhenReady = false  // Don't autoplay until active
+                playWhenReady = false
 
                 try {
                     if (videoURL.isNotEmpty()) {
@@ -126,7 +128,7 @@ fun VideoPlayerComposable(
             }
     }
 
-    // ADDED: Recording state integration - pause when recording starts
+    // Recording state integration - pause when recording starts
     LaunchedEffect(isRecordingActive) {
         if (isRecordingActive) {
             Log.i("VIDEO_PLAYER", "🎥 Recording started - pausing video $videoId")
@@ -134,14 +136,39 @@ fun VideoPlayerComposable(
             exoPlayer.playWhenReady = false
         } else {
             Log.d("VIDEO_PLAYER", "🎬 Recording stopped - video $videoId can resume if active")
-            // Note: Don't auto-resume here, let the normal isActive logic handle it
+        }
+    }
+
+    // ✅ NEW: Listen for pause broadcast from stitch button
+    DisposableEffect(videoId) {
+        val pauseReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                when (intent?.action) {
+                    "com.stitchsocial.PAUSE_ALL_VIDEOS" -> {
+                        Log.i("VIDEO_PLAYER", "📡 PAUSE BROADCAST RECEIVED for $videoId")
+                        exoPlayer.pause()
+                        exoPlayer.playWhenReady = false
+                        isPlaying = false
+                        showPlayButton = true
+                    }
+                }
+            }
+        }
+
+        val filter = IntentFilter("com.stitchsocial.PAUSE_ALL_VIDEOS")
+        LocalBroadcastManager.getInstance(context).registerReceiver(pauseReceiver, filter)
+        Log.d("VIDEO_PLAYER", "📻 Registered pause receiver for $videoId")
+
+        onDispose {
+            LocalBroadcastManager.getInstance(context).unregisterReceiver(pauseReceiver)
+            Log.d("VIDEO_PLAYER", "📻 Unregistered pause receiver for $videoId")
         }
     }
 
     // Video Manager control
     LaunchedEffect(isActive) {
         Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive")
-        if (isActive && !isError && !isRecordingActive) { // UPDATED: Check recording state
+        if (isActive && !isError && !isRecordingActive) {
             VideoManager.setActivePlayer(exoPlayer, videoId)
             exoPlayer.play()
             Log.i("VIDEO_PLAYER", "▶️ PLAYING $videoId (now active via VideoManager)")
@@ -187,21 +214,19 @@ fun VideoPlayerComposable(
                 )
             }
             else -> {
-                // ✅ CRITICAL FIX: ExoPlayer View with proper iPhone video handling
+                // ExoPlayer View - NO BUFFERING INDICATOR
                 AndroidView(
                     factory = { context ->
                         PlayerView(context).apply {
                             player = exoPlayer
-                            useController = false // Disable default controls
-                            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                            useController = false
+                            // ✅ REMOVED: setShowBuffering - no loading spinner!
 
-                            // ✅ IPHONE VIDEO FIX: Proper resize mode for modern iPhone videos
+                            // iPhone video fix
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-
-                            // ✅ ADDITIONAL FIXES for iPhone videos
                             setKeepContentOnPlayerReset(true)
 
-                            Log.d("VIDEO_PLAYER", "🎬 PlayerView configured for iPhone videos: $videoId")
+                            Log.d("VIDEO_PLAYER", "🎬 PlayerView configured: $videoId")
                         }
                     },
                     modifier = Modifier.fillMaxSize()
@@ -216,17 +241,14 @@ fun VideoPlayerComposable(
                                 onTap = { offset ->
                                     val screenWidth = size.width
                                     when {
-                                        // Left side tap - Cool interaction
                                         offset.x < screenWidth * 0.25f -> {
                                             onEngagement?.invoke(InteractionType.COOL)
                                             Log.d("VIDEO_PLAYER", "❄️ Cool tap on $videoId")
                                         }
-                                        // Right side tap - Hype interaction
                                         offset.x > screenWidth * 0.75f -> {
                                             onEngagement?.invoke(InteractionType.HYPE)
                                             Log.d("VIDEO_PLAYER", "🔥 Hype tap on $videoId")
                                         }
-                                        // Center tap - Video click
                                         else -> {
                                             onVideoClick?.invoke()
                                         }
@@ -236,8 +258,8 @@ fun VideoPlayerComposable(
                         }
                 )
 
-                // Play Button Overlay (hidden in feed, only shows in fullscreen)
-                if (showPlayButton && !isRecordingActive) { // UPDATED: Hide play button during recording
+                // Play Button Overlay (only in fullscreen)
+                if (showPlayButton && !isRecordingActive) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -255,7 +277,7 @@ fun VideoPlayerComposable(
                     }
                 }
 
-                // ADDED: Recording indicator overlay
+                // Recording indicator overlay
                 if (isRecordingActive) {
                     Box(
                         modifier = Modifier

@@ -1,10 +1,14 @@
 /*
- * VideoCoordinator.kt - COMPLETE WITH PARALLEL PROCESSING
+ * VideoCoordinator.kt - FIXED WITH THREAD HIERARCHY CALCULATION
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 6: Coordination - Video processing with parallel tasks
  * Dependencies: VideoServiceImpl (Layer 4), Foundation types
- * Features: Parallel processing (Audio + Compression + AI), Firebase upload
+ * Features: Parallel processing (Audio + Compression + AI), Firebase upload, Gallery picker
+ *
+ * ✅ FIXED: Proper threadID, replyToVideoID, conversationDepth calculation
+ * ✅ FIXED: Fetches parent video before creating child/stepchild
+ * ✅ FIXED: Matches Swift ThreadService hierarchy logic exactly
  */
 
 package com.stitchsocial.club.coordination
@@ -34,7 +38,8 @@ import kotlinx.coroutines.tasks.await
 import android.net.Uri
 
 /**
- * VideoCoordinator with complete parallel processing pipeline
+ * VideoCoordinator with complete parallel processing pipeline + proper thread hierarchy
+ * ✅ NOW PROPERLY CALCULATES threadID, replyToVideoID, conversationDepth
  */
 class VideoCoordinator(
     private val videoService: VideoServiceImpl,
@@ -93,8 +98,8 @@ class VideoCoordinator(
     private val _lastVideoMetadata = MutableStateFlow<CoreVideoMetadata?>(null)
     val lastVideoMetadata: StateFlow<CoreVideoMetadata?> = _lastVideoMetadata.asStateFlow()
 
-    private val _lastRecordingContext = MutableStateFlow<RecordingContext?>(null)
-    val lastRecordingContext: StateFlow<RecordingContext?> = _lastRecordingContext.asStateFlow()
+    private val _lastRecordingContext = MutableStateFlow<com.stitchsocial.club.camera.RecordingContext?>(null)
+    val lastRecordingContext: StateFlow<com.stitchsocial.club.camera.RecordingContext?> = _lastRecordingContext.asStateFlow()
 
     private val _lastAIResult = MutableStateFlow<VideoAnalysisResult?>(null)
     val lastAIResult: StateFlow<VideoAnalysisResult?> = _lastAIResult.asStateFlow()
@@ -113,7 +118,7 @@ class VideoCoordinator(
     suspend fun startParallelProcessing(
         videoPath: String,
         metadata: CoreVideoMetadata,
-        recordingContext: RecordingContext
+        recordingContext: com.stitchsocial.club.camera.RecordingContext
     ) = withContext(Dispatchers.IO) {
 
         val startTime = System.currentTimeMillis()
@@ -172,8 +177,108 @@ class VideoCoordinator(
         }
     }
 
+    // MARK: - GALLERY PICKER METHODS
+
+    /**
+     * Launch Android gallery picker for video selection
+     */
+    fun launchGalleryPicker() {
+        println("📱 VIDEO COORDINATOR: Launching gallery picker")
+        // Trigger will be handled by MainActivity via NavigationCoordinator
+    }
+
+    /**
+     * Process video selected from gallery
+     */
+    suspend fun processGalleryVideo(videoUri: Uri) = withContext(Dispatchers.IO) {
+        println("📹 VIDEO COORDINATOR: Processing gallery video")
+        println("📁 URI: $videoUri")
+
+        try {
+            // Convert URI to file path
+            val videoPath = copyUriToFile(videoUri)
+
+            // Create minimal metadata for gallery video
+            val metadata = CoreVideoMetadata(
+                id = "temp_${System.currentTimeMillis()}",
+                title = "Gallery Video",
+                description = "",
+                videoURL = "",
+                thumbnailURL = "",
+                creatorID = auth.currentUser?.uid ?: "anonymous",
+                creatorName = auth.currentUser?.displayName ?: "Anonymous",
+                hashtags = emptyList(),
+                createdAt = Date(),
+                threadID = null,
+                replyToVideoID = null,
+                conversationDepth = 0,
+                viewCount = 0,
+                hypeCount = 0,
+                coolCount = 0,
+                replyCount = 0,
+                shareCount = 0,
+                lastEngagementAt = null,
+                duration = 30.0,
+                aspectRatio = 9.0/16.0,
+                fileSize = 0L,
+                contentType = ContentType.THREAD,
+                temperature = Temperature.WARM,
+                qualityScore = 50,
+                engagementRatio = 0.0,
+                velocityScore = 0.0,
+                trendingScore = 0.0,
+                discoverabilityScore = 0.5,
+                isPromoted = false,
+                isProcessing = false,
+                isDeleted = false
+            )
+
+            // Use same parallel processing pipeline as camera
+            startParallelProcessing(
+                videoPath = videoPath,
+                metadata = metadata,
+                recordingContext = com.stitchsocial.club.camera.RecordingContext.NewThread
+            )
+
+            println("✅ VIDEO COORDINATOR: Gallery video processing started")
+
+        } catch (e: Exception) {
+            println("❌ VIDEO COORDINATOR: Gallery video processing failed - ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
+    }
+
+    /**
+     * Copy URI content to temporary file
+     */
+    private suspend fun copyUriToFile(uri: Uri): String = withContext(Dispatchers.IO) {
+        val fileName = "gallery_${System.currentTimeMillis()}.mp4"
+        val outputFile = File(context.cacheDir, fileName)
+
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                outputFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            println("📁 VIDEO COORDINATOR: Copied URI to ${outputFile.absolutePath}")
+            println("📊 VIDEO COORDINATOR: File size: ${outputFile.length()} bytes")
+
+            return@withContext outputFile.absolutePath
+
+        } catch (e: Exception) {
+            println("❌ VIDEO COORDINATOR: Failed to copy URI - ${e.message}")
+            throw e
+        }
+    }
+
+    // MARK: - Video Creation Completion
+
     /**
      * Complete video creation with user-edited content (called from ThreadComposer)
+     * ✅ FIXED: Now properly calculates thread hierarchy based on RecordingContext
      */
     suspend fun completeVideoCreation(
         userTitle: String,
@@ -198,29 +303,198 @@ class VideoCoordinator(
 
             // Upload video to Firebase Storage
             val videoURL = uploadVideoToFirebase(videoPath)
-            updateProgress(0.5, "Video uploaded, creating database record...")
+            updateProgress(0.3, "Video uploaded, calculating thread hierarchy...")
 
-            // Create final metadata with user input
+            // ✅ CRITICAL FIX: Calculate thread hierarchy based on context
+            val hierarchyData = calculateThreadHierarchy(recordingContext)
+            updateProgress(0.5, "Creating database record...")
+
+            // Create final metadata with user input AND hierarchy data
             val finalMetadata = metadata.copy(
                 title = userTitle.takeIf { it.isNotBlank() } ?: metadata.title,
                 description = userDescription,
-                videoURL = videoURL
+                videoURL = videoURL,
+                threadID = hierarchyData.threadID,
+                replyToVideoID = hierarchyData.replyToVideoID,
+                conversationDepth = hierarchyData.conversationDepth,
+                contentType = hierarchyData.contentType
             )
 
             // Save to database
-            val finalVideo = createVideoDocument(finalMetadata, recordingContext, userHashtags)
+            val finalVideo = createVideoDocument(finalMetadata, userHashtags)
 
             updateProgress(1.0, "Video creation complete!")
 
             println("🎉 VIDEO COORDINATOR: Video successfully created!")
             println("🆔 Video ID: ${finalVideo.id}")
             println("📹 Video URL: ${finalVideo.videoURL}")
+            println("🧵 Thread ID: ${finalVideo.threadID}")
+            println("↩️ Reply To: ${finalVideo.replyToVideoID}")
+            println("📊 Depth: ${finalVideo.conversationDepth}")
 
             return@withContext finalVideo
 
         } catch (e: Exception) {
             println("❌ VIDEO COORDINATOR: Video creation failed - ${e.message}")
+            e.printStackTrace()
             updateProgress(0.0, "Creation failed: ${e.message}")
+            throw e
+        }
+    }
+
+    // MARK: - Thread Hierarchy Calculation (NEW - MATCHES SWIFT)
+
+    /**
+     * Calculate thread hierarchy fields based on RecordingContext
+     * ✅ MATCHES Swift ThreadService.createReply() logic
+     */
+    private suspend fun calculateThreadHierarchy(
+        context: com.stitchsocial.club.camera.RecordingContext
+    ): ThreadHierarchyData = withContext(Dispatchers.IO) {
+
+        return@withContext when (context) {
+            // NEW THREAD: threadID = videoID (set after creation), depth = 0
+            is com.stitchsocial.club.camera.RecordingContext.NewThread -> {
+                println("🧵 HIERARCHY: New thread - depth 0")
+                ThreadHierarchyData(
+                    threadID = null, // Will be set to video ID after creation
+                    replyToVideoID = null,
+                    conversationDepth = 0,
+                    contentType = ContentType.THREAD
+                )
+            }
+
+            // STITCH TO THREAD: Child of thread (depth = 1)
+            is com.stitchsocial.club.camera.RecordingContext.StitchToThread -> {
+                println("🧵 HIERARCHY: Stitch to thread ${context.threadId}")
+
+                // Fetch parent thread to get root threadID
+                val parentVideo = fetchParentVideo(context.threadId)
+                val rootThreadID = parentVideo.threadID ?: parentVideo.id
+
+                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
+                println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}")
+
+                ThreadHierarchyData(
+                    threadID = rootThreadID,
+                    replyToVideoID = null, // Children don't reply to specific videos
+                    conversationDepth = 1, // Always depth 1 for children
+                    contentType = ContentType.CHILD
+                )
+            }
+
+            // REPLY TO VIDEO: Can be child (depth 1) or stepchild (depth 2)
+            is com.stitchsocial.club.camera.RecordingContext.ReplyToVideo -> {
+                println("🧵 HIERARCHY: Reply to video ${context.videoId}")
+
+                // Fetch parent video to determine depth
+                val parentVideo = fetchParentVideo(context.videoId)
+                val newDepth = parentVideo.conversationDepth + 1
+                val rootThreadID = parentVideo.threadID ?: parentVideo.id
+
+                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
+                println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}")
+                println("🧵 HIERARCHY: New depth: $newDepth")
+
+                // Determine content type based on depth
+                val contentType = when (newDepth) {
+                    1 -> ContentType.CHILD
+                    2 -> ContentType.STEPCHILD
+                    else -> throw IllegalStateException("Max conversation depth exceeded: $newDepth")
+                }
+
+                ThreadHierarchyData(
+                    threadID = rootThreadID,
+                    replyToVideoID = context.videoId,
+                    conversationDepth = newDepth,
+                    contentType = contentType
+                )
+            }
+
+            // CONTINUE THREAD: Child of thread (depth = 1)
+            is com.stitchsocial.club.camera.RecordingContext.ContinueThread -> {
+                println("🧵 HIERARCHY: Continue thread ${context.threadId}")
+
+                // Fetch parent thread
+                val parentVideo = fetchParentVideo(context.threadId)
+                val rootThreadID = parentVideo.threadID ?: parentVideo.id
+
+                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
+
+                ThreadHierarchyData(
+                    threadID = rootThreadID,
+                    replyToVideoID = null,
+                    conversationDepth = 1,
+                    contentType = ContentType.CHILD
+                )
+            }
+        }
+    }
+
+    /**
+     * Fetch parent video from Firestore to get hierarchy data
+     * ✅ CRITICAL: Required for proper threadID/depth calculation
+     */
+    private suspend fun fetchParentVideo(videoID: String): CoreVideoMetadata = withContext(Dispatchers.IO) {
+        return@withContext try {
+            println("📥 HIERARCHY: Fetching parent video $videoID")
+
+            val doc = db.collection("videos").document(videoID).get().await()
+
+            if (!doc.exists()) {
+                throw IllegalStateException("Parent video not found: $videoID")
+            }
+
+            val data = doc.data ?: throw IllegalStateException("Parent video has no data")
+
+            // Parse essential hierarchy fields
+            val threadID = data["threadID"] as? String
+            val replyToVideoID = data["replyToVideoID"] as? String
+            val conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
+            val contentTypeStr = data["contentType"] as? String ?: "thread"
+
+            println("✅ HIERARCHY: Parent video loaded")
+            println("  threadID: $threadID")
+            println("  replyToVideoID: $replyToVideoID")
+            println("  conversationDepth: $conversationDepth")
+
+            // Create minimal CoreVideoMetadata with hierarchy data
+            CoreVideoMetadata(
+                id = videoID,
+                title = data["title"] as? String ?: "",
+                description = data["description"] as? String ?: "",
+                videoURL = data["videoURL"] as? String ?: "",
+                thumbnailURL = data["thumbnailURL"] as? String ?: "",
+                creatorID = data["creatorID"] as? String ?: "",
+                creatorName = data["creatorName"] as? String ?: "",
+                hashtags = emptyList(),
+                createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
+                threadID = threadID,
+                replyToVideoID = replyToVideoID,
+                conversationDepth = conversationDepth,
+                viewCount = 0,
+                hypeCount = 0,
+                coolCount = 0,
+                replyCount = 0,
+                shareCount = 0,
+                lastEngagementAt = null,
+                duration = 0.0,
+                aspectRatio = 9.0/16.0,
+                fileSize = 0L,
+                contentType = ContentType.values().find { it.rawValue == contentTypeStr } ?: ContentType.THREAD,
+                temperature = Temperature.WARM,
+                qualityScore = 50,
+                engagementRatio = 0.0,
+                velocityScore = 0.0,
+                trendingScore = 0.0,
+                discoverabilityScore = 0.5,
+                isPromoted = false,
+                isProcessing = false,
+                isDeleted = false
+            )
+
+        } catch (e: Exception) {
+            println("❌ HIERARCHY: Failed to fetch parent video - ${e.message}")
             throw e
         }
     }
@@ -266,27 +540,14 @@ class VideoCoordinator(
                 println("🤖 AI: AIVideoAnalyzer is available, attempting analysis")
 
                 // Get the recording context
-                val recordingContext: com.stitchsocial.club.coordination.RecordingContext =
-                    _lastRecordingContext.value
-                        ?: com.stitchsocial.club.coordination.RecordingContext.NewThread
-
-                // Convert coordination.RecordingContext to camera.RecordingContext
-                val cameraContext = when (recordingContext) {
-                    com.stitchsocial.club.coordination.RecordingContext.NewThread ->
-                        com.stitchsocial.club.camera.RecordingContext.NewThread
-                    com.stitchsocial.club.coordination.RecordingContext.ReplyToThread ->
-                        com.stitchsocial.club.camera.RecordingContext.NewThread
-                    com.stitchsocial.club.coordination.RecordingContext.StitchToThread ->
-                        com.stitchsocial.club.camera.RecordingContext.NewThread
-                    com.stitchsocial.club.coordination.RecordingContext.ContinueThread ->
-                        com.stitchsocial.club.camera.RecordingContext.NewThread
-                }
+                val recordingContext = _lastRecordingContext.value
+                    ?: com.stitchsocial.club.camera.RecordingContext.NewThread
 
                 // Update progress while waiting for AI
                 val aiJob = async {
                     aiAnalyzer.analyzeAudioContent(
                         audioPath = videoPath,
-                        recordingContext = cameraContext
+                        recordingContext = recordingContext
                     )
                 }
 
@@ -367,15 +628,22 @@ class VideoCoordinator(
         }
     }
 
+    /**
+     * Create video document in Firestore
+     * ✅ FIXED: Now uses pre-calculated hierarchy data
+     */
     private suspend fun createVideoDocument(
         metadata: CoreVideoMetadata,
-        recordingContext: RecordingContext,
         hashtags: List<String>
     ): CoreVideoMetadata {
 
         val now = Timestamp.now()
         val currentUser = auth.currentUser
         val creatorID = currentUser?.uid ?: "anonymous"
+
+        // ✅ CRITICAL: For new threads, threadID should equal the video ID
+        // This will be set after document creation
+        var finalThreadID = metadata.threadID
 
         val documentData = mapOf(
             "title" to metadata.title,
@@ -386,7 +654,7 @@ class VideoCoordinator(
             "creatorName" to (currentUser?.displayName ?: "Anonymous"),
             "hashtags" to hashtags,
             "createdAt" to now,
-            "threadID" to metadata.threadID,
+            "threadID" to metadata.threadID, // Will update for new threads
             "replyToVideoID" to metadata.replyToVideoID,
             "conversationDepth" to metadata.conversationDepth,
             "viewCount" to 0,
@@ -414,13 +682,22 @@ class VideoCoordinator(
             val documentRef = db.collection("videos").add(documentData).await()
             val videoId = documentRef.id
 
+            // ✅ CRITICAL: For new threads, update threadID to match video ID
+            if (metadata.contentType == ContentType.THREAD && metadata.threadID == null) {
+                println("🧵 DATABASE: Updating threadID to match video ID for new thread")
+                documentRef.update("threadID", videoId).await()
+                finalThreadID = videoId
+            }
+
             println("✅ DATABASE: Document created successfully!")
             println("🆔 DATABASE: New video ID: $videoId")
+            println("🧵 DATABASE: Final thread ID: $finalThreadID")
 
             metadata.copy(
                 id = videoId,
                 creatorID = creatorID,
-                createdAt = now.toDate()
+                createdAt = now.toDate(),
+                threadID = finalThreadID
             )
 
         } catch (e: Exception) {
@@ -462,22 +739,15 @@ class VideoCoordinator(
 // MARK: - Supporting Data Classes
 
 /**
- * Recording context enum (simplified from camera.RecordingContext)
+ * Thread hierarchy calculation result
+ * ✅ NEW: Encapsulates all hierarchy fields
  */
-enum class RecordingContext(val displayName: String) {
-    NewThread("New Thread"),
-    ReplyToThread("Reply to Thread"),
-    StitchToThread("Stitch to Thread"),
-    ContinueThread("Continue Thread");
-
+data class ThreadHierarchyData(
+    val threadID: String?,
+    val replyToVideoID: String?,
+    val conversationDepth: Int,
     val contentType: ContentType
-        get() = when (this) {
-            NewThread -> ContentType.THREAD
-            ReplyToThread -> ContentType.CHILD
-            StitchToThread -> ContentType.CHILD
-            ContinueThread -> ContentType.STEPCHILD
-        }
-}
+)
 
 /**
  * AI analysis result for video

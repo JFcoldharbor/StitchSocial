@@ -1,20 +1,15 @@
 /*
- * ThreadNavigationState.kt - FIXED TO USE EXISTING THREADDATA
+ * ThreadNavigationState.kt - THREAD NAVIGATION SYSTEM
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 6: Coordination - Thread Navigation System using existing foundation types
- * Dependencies: Foundation types only (ThreadData, CoreVideoMetadata)
+ * Layer 6: Coordination - Thread Navigation System
+ * Dependencies: Foundation types (ThreadData, CoreVideoMetadata)
  * Features: Horizontal thread navigation, visual indicators, gesture detection
- *
- * ✅ FIXED: Uses existing ThreadData from foundation package
- * ✅ FIXED: Uses ThreadData.allVideos property that exists
- * ✅ FIXED: ContextualVideoOverlay parameter name (overlayContext)
- * ✅ FIXED: No conflicting function definitions
+ * ✅ FIXED: Added engagementViewModel and iconManager parameters
  */
 
-package com.stitchsocial.club
+package com.stitchsocial.club.coordination
 
-import com.stitchsocial.club.foundation.UserTier
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -32,23 +27,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
-// Foundation imports - using EXISTING types
+// Foundation imports
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.CoreVideoMetadata
+import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.views.VideoPlayerComposable
 import com.stitchsocial.club.views.ContextualVideoOverlay
 import com.stitchsocial.club.views.OverlayContext
 import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.coordination.EngagementCoordinator
+import com.stitchsocial.club.viewmodels.EngagementViewModel
+import com.stitchsocial.club.viewmodels.FloatingIconManager
 
 // MARK: - Navigation State Management
 
-/**
- * Complete navigation state for thread system
- * FIXED: Uses existing ThreadData structure
- */
 data class ThreadNavigationState(
     val currentThread: ThreadData,
     val allVideosInThread: List<CoreVideoMetadata>,
@@ -57,17 +52,11 @@ data class ThreadNavigationState(
     val isOnParent: Boolean,
     val canNavigateLeft: Boolean,
     val canNavigateRight: Boolean,
-    val threadPosition: String // "Thread", "Stitch 1", "Stitch 2", etc.
+    val threadPosition: String
 ) {
-    /**
-     * Get current video being displayed
-     */
     val currentVideo: CoreVideoMetadata = allVideosInThread[currentVideoIndex]
 }
 
-/**
- * Navigation direction for gesture detection
- */
 enum class NavigationDirection {
     HORIZONTAL_LEFT,
     HORIZONTAL_RIGHT,
@@ -76,10 +65,6 @@ enum class NavigationDirection {
     NONE
 }
 
-/**
- * Thread navigation controller with state management
- * FIXED: Uses existing ThreadData structure
- */
 class ThreadNavigationController(
     private val threads: List<ThreadData>,
     private val currentThreadIndex: Int,
@@ -87,10 +72,9 @@ class ThreadNavigationController(
     private val onChildChange: (Int) -> Unit = {},
     private val onVideoChange: (CoreVideoMetadata) -> Unit = {}
 ) {
-
     fun getCurrentNavigationState(currentChildIndex: Int): ThreadNavigationState {
         val thread = threads[currentThreadIndex]
-        val allVideos = thread.allVideos // Uses existing ThreadData.allVideos property
+        val allVideos = thread.allVideos
 
         return ThreadNavigationState(
             currentThread = thread,
@@ -110,7 +94,7 @@ class ThreadNavigationController(
 
     fun navigateToChild(childIndex: Int): Boolean {
         val thread = threads[currentThreadIndex]
-        val maxIndex = thread.childVideos.size // Use existing property
+        val maxIndex = thread.childVideos.size
 
         return if (childIndex >= 0 && childIndex <= maxIndex) {
             onChildChange(childIndex)
@@ -125,10 +109,6 @@ class ThreadNavigationController(
 
 // MARK: - Main Thread Navigation Container
 
-/**
- * Reusable thread navigation container
- * FIXED: Uses existing ThreadData structure
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ThreadNavigationContainer(
@@ -141,47 +121,42 @@ fun ThreadNavigationContainer(
     onVideoChange: ((CoreVideoMetadata) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    // Use existing ThreadData.allVideos property
     val allVideosInThread = thread.allVideos
-    val horizontalPagerState = rememberPagerState(pageCount = { allVideosInThread.size })
+    val pagerState = rememberPagerState(pageCount = { allVideosInThread.size })
     val coroutineScope = rememberCoroutineScope()
     val hapticFeedback = LocalHapticFeedback.current
 
-    // Current navigation state
-    val navigationState = remember(horizontalPagerState.currentPage) {
-        ThreadNavigationState(
-            currentThread = thread,
-            allVideosInThread = allVideosInThread,
-            currentVideoIndex = horizontalPagerState.currentPage,
-            totalVideosInThread = allVideosInThread.size,
-            isOnParent = horizontalPagerState.currentPage == 0,
-            canNavigateLeft = horizontalPagerState.currentPage > 0,
-            canNavigateRight = horizontalPagerState.currentPage < allVideosInThread.size - 1,
-            threadPosition = when {
-                horizontalPagerState.currentPage == 0 -> "Thread"
-                horizontalPagerState.currentPage == 1 -> "Stitch"
-                else -> "Stitch ${horizontalPagerState.currentPage}"
-            }
-        )
-    }
+    val navigationState = ThreadNavigationState(
+        currentThread = thread,
+        allVideosInThread = allVideosInThread,
+        currentVideoIndex = pagerState.currentPage,
+        totalVideosInThread = allVideosInThread.size,
+        isOnParent = pagerState.currentPage == 0,
+        canNavigateLeft = pagerState.currentPage > 0,
+        canNavigateRight = pagerState.currentPage < allVideosInThread.size - 1,
+        threadPosition = when (pagerState.currentPage) {
+            0 -> "Thread"
+            1 -> "Stitch"
+            else -> "Stitch ${pagerState.currentPage}"
+        }
+    )
 
-    // Video change callback
-    LaunchedEffect(navigationState.currentVideo) {
-        onVideoChange?.invoke(navigationState.currentVideo)
+    LaunchedEffect(pagerState.currentPage) {
+        onVideoChange?.invoke(allVideosInThread[pagerState.currentPage])
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Horizontal pager for thread navigation
         HorizontalPager(
-            state = horizontalPagerState,
+            state = pagerState,
             modifier = Modifier.fillMaxSize()
-        ) { pageIndex ->
-            val video = allVideosInThread[pageIndex]
-            val isCurrentPage = pageIndex == horizontalPagerState.currentPage
+        ) { page ->
+            val video = allVideosInThread[page]
+            val isVideoActive = isActive && page == pagerState.currentPage
 
             ThreadVideoView(
                 video = video,
-                isActive = isCurrentPage && isActive,
+                isActive = isVideoActive,
                 currentUserID = currentUserID,
                 engagementCoordinator = engagementCoordinator,
                 navigationState = navigationState,
@@ -189,7 +164,6 @@ fun ThreadNavigationContainer(
             )
         }
 
-        // Thread navigation indicators (bottom)
         if (allVideosInThread.size > 1) {
             ThreadNavigationIndicators(
                 navigationState = navigationState,
@@ -199,7 +173,6 @@ fun ThreadNavigationContainer(
             )
         }
 
-        // Thread position indicator (top)
         ThreadPositionIndicator(
             navigationState = navigationState,
             modifier = Modifier
@@ -211,12 +184,8 @@ fun ThreadNavigationContainer(
 
 // MARK: - Individual Video View with Navigation Context
 
-/**
- * Individual video view within thread navigation
- * FIXED: ContextualVideoOverlay parameter name and explicit types
- */
 @Composable
-private fun ThreadVideoView(
+fun ThreadVideoView(
     video: CoreVideoMetadata,
     isActive: Boolean,
     currentUserID: String,
@@ -224,22 +193,24 @@ private fun ThreadVideoView(
     navigationState: ThreadNavigationState,
     modifier: Modifier = Modifier
 ) {
+    // ✅ ADD: Initialize view models
+    val engagementViewModel = viewModel<EngagementViewModel>()
+    val iconManager = remember { FloatingIconManager() }
+
     Box(modifier = modifier.fillMaxSize()) {
-        // Background video player
         VideoPlayerComposable(
             video = video,
             isActive = isActive,
             onEngagement = { interactionType ->
                 println("🎯 THREAD NAV: Engagement $interactionType on ${video.title}")
-                // Handle engagement through coordinator
             },
             onVideoClick = {
-                println("📹 THREAD NAV: Video clicked: ${video.title}")
+                println("🔹 THREAD NAV: Video clicked: ${video.title}")
             },
             modifier = Modifier.fillMaxSize()
         )
 
-        // ✅ FIXED: ContextualVideoOverlay with explicit parameters to resolve ambiguity
+        // ✅ FIXED: Added missing parameters
         ContextualVideoOverlay(
             video = video,
             overlayContext = if (navigationState.isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
@@ -247,8 +218,9 @@ private fun ThreadVideoView(
             threadVideo = if (!navigationState.isOnParent) navigationState.currentThread.parentVideo else null,
             isVisible = isActive,
             currentUserTier = UserTier.ROOKIE,
-            isFollowing = false, // Use backward compatibility version explicitly
-            onAction = { action: OverlayAction ->  // Explicit type annotation
+            engagementViewModel = engagementViewModel,  // ✅ ADDED
+            iconManager = iconManager,                  // ✅ ADDED
+            onAction = { action: OverlayAction ->
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {
                         println("👤 THREAD NAV: Navigate to profile ${video.creatorID}")
@@ -258,7 +230,6 @@ private fun ThreadVideoView(
                     }
                     is OverlayAction.Engagement -> {
                         println("💫 THREAD NAV: Engagement ${action.type}")
-                        // Handle engagement through coordinator
                     }
                     is OverlayAction.Follow -> {
                         println("➕ THREAD NAV: Follow user ${video.creatorID}")
@@ -280,11 +251,8 @@ private fun ThreadVideoView(
 
 // MARK: - Navigation UI Components
 
-/**
- * Thread navigation indicators (dots at bottom)
- */
 @Composable
-private fun ThreadNavigationIndicators(
+fun ThreadNavigationIndicators(
     navigationState: ThreadNavigationState,
     modifier: Modifier = Modifier
 ) {
@@ -313,11 +281,8 @@ private fun ThreadNavigationIndicators(
     }
 }
 
-/**
- * Thread position indicator (top center)
- */
 @Composable
-private fun ThreadPositionIndicator(
+fun ThreadPositionIndicator(
     navigationState: ThreadNavigationState,
     modifier: Modifier = Modifier
 ) {

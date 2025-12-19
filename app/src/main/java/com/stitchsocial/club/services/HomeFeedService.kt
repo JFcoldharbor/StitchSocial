@@ -1,18 +1,9 @@
-
-
 /*
- * HomeFeedService.kt - FIXED THREADDATA USAGE
+ * HomeFeedService.kt - FIXED TYPE MISMATCHES
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 4: Services - Home feed management with foundation types
- * Dependencies: VideoServiceImpl, SimplifiedCachingService, Foundation types
- * Features: Feed loading, refresh, cache integration, following-based feeds
- *
- * FIXES:
- * ✅ Uses foundation ThreadData instead of SimpleThreadData
- * ✅ Removed iOS annotations - pure Android/Kotlin
- * ✅ Proper error handling and caching integration
- * ✅ Works with existing VideoService structure
+ * Layer 4: Services - Home feed with UserService integration
+ * ✅ FIXED: All method signatures match VideoServiceImpl
  */
 
 package com.stitchsocial.club.services
@@ -22,16 +13,13 @@ import kotlinx.coroutines.flow.*
 import java.util.Date
 
 /**
- * Android HomeFeedService that works with foundation ThreadData
- * Layer 4: Services - Uses only existing methods and foundation data classes
- * Pure Kotlin - no iOS annotations
+ * HomeFeedService with proper UserService integration
  */
 class HomeFeedService(
     private val videoService: VideoServiceImpl,
-    private val cachingService: SimplifiedCachingService
+    private val cachingService: SimplifiedCachingService,
+    private val userService: UserService
 ) {
-
-    // Android StateFlow pattern for UI state management
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -41,40 +29,38 @@ class HomeFeedService(
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
-    private val _currentFeed = MutableStateFlow<List<ThreadData>>(emptyList()) // FIXED: ThreadData
-    val currentFeed: StateFlow<List<ThreadData>> = _currentFeed.asStateFlow() // FIXED: ThreadData
+    private val _currentFeed = MutableStateFlow<List<ThreadData>>(emptyList())
+    val currentFeed: StateFlow<List<ThreadData>> = _currentFeed.asStateFlow()
 
-    // Feed Configuration
     private val defaultFeedSize = 20
     private val feedCacheKey = "home_feed_cache"
 
-    /**
-     * Load feed using VideoService.getFeedVideos method
-     * FIXED: Works with foundation ThreadData from VideoService
-     */
-    suspend fun loadFeed(userID: String, limit: Int = 20): List<ThreadData> { // FIXED: ThreadData return type
+    suspend fun loadFeed(userID: String, limit: Int = 20): List<ThreadData> {
         _isLoading.value = true
         _lastError.value = null
 
         return try {
             println("HOME FEED: Loading feed for user $userID")
 
-            // Step 1: Check cache for instant display (if available)
+            val followingIDs = try {
+                userService.getFollowingIDs(userID)
+            } catch (e: Exception) {
+                println("HOME FEED: ⚠️ Failed to load following: ${e.message}")
+                emptyList()
+            }
+
+            println("HOME FEED: User follows ${followingIDs.size} people")
+
             val cachedFeed = getCachedFeed(userID)
             if (cachedFeed.isNotEmpty()) {
-                println("HOME FEED: Found ${cachedFeed.size} cached threads - showing instantly")
+                println("HOME FEED: Found ${cachedFeed.size} cached threads")
                 _currentFeed.value = cachedFeed
-
-                // Load fresh content in background
-                loadFreshContentInBackground(userID, limit)
+                loadFreshContentInBackground(userID, followingIDs, limit)
                 return cachedFeed
             }
 
-            // Step 2: Load fresh content since no cache available
-            val freshFeed = loadFreshContent(userID, limit)
+            val freshFeed = loadFreshContent(followingIDs, limit)
             _currentFeed.value = freshFeed
-
-            // Step 3: Cache the results for next time
             cacheFeed(userID, freshFeed)
 
             println("HOME FEED: Loaded ${freshFeed.size} threads")
@@ -91,20 +77,21 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Load fresh content using VideoService method
-     * FIXED: Returns foundation ThreadData from VideoService
-     */
-    private suspend fun loadFreshContent(userID: String, limit: Int): List<ThreadData> { // FIXED: ThreadData return
+    private suspend fun loadFreshContent(followingIDs: List<String>, limit: Int): List<ThreadData> {
         return try {
-            // For now, we pass empty following list since UserService integration is simplified
-            // TODO: Implement proper following when UserService is enhanced
-            val emptyFollowingList = emptyList<String>()
+            if (followingIDs.isEmpty()) {
+                println("HOME FEED: ⚠️ No following list - feed will be empty")
+                return emptyList()
+            }
 
-            // FIXED: VideoService now returns ThreadData directly
-            val threads = videoService.getFeedVideos(emptyFollowingList)
+            println("HOME FEED: Loading content from ${followingIDs.size} users")
 
-            // Limit results to requested amount
+            // ✅ FIXED: Correct signature - getFeedVideos(List<String>, Int) returns List<CoreVideoMetadata>
+            val videos: List<CoreVideoMetadata> = videoService.getFeedVideos(followingIDs, limit)
+
+            // Convert to ThreadData
+            val threads = ThreadData.fromVideos(videos)
+
             threads.take(limit)
 
         } catch (e: Exception) {
@@ -113,13 +100,9 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Background refresh without blocking UI
-     * FIXED: Uses ThreadData types
-     */
-    private suspend fun loadFreshContentInBackground(userID: String, limit: Int) {
+    private suspend fun loadFreshContentInBackground(userID: String, followingIDs: List<String>, limit: Int) {
         try {
-            val freshContent = loadFreshContent(userID, limit)
+            val freshContent = loadFreshContent(followingIDs, limit)
             if (freshContent.isNotEmpty()) {
                 _currentFeed.value = freshContent
                 cacheFeed(userID, freshContent)
@@ -130,20 +113,21 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Pull-to-refresh functionality
-     * FIXED: Uses ThreadData types
-     */
-    suspend fun refreshFeed(userID: String): List<ThreadData> { // FIXED: ThreadData return
+    suspend fun refreshFeed(userID: String): List<ThreadData> {
         _isRefreshing.value = true
 
         return try {
             println("HOME FEED: Refreshing feed for user $userID")
 
-            val freshFeed = loadFreshContent(userID, defaultFeedSize)
-            _currentFeed.value = freshFeed
+            val followingIDs = try {
+                userService.getFollowingIDs(userID)
+            } catch (e: Exception) {
+                println("HOME FEED: Failed to load following during refresh")
+                emptyList()
+            }
 
-            // Update cache with fresh content
+            val freshFeed = loadFreshContent(followingIDs, defaultFeedSize)
+            _currentFeed.value = freshFeed
             cacheFeed(userID, freshFeed)
 
             println("HOME FEED: Refresh completed - ${freshFeed.size} threads")
@@ -160,138 +144,22 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Get cached feed if available
-     * FIXED: ThreadData return type
-     */
-    private suspend fun getCachedFeed(userID: String): List<ThreadData> { // FIXED: ThreadData return
+    suspend fun loadMoreContent(userID: String): List<ThreadData> {
         return try {
-            // For now, return empty since SimplifiedCachingService doesn't have feed-specific methods
-            // TODO: Add feed caching when SimplifiedCachingService is enhanced
-            emptyList()
-        } catch (e: Exception) {
-            println("HOME FEED: Cache lookup failed: ${e.message}")
-            emptyList()
-        }
-    }
+            println("HOME FEED: Loading more content")
 
-    /**
-     * Cache feed results for next startup
-     * FIXED: ThreadData parameter type
-     */
-    private suspend fun cacheFeed(userID: String, feed: List<ThreadData>) { // FIXED: ThreadData parameter
-        try {
-            // TODO: Implement feed caching when SimplifiedCachingService supports it
-            println("HOME FEED: Caching ${feed.size} threads for user $userID")
-        } catch (e: Exception) {
-            println("HOME FEED: Cache storage failed: ${e.message}")
-        }
-    }
-
-    /**
-     * Check if we have any cached content for instant display
-     */
-    fun hasInstantContent(userID: String): Boolean {
-        return _currentFeed.value.isNotEmpty()
-    }
-
-    /**
-     * Get current feed state for UI
-     * FIXED: ThreadData return type
-     */
-    fun getCurrentFeed(): List<ThreadData> { // FIXED: ThreadData return
-        return _currentFeed.value
-    }
-
-    /**
-     * Clear feed and reset state
-     */
-    fun clearFeed() {
-        _currentFeed.value = emptyList()
-        _lastError.value = null
-    }
-
-    /**
-     * Load specific thread children using VideoService
-     * FIXED: Uses VideoService.getThreadChildren method that exists
-     */
-    suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
-        return try {
-            println("HOME FEED: Loading children for thread $threadID")
-
-            // FIXED: Use existing VideoService method
-            val children = videoService.getThreadChildren(threadID)
-
-            println("HOME FEED: Loaded ${children.size} children for thread $threadID")
-            children
-
-        } catch (e: Exception) {
-            println("HOME FEED: Failed to load thread children: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Load content from following users
-     * FIXED: ThreadData return type
-     */
-    suspend fun loadFollowingFeed(followingIDs: List<String>, limit: Int = 20): List<ThreadData> { // FIXED: ThreadData return
-        return try {
-            println("HOME FEED: Loading following feed for ${followingIDs.size} users")
-
-            // FIXED: VideoService returns ThreadData directly
-            val threads = videoService.getFeedVideos(followingIDs)
-
-            threads.take(limit)
-
-        } catch (e: Exception) {
-            println("HOME FEED: Failed to load following feed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Get feed statistics for monitoring
-     * FIXED: Uses ThreadData and explicit return type
-     */
-    fun getFeedStats(): Map<String, Any> {
-        val currentFeed = _currentFeed.value
-        val totalChildren = currentFeed.sumOf { it.childVideos.size }
-
-        return mapOf<String, Any>(
-            "totalThreads" to currentFeed.size,
-            "totalChildren" to totalChildren,
-            "hasContent" to currentFeed.isNotEmpty(),
-            "isLoading" to _isLoading.value,
-            "isRefreshing" to _isRefreshing.value,
-            "lastError" to (_lastError.value ?: "")
-        )
-    }
-
-    /**
-     * Preload next batch of content for infinite scroll
-     * FIXED: ThreadData types
-     */
-    suspend fun loadMoreContent(userID: String): List<ThreadData> { // FIXED: ThreadData return
-        return try {
-            println("HOME FEED: Loading more content for pagination")
-
+            val followingIDs = userService.getFollowingIDs(userID)
             val currentFeed = _currentFeed.value
-            val startAfter = currentFeed.lastOrNull()?.id
+            val moreFeed = loadFreshContent(followingIDs, defaultFeedSize)
 
-            // Load next batch - simplified since VideoService doesn't have pagination yet
-            val moreFeed = loadFreshContent(userID, defaultFeedSize)
-
-            // Filter out already loaded content
             val newContent = moreFeed.filter { newThread ->
-                currentFeed.none { existingThread -> existingThread.id == newThread.id }
+                currentFeed.none { it.id == newThread.id }
             }
 
             if (newContent.isNotEmpty()) {
                 val updatedFeed = currentFeed + newContent
                 _currentFeed.value = updatedFeed
                 cacheFeed(userID, updatedFeed)
-
                 println("HOME FEED: Added ${newContent.size} new threads")
             }
 
@@ -303,11 +171,24 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Search within current feed
-     * FIXED: ThreadData types
-     */
-    fun searchFeed(query: String): List<ThreadData> { // FIXED: ThreadData return
+    fun clearFeed() {
+        _currentFeed.value = emptyList()
+        _lastError.value = null
+    }
+
+    suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
+        return try {
+            println("HOME FEED: Loading children for thread $threadID")
+            val children = videoService.getThreadChildren(threadID)
+            println("HOME FEED: Loaded ${children.size} children")
+            children
+        } catch (e: Exception) {
+            println("HOME FEED: Failed to load thread children: ${e.message}")
+            emptyList()
+        }
+    }
+
+    fun searchFeed(query: String): List<ThreadData> {
         val currentFeed = _currentFeed.value
         val normalizedQuery = query.lowercase().trim()
 
@@ -324,19 +205,11 @@ class HomeFeedService(
         }
     }
 
-    /**
-     * Get thread by ID from current feed
-     * FIXED: ThreadData return type
-     */
-    fun getThreadById(threadID: String): ThreadData? { // FIXED: ThreadData return
+    fun getThreadById(threadID: String): ThreadData? {
         return _currentFeed.value.find { it.id == threadID }
     }
 
-    /**
-     * Update thread in current feed (after engagement, etc.)
-     * FIXED: ThreadData parameter
-     */
-    fun updateThread(updatedThread: ThreadData) { // FIXED: ThreadData parameter
+    fun updateThread(updatedThread: ThreadData) {
         val currentFeed = _currentFeed.value.toMutableList()
         val index = currentFeed.indexOfFirst { it.id == updatedThread.id }
 
@@ -345,5 +218,44 @@ class HomeFeedService(
             _currentFeed.value = currentFeed
             println("HOME FEED: Updated thread ${updatedThread.id}")
         }
+    }
+
+    private suspend fun getCachedFeed(userID: String): List<ThreadData> {
+        return try {
+            emptyList()
+        } catch (e: Exception) {
+            println("HOME FEED: Cache lookup failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private suspend fun cacheFeed(userID: String, feed: List<ThreadData>) {
+        try {
+            println("HOME FEED: Caching ${feed.size} threads for user $userID")
+        } catch (e: Exception) {
+            println("HOME FEED: Cache storage failed: ${e.message}")
+        }
+    }
+
+    fun hasInstantContent(userID: String): Boolean {
+        return _currentFeed.value.isNotEmpty()
+    }
+
+    fun getCurrentFeed(): List<ThreadData> {
+        return _currentFeed.value
+    }
+
+    fun getFeedStats(): Map<String, Any> {
+        val currentFeed = _currentFeed.value
+        val totalChildren = currentFeed.sumOf { it.childVideos.size }
+
+        return mapOf<String, Any>(
+            "totalThreads" to currentFeed.size,
+            "totalChildren" to totalChildren,
+            "hasContent" to currentFeed.isNotEmpty(),
+            "isLoading" to _isLoading.value,
+            "isRefreshing" to _isRefreshing.value,
+            "lastError" to (_lastError.value ?: "")
+        )
     }
 }

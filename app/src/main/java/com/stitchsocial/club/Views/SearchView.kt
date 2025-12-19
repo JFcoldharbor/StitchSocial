@@ -1,10 +1,11 @@
 /*
- * SearchView.kt - SIMPLIFIED VERSION THAT WORKS WITH YOUR EXISTING STRUCTURE
+ * SearchView.kt - WITH DEBUG LOGGING FOR FOLLOW BUTTON
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 8: Views - Search Interface with Follow/Unfollow
  * Dependencies: SearchService, BasicUserInfo, FollowManager
- * Features: User search with follow buttons (simplified for your current structure)
+ * Features: User search with follow buttons
+ * ✅ ADDED: Comprehensive debug logging for follow state tracking
  */
 
 package com.stitchsocial.club
@@ -95,11 +96,14 @@ class SearchViewModel(
     }
 
     fun toggleFollow(userID: String) {
+        println("🔍 SEARCH VM: toggleFollow called for user $userID")
         followManager.toggleFollow(userID)
     }
 
     fun isFollowing(userID: String): Boolean {
-        return followManager.isFollowing(userID)
+        val result = followManager.isFollowing(userID)
+        println("🔍 SEARCH VM: isFollowing($userID) = $result")
+        return result
     }
 
     fun isFollowLoading(userID: String): Boolean {
@@ -183,8 +187,16 @@ fun SearchView(
     val suggestedUsers by viewModel.suggestedUsers.collectAsState()
     val isLoadingSuggestions by viewModel.isLoadingSuggestions.collectAsState()
 
-    // Get follow states from FollowManager
+    // Get follow states from FollowManager - CRITICAL: Must observe state changes
     val followingStates by followManager.followingStates.collectAsState()
+
+    // Debug: Log when follow states change
+    LaunchedEffect(followingStates) {
+        println("🔍 SEARCH VIEW: Follow states updated - ${followingStates.size} users tracked")
+        followingStates.forEach { (userID, isFollowing) ->
+            println("   - User $userID: following=$isFollowing")
+        }
+    }
 
     // Colors
     val backgroundColor = Color(0xFF1C1C1E)
@@ -233,7 +245,10 @@ fun SearchView(
                                     isFollowLoading = viewModel.isFollowLoading(user.id),
                                     followButtonText = viewModel.getFollowButtonText(user.id),
                                     onUserTapped = { onUserTapped(user) },
-                                    onFollowToggle = { viewModel.toggleFollow(user.id) }
+                                    onFollowToggle = {
+                                        println("🔍 SEARCH VIEW: Follow toggle triggered for ${user.displayName} (${user.id})")
+                                        viewModel.toggleFollow(user.id)
+                                    }
                                 )
                             }
                         }
@@ -286,7 +301,10 @@ fun SearchView(
                                     isFollowLoading = viewModel.isFollowLoading(user.id),
                                     followButtonText = viewModel.getFollowButtonText(user.id),
                                     onUserTapped = { onUserTapped(user) },
-                                    onFollowToggle = { viewModel.toggleFollow(user.id) }
+                                    onFollowToggle = {
+                                        println("🔍 SEARCH VIEW: Follow toggle triggered for ${user.displayName} (${user.id})")
+                                        viewModel.toggleFollow(user.id)
+                                    }
                                 )
                             }
                         }
@@ -442,8 +460,11 @@ private fun UserSearchItem(
             isFollowing = isFollowing,
             isLoading = isFollowLoading,
             onClick = {
+                println("🔍 SEARCH ITEM: Follow button clicked for ${user.displayName}")
+                println("🔍 Current state: isFollowing=$isFollowing, isLoading=$isFollowLoading")
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 onFollowToggle()
+                println("🔍 After toggle called")
             }
         )
     }
@@ -465,7 +486,10 @@ private fun FollowButton(
     }
 
     Button(
-        onClick = onClick,
+        onClick = {
+            println("🔍 FOLLOW BUTTON: Button clicked internally")
+            onClick()
+        },
         enabled = !isLoading,
         colors = ButtonDefaults.buttonColors(
             containerColor = backgroundColor,

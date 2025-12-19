@@ -1,18 +1,32 @@
 /*
- * MainActivity.kt - FIXED PROFILE LOADING WITH INCREASED RETRY DELAY
+ * MainActivity.kt - WITH FCM PUSH NOTIFICATIONS (FIXED)
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * CRITICAL FIX: Increased retry delay from 500ms to 1000ms
- * CRITICAL FIX: Empty onLoginSuccess callback prevents scope cancellation
+ * ✅ FIXED: FCM registration now happens AFTER authentication completes
+ * ✅ FIXED: All RecordingContext references now use camera.RecordingContext
+ * ✅ FIXED: Removed coordination.RecordingContext enum conversions
+ * ✅ FIXED: Gallery picker shows processing modal
+ * ✅ FIXED: ThreadComposer modal shown after processing
+ * ✅ FIXED: LoginView import from correct package
+ * ✅ FIXED: Notification navigation with proper state management
+ * ✅ NEW: NotificationView integrated in NOTIFICATIONS tab
+ * ✅ NEW: FCM push notifications fully integrated
+ * ✅ NEW: Android 13+ notification permission request added
  */
 
 package com.stitchsocial.club
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -42,9 +56,6 @@ import com.stitchsocial.club.ui.theme.StitchSocialClubTheme
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.camera.ThreadComposer
 
-// FIXED: Import LoginView from correct package
-import com.example.stitchsocialclub.views.LoginView
-
 // Stitch colors theme
 object StitchColors {
     val primary = Color(0xFF00BCD4)
@@ -56,12 +67,24 @@ object StitchColors {
 }
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        // ✅ FIXED: Store pending notification intent for Compose processing
+        var pendingNotificationIntent: Intent? = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         suppressCameraLogging()
 
         Log.d("STITCH_MAIN", "App starting up...")
+
+        // ✅ REMOVED: FCM initialization moved to AFTER authentication
+        // FCM will be initialized in LaunchedEffect after user authenticates
+
+        // ✅ NEW: Request notification permission (Android 13+)
+        requestNotificationPermission()
 
         enableEdgeToEdge()
 
@@ -76,6 +99,73 @@ class MainActivity : ComponentActivity() {
         setContent {
             StitchSocialClubTheme {
                 MainScreen()
+            }
+        }
+
+        // ✅ Handle notification intent if app opened from notification
+        handleNotificationIntent(intent)
+    }
+
+    // ✅ Handle new intents when app is already running
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    /**
+     * ✅ NEW: Request notification permission for Android 13+
+     */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Log.d("STITCH_MAIN", "📱 Requesting POST_NOTIFICATIONS permission...")
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                100
+            )
+        } else {
+            Log.d("STITCH_MAIN", "📱 Android < 13, notification permission not required")
+        }
+    }
+
+    /**
+     * ✅ NEW: Handle permission result (deprecated but still works for requestPermissions)
+     */
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == 100) {
+            if (grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Log.d("STITCH_MAIN", "✅ Notification permission granted")
+            } else {
+                Log.w("STITCH_MAIN", "⚠️ Notification permission denied")
+            }
+        }
+    }
+
+    /**
+     * ✅ FIXED: Store notification intent for processing by Compose
+     */
+    private fun handleNotificationIntent(intent: Intent?) {
+        intent?.let {
+            val fromNotification = it.getBooleanExtra("fromNotification", false)
+
+            if (fromNotification) {
+                Log.d("STITCH_MAIN", "📱 Notification intent detected - storing for processing")
+                pendingNotificationIntent = it
+
+                // Log notification details for debugging
+                val notificationType = it.getStringExtra("notification_type")
+                val videoId = it.getStringExtra("video_id")
+                val userId = it.getStringExtra("user_id")
+                Log.d("STITCH_MAIN", "📱 Type: $notificationType, VideoID: $videoId, UserID: $userId")
+            } else {
+                Log.d("STITCH_MAIN", "📱 Normal app launch - no notification")
             }
         }
     }
@@ -96,10 +186,8 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
     var selectedTab by remember { mutableStateOf(MainAppTab.HOME) }
 
-    // Real Firebase services
     val authService = remember { AuthService() }
     val videoService = remember { VideoServiceImpl() }
     val userService = remember { UserService(context) }
@@ -107,226 +195,219 @@ fun MainScreen() {
     val navigationCoordinator = remember { NavigationCoordinator(videoCoordinator) }
     val feedService = remember { HybridHomeFeedService(videoService, userService) }
 
-    // Firebase authentication state
+    // ✅ FIXED: Process pending notification intent
+    LaunchedEffect(navigationCoordinator) {
+        MainActivity.pendingNotificationIntent?.let { intent ->
+            Log.d("STITCH_MAIN", "📱 Processing pending notification intent")
+
+            val notificationType = intent.getStringExtra("notification_type")
+            val videoId = intent.getStringExtra("video_id")
+            val userId = intent.getStringExtra("user_id")
+
+            // Wait for authentication to complete
+            delay(1000)
+
+            when (notificationType) {
+                "hype", "reply", "cool" -> {
+                    videoId?.let { id ->
+                        Log.d("STITCH_MAIN", "📱 Navigating to video: $id")
+                        navigationCoordinator.showModal(
+                            modal = ModalState.VIDEO_PLAYER,
+                            data = mapOf("videoId" to id)
+                        )
+                    }
+                }
+                "follow" -> {
+                    userId?.let { id ->
+                        Log.d("STITCH_MAIN", "📱 Navigating to profile: $id")
+                        navigationCoordinator.showModal(
+                            modal = ModalState.USER_PROFILE,
+                            data = mapOf("userID" to id)
+                        )
+                    }
+                }
+                "milestone" -> {
+                    Log.d("STITCH_MAIN", "📱 Switching to notifications tab")
+                    selectedTab = MainAppTab.NOTIFICATIONS
+                }
+            }
+
+            // Clear pending intent
+            MainActivity.pendingNotificationIntent = null
+            Log.d("STITCH_MAIN", "✅ Notification intent processed and cleared")
+        }
+    }
+
+    val galleryPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        uri?.let {
+            navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
+            scope.launch {
+                try {
+                    videoCoordinator.processGalleryVideo(it)
+                    val videoPath = videoCoordinator.lastProcessedVideoPath.value
+                    val aiResult = videoCoordinator.lastAIResult.value
+                    if (videoPath != null) {
+                        val modalDataMap = mutableMapOf<String, Any>("videoPath" to videoPath)
+                        if (aiResult != null) modalDataMap["aiResult"] = aiResult
+                        navigationCoordinator.showModal(ModalState.THREAD_COMPOSER, modalDataMap)
+                    } else {
+                        navigationCoordinator.dismissModal()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    navigationCoordinator.dismissModal()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(navigationCoordinator) {
+        navigationCoordinator.onGalleryPickerRequested = {
+            galleryPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+        }
+    }
+
     val isAuthenticated by authService.isAuthenticated.collectAsState()
     val firebaseUser by authService.currentUser.collectAsState()
     val authLoading by authService.isLoading.collectAsState()
-
-    // Navigation coordinator state
     val currentModal by navigationCoordinator.currentModal.collectAsState()
     val modalData by navigationCoordinator.modalData.collectAsState()
 
-    // User profile
     var currentUser: BasicUserInfo? by remember { mutableStateOf(null) }
     var isLoadingUser by remember { mutableStateOf(true) }
     var userError by remember { mutableStateOf<String?>(null) }
 
-    // Load current user profile from Firebase with retry logic
+    // ✅ FIXED: FCM registration moved HERE - after authentication completes
     LaunchedEffect(firebaseUser, isAuthenticated) {
         scope.launch {
             try {
                 isLoadingUser = true
                 userError = null
-
                 val user = firebaseUser
                 if (user != null && isAuthenticated) {
-                    Log.d("STITCH_MAIN", "Loading profile for authenticated user: ${user.uid}")
+                    // ✅ REGISTER FCM TOKEN AFTER AUTH
+                    Log.d("STITCH_MAIN", "🔐 User authenticated: ${user.uid}")
+                    Log.d("STITCH_MAIN", "📱 Registering FCM token for authenticated user...")
 
-                    // Retry logic for profile loading (handles race condition with profile creation)
-                    var userProfile: BasicUserInfo? = null
-                    var attempts = 0
-                    val maxAttempts = 3
-
-                    while (userProfile == null && attempts < maxAttempts) {
-                        attempts++
-                        Log.d("STITCH_MAIN", "Profile load attempt $attempts of $maxAttempts")
-
-                        userProfile = userService.getUserProfile(user.uid)
-
-                        if (userProfile == null && attempts < maxAttempts) {
-                            // CRITICAL FIX: Increased from 500ms to 1000ms
-                            Log.d("STITCH_MAIN", "Profile not found, waiting 1000ms before retry...")
-                            delay(1000)
-                        }
+                    try {
+                        FCMManager.initialize(context)
+                        Log.d("STITCH_MAIN", "✅ FCM registration initiated")
+                    } catch (e: Exception) {
+                        Log.e("STITCH_MAIN", "❌ FCM registration failed: ${e.message}")
+                        e.printStackTrace()
                     }
 
+                    // Load user profile
+                    var userProfile: BasicUserInfo? = null
+                    var retryCount = 0
+                    val maxRetries = 5
+                    while (userProfile == null && retryCount < maxRetries) {
+                        userProfile = userService.getUserProfile(user.uid)
+                        if (userProfile == null) {
+                            retryCount++
+                            delay(1000L * retryCount)
+                        }
+                    }
                     if (userProfile != null) {
                         currentUser = userProfile
-                        Log.d("STITCH_MAIN", "Loaded user profile: ${userProfile.displayName}")
+                        Log.d("STITCH_MAIN", "✅ User profile loaded: ${userProfile.username}")
                     } else {
-                        userError = "Profile not found for user ${user.uid} after $maxAttempts attempts"
-                        Log.e("STITCH_MAIN", "Profile not found after $maxAttempts attempts")
+                        userError = "Could not load user profile"
                     }
                 } else {
-                    Log.d("STITCH_MAIN", "No authenticated user - showing sign-in")
                     currentUser = null
                 }
-            } catch (e: Exception) {
-                userError = "Failed to load profile: ${e.message}"
-                Log.e("STITCH_MAIN", "Profile loading failed: ${e.message}")
-            } finally {
                 isLoadingUser = false
+            } catch (e: Exception) {
+                userError = e.message
+                isLoadingUser = false
+                Log.e("STITCH_MAIN", "❌ User loading error: ${e.message}")
             }
         }
     }
 
-    // Show authentication loading
-    if (authLoading || isLoadingUser) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CircularProgressIndicator(color = StitchColors.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = if (authLoading) "Authenticating..." else "Loading profile...",
-                    color = StitchColors.textSecondary,
-                    fontSize = 16.sp
-                )
-            }
-        }
-        return
-    }
-
-    // CRITICAL FIX: Show LoginView if not authenticated
-    // Empty callback and early return prevent scope cancellation
-    if (!isAuthenticated || currentUser == null) {
-        LoginView(
-            authService = authService,
-            onLoginSuccess = {
-                // CRITICAL FIX: Empty callback
-                // Let reactive state handle navigation naturally
-                Log.d("STITCH_MAIN", "Login successful - waiting for state update")
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-        return  // CRITICAL: Early return prevents rest of UI from rendering
-    }
-
-    // Main UI with authenticated user
-    val user = currentUser ?: return
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Main content with CustomDippedTabBar
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Tab content area
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                TabContent(
-                    selectedTab = selectedTab,
-                    currentUser = user,
-                    videoService = videoService,
-                    userService = userService,
-                    feedService = feedService,
-                    navigationCoordinator = navigationCoordinator
-                )
-            }
-
-            // CustomDippedTabBar
-            CustomDippedTabBar(
-                selectedTab = selectedTab,
-                onTabSelected = { tab ->
-                    selectedTab = tab
-                    Log.d("STITCH_MAIN", "Selected tab: ${tab.title}")
-                },
-                onCreateTapped = {
-                    Log.d("STITCH_MAIN", "CREATE BUTTON: Opening camera for recording")
-                    navigationCoordinator.showModal(
-                        ModalState.RECORDING,
-                        mapOf("context" to RecordingContext.NewThread)
+    Surface(modifier = Modifier.fillMaxSize(), color = StitchColors.background) {
+        when {
+            authLoading || isLoadingUser -> LoadingScreen()
+            !isAuthenticated || firebaseUser == null -> LoginView(authService = authService, onLoginSuccess = {})
+            userError != null -> ErrorScreen(message = userError ?: "Unknown error", onRetry = {
+                scope.launch {
+                    isLoadingUser = true
+                    userError = null
+                    val user = firebaseUser
+                    currentUser = user?.let { userService.getUserProfile(it.uid) }
+                    isLoadingUser = false
+                }
+            })
+            currentUser != null -> {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    TabContent(selectedTab, currentUser!!, videoService, userService, feedService, navigationCoordinator)
+                    CustomDippedTabBar(
+                        selectedTab = selectedTab,
+                        onTabSelected = { tab -> selectedTab = tab },
+                        onCreateTapped = { navigationCoordinator.showModal(ModalState.RECORDING) },
+                        modifier = Modifier.align(Alignment.BottomCenter)
                     )
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // Modal overlays based on NavigationCoordinator state
-        when (currentModal) {
-            ModalState.RECORDING -> {
-                CameraView(
-                    recordingContext = RecordingContext.NewThread,
-                    parentVideo = null,
-                    userTier = user.tier,
-                    onVideoRecorded = { videoMetadata ->
-                        Log.d("STITCH_MAIN", "Video recorded: ${videoMetadata.title}")
-
-                        scope.launch {
-                            try {
-                                val videoData = mapOf(
-                                    "videoPath" to videoMetadata.videoURL,
-                                    "metadata" to videoMetadata,
-                                    "recordingContext" to RecordingContext.NewThread
-                                )
-                                navigationCoordinator.onVideoCreated(videoData)
-                                Log.d("STITCH_MAIN", "Video processing started")
-                            } catch (e: Exception) {
-                                Log.e("STITCH_MAIN", "Video processing failed: ${e.message}")
-                            }
-                        }
-                    },
-                    onCancel = {
-                        Log.d("STITCH_MAIN", "Camera cancelled")
-                        navigationCoordinator.dismissModal()
-                    },
-                    onStopAllVideos = {
-                        Log.d("STITCH_MAIN", "Stopping all videos for recording")
-                    },
-                    onDisposeAllVideos = {
-                        Log.d("STITCH_MAIN", "Disposing all video players")
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            ModalState.PARALLEL_PROCESSING -> {
-                ParallelProcessingView(
-                    navigationCoordinator = navigationCoordinator,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            ModalState.THREAD_COMPOSER -> {
-                val videoPath = modalData["videoPath"] as? String
-                val aiResult = modalData["aiResult"] as? VideoAnalysisResult
-
-                if (videoPath != null) {
-                    ThreadComposer(
-                        recordedVideoURL = videoPath,
-                        recordingContext = RecordingContext.NewThread,
-                        aiResult = aiResult,
-                        videoCoordinator = videoCoordinator,
-                        onVideoCreated = { finalVideo ->
-                            Log.d("STITCH_MAIN", "Video created: ${finalVideo.id}")
-                            navigationCoordinator.dismissModal()
-                            selectedTab = MainAppTab.HOME
-                        },
-                        onCancel = {
-                            Log.d("STITCH_MAIN", "ThreadComposer cancelled")
-                            navigationCoordinator.dismissModal()
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Log.e("STITCH_MAIN", "ThreadComposer: Missing video path")
-                    navigationCoordinator.dismissModal()
+                    ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
                 }
             }
+        }
+    }
+}
 
-            ModalState.NONE -> {
-                // No modal
-            }
-
-            else -> {
-                // Handle any other modal states
-                Log.w("STITCH_MAIN", "Unhandled modal state: $currentModal")
+@Composable
+private fun ModalOverlay(
+    currentModal: ModalState,
+    modalData: Map<String, Any>,
+    navigationCoordinator: NavigationCoordinator,
+    videoCoordinator: VideoCoordinator,
+    onTabChange: (MainAppTab) -> Unit
+) {
+    if (currentModal != ModalState.NONE) {
+        Box(modifier = Modifier.fillMaxSize().background(StitchColors.modalOverlay)) {
+            when (currentModal) {
+                ModalState.RECORDING -> {
+                    val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
+                    CameraView(
+                        recordingContext = recordingContext,
+                        onVideoRecorded = { recordedVideo ->
+                            navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
+                            kotlinx.coroutines.GlobalScope.launch {
+                                try {
+                                    videoCoordinator.startParallelProcessing(recordedVideo.videoURL, recordedVideo, recordingContext)
+                                } catch (e: Exception) {
+                                    Log.e("STITCH_MAIN", "Video processing failed: ${e.message}")
+                                }
+                            }
+                        },
+                        onCancel = { navigationCoordinator.dismissModal() },
+                        onStopAllVideos = {},
+                        onDisposeAllVideos = {},
+                        onGalleryRequested = { navigationCoordinator.requestGalleryPicker() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                ModalState.PARALLEL_PROCESSING -> ParallelProcessingView(navigationCoordinator, Modifier.fillMaxSize())
+                ModalState.THREAD_COMPOSER -> {
+                    val videoPath = modalData["videoPath"] as? String
+                    val aiResult = modalData["aiResult"] as? VideoAnalysisResult
+                    if (videoPath != null) {
+                        ThreadComposer(
+                            recordedVideoURL = videoPath,
+                            recordingContext = RecordingContext.NewThread,
+                            aiResult = aiResult,
+                            videoCoordinator = videoCoordinator,
+                            onVideoCreated = { navigationCoordinator.dismissModal(); onTabChange(MainAppTab.HOME) },
+                            onCancel = { navigationCoordinator.dismissModal() },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        navigationCoordinator.dismissModal()
+                    }
+                }
+                else -> {}
             }
         }
     }
@@ -345,6 +426,7 @@ private fun TabContent(
         MainAppTab.HOME -> {
             HomeFeedView(
                 userID = currentUser.id,
+                navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -352,6 +434,12 @@ private fun TabContent(
             DiscoveryView(
                 onNavigateToVideo = { video ->
                     Log.d("NAVIGATION", "Discovery video selected: ${video.title}")
+                },
+                onNavigateToProfile = { userId ->
+                    Log.d("NAVIGATION", "Navigate to profile: $userId")
+                },
+                onNavigateToSearch = {
+                    Log.d("NAVIGATION", "🔍 SEARCH NAVIGATION TRIGGERED")
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -364,16 +452,36 @@ private fun TabContent(
             )
         }
         MainAppTab.NOTIFICATIONS -> {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Notifications\nComing Soon",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            NotificationViewComplete(
+                navigationCoordinator = navigationCoordinator,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingScreen() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CircularProgressIndicator(color = StitchColors.primary)
+            Text("Loading...", color = Color.White, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+private fun ErrorScreen(message: String, onRetry: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Text("Error", color = StitchColors.error, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(message, color = Color.White, fontSize = 16.sp)
+            Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = StitchColors.primary)) {
+                Text("Retry")
             }
         }
     }

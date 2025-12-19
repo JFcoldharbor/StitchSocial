@@ -1,10 +1,13 @@
 /*
- * NavigationCoordinator.kt - COMPLETE WITH VIDEO WORKFLOW
+ * NavigationCoordinator.kt - FIXED RECORDING CONTEXT IMPORTS
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 6: Coordination - Navigation and modal state management
  * Dependencies: VideoCoordinator (Layer 6)
- * Features: Tab navigation, modal management, video processing workflow
+ * Features: Tab navigation, modal management, video processing workflow, gallery picker
+ *
+ * ✅ FIXED: Removed coordination.RecordingContext enum (now uses camera.RecordingContext)
+ * ✅ FIXED: All RecordingContext references now use camera package
  */
 
 package com.stitchsocial.club.coordination
@@ -97,6 +100,7 @@ data class NavigationState(
 
 /**
  * NavigationCoordinator - Complete navigation and video workflow management
+ * ✅ FIXED: Now properly uses camera.RecordingContext
  */
 class NavigationCoordinator(
     private val videoCoordinator: VideoCoordinator
@@ -110,6 +114,10 @@ class NavigationCoordinator(
 
     // Expose VideoCoordinator for UI components
     val exposedVideoCoordinator: VideoCoordinator get() = videoCoordinator
+
+    // MARK: - Gallery Picker Callback
+
+    var onGalleryPickerRequested: (() -> Unit)? = null
 
     // MARK: - Navigation State
 
@@ -182,6 +190,16 @@ class NavigationCoordinator(
         println("🧭 TAB: ${tab.title}")
     }
 
+    // MARK: - Gallery Picker
+
+    /**
+     * Request gallery picker launch
+     */
+    fun requestGalleryPicker() {
+        println("📱 NAV COORDINATOR: Requesting gallery picker")
+        onGalleryPickerRequested?.invoke()
+    }
+
     // MARK: - Modal Management
 
     /**
@@ -224,33 +242,22 @@ class NavigationCoordinator(
         println("🧭 MODAL: Dismissed $previousModal")
     }
 
-    // MARK: - Video Processing Workflow (NEW)
+    // MARK: - Video Processing Workflow
 
     /**
      * Handle video creation from CameraView - triggers parallel processing
+     * ✅ FIXED: Now properly uses camera.RecordingContext
      */
     fun onVideoCreated(videoData: Map<String, Any>) {
         println("🧭 NAVIGATION: Video created, starting parallel processing")
 
         val videoPath = videoData["videoPath"] as? String
         val metadata = videoData["metadata"] as? CoreVideoMetadata
-        val cameraRecordingContext = videoData["recordingContext"] as? com.stitchsocial.club.camera.RecordingContext
+        val cameraRecordingContext = videoData["recordingContext"] as? RecordingContext
 
         if (videoPath == null || metadata == null || cameraRecordingContext == null) {
             println("❌ NAVIGATION: Missing required video data")
             return
-        }
-
-        // Convert camera.RecordingContext to coordination.RecordingContext
-        val recordingContext = when (cameraRecordingContext) {
-            is com.stitchsocial.club.camera.RecordingContext.NewThread ->
-                com.stitchsocial.club.coordination.RecordingContext.NewThread
-            is com.stitchsocial.club.camera.RecordingContext.StitchToThread ->
-                com.stitchsocial.club.coordination.RecordingContext.StitchToThread
-            is com.stitchsocial.club.camera.RecordingContext.ReplyToVideo ->
-                com.stitchsocial.club.coordination.RecordingContext.ReplyToThread
-            is com.stitchsocial.club.camera.RecordingContext.ContinueThread ->
-                com.stitchsocial.club.coordination.RecordingContext.ContinueThread
         }
 
         // Show parallel processing modal
@@ -265,10 +272,11 @@ class NavigationCoordinator(
 
                 println("🧭 RECORDING: Starting VideoCoordinator parallel processing")
 
+                // ✅ FIXED: Pass camera.RecordingContext directly (VideoCoordinator expects it)
                 videoCoordinator.startParallelProcessing(
                     videoPath = videoPath,
                     metadata = metadata,
-                    recordingContext = recordingContext
+                    recordingContext = cameraRecordingContext
                 )
 
                 println("🧭 RECORDING: Parallel processing complete")

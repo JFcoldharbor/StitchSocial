@@ -1,44 +1,52 @@
 /*
- * NotificationViewModel.kt - FIXED NAVIGATION METHODS
+ * NotificationViewModel.kt - COMPLETE WITH REAL FIREBASE INTEGRATION
  * StitchSocial Android
  *
  * Layer 7: ViewModels - Notification State Management
- * Dependencies: UserService (Layer 4), EngagementCoordinator (Layer 6), NavigationCoordinator (Layer 6)
- * Features: Engagement notifications, tap progress alerts, milestone celebrations, follow notifications
+ * Dependencies: UserService, EngagementCoordinator, NavigationCoordinator, NotificationService, AuthService
  *
- * FIXES:
- * ✅ Fixed navigationCoordinator.navigateTo() calls - replaced with showModal()
- * ✅ Proper modal navigation for user profiles and video details
- * ✅ Correct NavigationCoordinator method usage
- *
- * BLUEPRINT: Swift notification patterns from EngagementCoordinator.swift notification methods
+ * ✅ COMPLETE: Real Firebase notification loading
+ * ✅ COMPLETE: Real-time listener integration
+ * ✅ COMPLETE: Proper AuthService user ID retrieval
+ * ✅ COMPLETE: Mark as read functionality
  */
 
 package com.stitchsocial.club.viewmodels
 
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stitchsocial.club.coordination.NavigationCoordinator
-import com.stitchsocial.club.coordination.NavigationDestination
 import com.stitchsocial.club.coordination.ModalState
 import com.stitchsocial.club.coordination.EngagementCoordinator
-import com.stitchsocial.club.protocols.UserService
+import com.stitchsocial.club.services.UserService
+import com.stitchsocial.club.services.NotificationService
+import com.stitchsocial.club.services.StitchNotification
+import com.stitchsocial.club.services.StitchNotificationType
+import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.foundation.*
-import com.stitchsocial.club.engagement.InteractionType
-import com.stitchsocial.club.engagement.TapMilestone
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.*
 
 /**
- * Notification ViewModel managing engagement alerts and user notifications
- * Translates Swift notification patterns to StateFlow architecture
+ * Notification ViewModel with complete Firebase integration
  */
 class NotificationViewModel(
     private val userService: UserService,
     private val engagementCoordinator: EngagementCoordinator,
-    private val navigationCoordinator: NavigationCoordinator
+    private val navigationCoordinator: NavigationCoordinator,
+    private val context: Context
 ) : ViewModel() {
+
+    // Services
+    private val notificationService = NotificationService()
+    private val authService = AuthService()
+
+    companion object {
+        private const val TAG = "NotificationViewModel"
+    }
 
     // MARK: - Core Notification State
 
@@ -62,64 +70,50 @@ class NotificationViewModel(
     private val _filteredNotifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val filteredNotifications: StateFlow<List<NotificationItem>> = _filteredNotifications.asStateFlow()
 
-    // MARK: - Milestone and Engagement State
-
-    private val _activeMilestones = MutableStateFlow<Map<String, TapMilestone>>(emptyMap())
-    val activeMilestones: StateFlow<Map<String, TapMilestone>> = _activeMilestones.asStateFlow()
-
-    private val _milestoneProgress = MutableStateFlow<Map<String, Double>>(emptyMap())
-    val milestoneProgress: StateFlow<Map<String, Double>> = _milestoneProgress.asStateFlow()
-
-    private val _celebrationType = MutableStateFlow<CelebrationType?>(null)
-    val celebrationType: StateFlow<CelebrationType?> = _celebrationType.asStateFlow()
-
-    private val _showingCelebration = MutableStateFlow(false)
-    val showingCelebration: StateFlow<Boolean> = _showingCelebration.asStateFlow()
-
-    // MARK: - Real-time Engagement Alerts
-
-    private val _pendingAlert = MutableStateFlow<EngagementAlert?>(null)
-    val pendingAlert: StateFlow<EngagementAlert?> = _pendingAlert.asStateFlow()
-
-    private val _alertQueue = MutableStateFlow<List<EngagementAlert>>(emptyList())
-    val alertQueue: StateFlow<List<EngagementAlert>> = _alertQueue.asStateFlow()
-
     // MARK: - Initialization
 
     init {
-        println("🔔 NOTIFICATION VM: Initializing with engagement coordinator integration")
-
-        // Start observing milestones and engagement
-        observeEngagementMilestones()
+        Log.d(TAG, "🔔 NOTIFICATION VM: Initializing with NotificationService integration")
 
         // Load initial notifications
         viewModelScope.launch {
+            delay(500) // Small delay to ensure auth is ready
             loadNotifications()
+            startRealtimeListener()
         }
     }
 
     // MARK: - Notification Loading
 
     /**
-     * Load notifications from server
-     * BLUEPRINT: Swift NotificationManager.loadNotifications pattern
+     * Load notifications from Firebase via NotificationService
      */
     private suspend fun loadNotifications() {
         try {
             _isLoading.value = true
-            println("🔔 NOTIFICATION VM: Loading notifications...")
+            Log.d(TAG, "🔔 NOTIFICATION VM: Loading notifications from Firebase...")
 
             val currentUserID = getCurrentUserId()
+            if (currentUserID.isEmpty()) {
+                Log.w(TAG, "⚠️ NOTIFICATION VM: No user ID available")
+                _isLoading.value = false
+                return
+            }
 
-            // TODO: Implement actual notification loading
-            // val notificationsData = userService.getUserNotifications(currentUserID) as? List<*>
-            //     ?: throw StitchError.NetworkError("Failed to load notifications")
+            Log.d(TAG, "🔔 NOTIFICATION VM: Loading for user: $currentUserID")
 
-            // Convert to NotificationItem objects
-            val notificationItems = emptyList<NotificationItem>() // TODO: Implement conversion
-            // val notificationItems = notificationsData.mapNotNull { data ->
-            //     NotificationItem.fromFirebaseData(data)
-            // }.sortedByDescending { it.timestamp }
+            // Load notifications from NotificationService
+            val result = notificationService.loadNotifications(
+                userID = currentUserID,
+                limit = 50
+            )
+
+            Log.d(TAG, "🔔 NOTIFICATION VM: Received ${result.notifications.size} notifications from service")
+
+            // Convert to NotificationItems
+            val notificationItems = result.notifications.map { firebaseNotification ->
+                convertToNotificationItem(firebaseNotification)
+            }
 
             _notifications.value = notificationItems
             _unreadCount.value = notificationItems.count { !it.isRead }
@@ -127,52 +121,89 @@ class NotificationViewModel(
             // Apply current filter
             applyFilter(_selectedFilter.value)
 
-            println("✅ NOTIFICATION VM: Loaded ${notificationItems.size} notifications (${_unreadCount.value} unread)")
+            Log.d(TAG, "✅ NOTIFICATION VM: Loaded ${notificationItems.size} notifications (${_unreadCount.value} unread)")
 
         } catch (error: Exception) {
             val stitchError = error as? StitchError ?: StitchError.NetworkError(error.message ?: "Unknown error")
             _lastError.value = stitchError
-            println("❌ NOTIFICATION VM: Failed to load notifications - ${stitchError.message}")
+            Log.e(TAG, "❌ NOTIFICATION VM: Failed to load notifications", error)
         } finally {
             _isLoading.value = false
         }
     }
 
     /**
-     * Observe engagement milestones from EngagementCoordinator
-     * BLUEPRINT: EngagementCoordinator milestone observation patterns
+     * Start real-time listener for new notifications
      */
-    private fun observeEngagementMilestones() {
-        viewModelScope.launch {
-            // Observe milestone completions
-            engagementCoordinator.showingMilestone.collect { milestonesMap ->
-                _activeMilestones.value = milestonesMap
+    private fun startRealtimeListener() {
+        val currentUserID = getCurrentUserId()
+        if (currentUserID.isEmpty()) {
+            Log.w(TAG, "⚠️ NOTIFICATION VM: Cannot start listener - no user ID")
+            return
+        }
 
-                // Show alerts for new milestones
-                milestonesMap.values.firstOrNull()?.let { milestone ->
-                    showMilestoneAlert(milestone)
+        Log.d(TAG, "📡 NOTIFICATION VM: Starting real-time listener for user: $currentUserID")
+
+        notificationService.startListening(
+            userID = currentUserID,
+            onNotificationsUpdated = { firebaseNotifications ->
+                Log.d(TAG, "🔄 NOTIFICATION VM: Real-time update - ${firebaseNotifications.size} notifications")
+
+                val notificationItems = firebaseNotifications.map { convertToNotificationItem(it) }
+                _notifications.value = notificationItems
+                _unreadCount.value = notificationItems.count { !it.isRead }
+                applyFilter(_selectedFilter.value)
+            }
+        )
+    }
+
+    /**
+     * Convert Firebase notification to NotificationItem
+     */
+    private fun convertToNotificationItem(firebaseNotification: StitchNotification): NotificationItem {
+        return NotificationItem(
+            id = firebaseNotification.id,
+            type = mapNotificationType(firebaseNotification.type),
+            title = firebaseNotification.title,
+            message = firebaseNotification.message,
+            timestamp = firebaseNotification.createdAt,
+            isRead = firebaseNotification.isRead,
+            actionData = buildMap {
+                put("userId", firebaseNotification.senderID)
+                put("profileImageURL", firebaseNotification.payload["profileImageURL"] ?: "")
+                firebaseNotification.payload.forEach { (key, value) ->
+                    put(key, value)
                 }
             }
-        }
+        )
+    }
 
-        viewModelScope.launch {
-            // Observe tap progress
-            engagementCoordinator.tapProgress.collect { progressMap ->
-                _milestoneProgress.value = progressMap
-            }
+    /**
+     * Map Firebase notification type to app notification type
+     */
+    private fun mapNotificationType(firebaseType: StitchNotificationType): NotificationType {
+        return when (firebaseType) {
+            StitchNotificationType.HYPE -> NotificationType.HYPE_RECEIVED
+            StitchNotificationType.COOL -> NotificationType.HYPE_RECEIVED
+            StitchNotificationType.REPLY -> NotificationType.REPLY_RECEIVED
+            StitchNotificationType.FOLLOW -> NotificationType.NEW_FOLLOWER
+            StitchNotificationType.SHARE -> NotificationType.SHARE_RECEIVED
+            StitchNotificationType.MILESTONE -> NotificationType.TAP_MILESTONE
+            StitchNotificationType.TIER_UPGRADE -> NotificationType.TIER_UPGRADED
+            StitchNotificationType.SYSTEM -> NotificationType.SYSTEM_UPDATE
+            else -> NotificationType.SYSTEM_UPDATE
         }
-
-        println("🔔 NOTIFICATION VM: Started observing engagement milestones")
     }
 
     // MARK: - Notification Actions
 
     /**
      * Handle notification tap with proper navigation
-     * FIXED: Uses correct NavigationCoordinator methods
      */
     fun onNotificationTapped(notification: NotificationItem) {
         viewModelScope.launch {
+            Log.d(TAG, "📱 Notification tapped: ${notification.title}")
+
             // Mark as read
             markAsRead(notification.id)
 
@@ -181,47 +212,47 @@ class NotificationViewModel(
                 NotificationType.HYPE_RECEIVED,
                 NotificationType.REPLY_RECEIVED,
                 NotificationType.SHARE_RECEIVED -> {
-                    // Navigate to video
-                    val videoId = notification.actionData["videoId"] as? String
+                    val videoId = notification.actionData["videoID"] as? String
                     if (videoId != null) {
-                        // ✅ FIXED: Use showModal instead of navigateTo
-                        navigationCoordinator.showModal(
-                            modal = ModalState.VIDEO_PLAYER,
-                            data = mapOf("videoId" to videoId)
-                        )
+                        Log.d(TAG, "📱 TODO: Navigate to video: $videoId")
+                        // TODO: Implement video thread navigation when ThreadView modal exists
+                    } else {
+                        Log.w(TAG, "⚠️ No videoID in notification payload")
                     }
                 }
                 NotificationType.NEW_FOLLOWER,
                 NotificationType.FOLLOWING_VIDEO -> {
-                    // Navigate to user profile
                     val userId = notification.actionData["userId"] as? String
                     if (userId != null) {
-                        // ✅ FIXED: Use showModal instead of navigateTo
-                        navigationCoordinator.showModal(
-                            modal = ModalState.USER_PROFILE,
-                            data = mapOf("userID" to userId)
-                        )
+                        Log.d(TAG, "📱 TODO: Navigate to profile: $userId")
+                        // TODO: Implement profile navigation when ProfileView modal exists
+                    } else {
+                        Log.w(TAG, "⚠️ No userId in notification payload")
                     }
                 }
                 NotificationType.TAP_MILESTONE -> {
-                    // Show milestone celebration
                     val milestone = notification.actionData["milestone"] as? String
-                    println("🎯 Celebrating milestone: $milestone")
+                    Log.d(TAG, "🎯 Celebrating milestone: $milestone")
                 }
                 else -> {
-                    println("📱 Notification tapped: ${notification.title}")
+                    Log.d(TAG, "📱 Notification type: ${notification.type}")
                 }
             }
         }
     }
 
     /**
-     * Mark notification as read
+     * Mark notification as read in Firebase
      */
     private suspend fun markAsRead(notificationId: String) {
         try {
-            // TODO: Implement server call
-            // userService.markNotificationAsRead(notificationId)
+            val currentUserID = getCurrentUserId()
+            if (currentUserID.isEmpty()) return
+
+            Log.d(TAG, "✅ Marking notification as read: $notificationId")
+
+            // Update Firebase
+            notificationService.markAsRead(currentUserID, notificationId)
 
             // Update local state
             val updatedNotifications = _notifications.value.map { notification ->
@@ -235,13 +266,11 @@ class NotificationViewModel(
             _notifications.value = updatedNotifications
             _unreadCount.value = updatedNotifications.count { !it.isRead }
 
-            // Reapply filter to update filtered notifications
+            // Reapply filter
             applyFilter(_selectedFilter.value)
 
-            println("✅ NOTIFICATION VM: Marked notification $notificationId as read")
-
         } catch (error: Exception) {
-            println("❌ NOTIFICATION VM: Failed to mark as read - ${error.message}")
+            Log.e(TAG, "❌ Failed to mark as read", error)
         }
     }
 
@@ -251,7 +280,7 @@ class NotificationViewModel(
     fun setFilter(filter: NotificationFilter) {
         _selectedFilter.value = filter
         applyFilter(filter)
-        println("🔍 NOTIFICATION VM: Filter set to ${filter.displayName}")
+        Log.d(TAG, "🔍 Filter set to ${filter.displayName}")
     }
 
     /**
@@ -286,102 +315,7 @@ class NotificationViewModel(
         }
 
         _filteredNotifications.value = filtered
-    }
-
-    /**
-     * Clear all notifications
-     */
-    fun clearAllNotifications() {
-        viewModelScope.launch {
-            try {
-                val currentUserID = getCurrentUserId()
-                // TODO: Implement actual clearAllNotifications method
-                // userService.clearAllNotifications(currentUserID)
-
-                _notifications.value = emptyList()
-                _filteredNotifications.value = emptyList()
-                _unreadCount.value = 0
-
-                println("🗑️ NOTIFICATION VM: Cleared all notifications")
-
-            } catch (error: Exception) {
-                println("❌ NOTIFICATION VM: Failed to clear notifications - ${error.message}")
-            }
-        }
-    }
-
-    // MARK: - Milestone Alert Management
-
-    /**
-     * Show milestone celebration alert
-     */
-    private fun showMilestoneAlert(milestone: TapMilestone) {
-        _celebrationType.value = CelebrationType.MILESTONE_REACHED
-        _showingCelebration.value = true
-
-        // Auto-hide after celebration duration
-        viewModelScope.launch {
-            delay(CelebrationType.MILESTONE_REACHED.duration)
-            hideCelebration()
-        }
-
-        println("🎯 NOTIFICATION VM: Showing milestone alert - ${milestone.displayName}")
-    }
-
-    /**
-     * Hide celebration
-     */
-    fun hideCelebration() {
-        _showingCelebration.value = false
-        _celebrationType.value = null
-    }
-
-    /**
-     * Show engagement alert
-     */
-    fun showEngagementAlert(alert: EngagementAlert) {
-        // Add to queue if already showing an alert
-        if (_pendingAlert.value != null) {
-            val currentQueue = _alertQueue.value.toMutableList()
-            currentQueue.add(alert)
-            _alertQueue.value = currentQueue
-        } else {
-            _pendingAlert.value = alert
-
-            // Auto-hide after 3 seconds
-            viewModelScope.launch {
-                delay(3000L)
-                hideEngagementAlert()
-            }
-        }
-
-        println("⚡ NOTIFICATION VM: Showing engagement alert - ${alert.type.displayName} from ${alert.fromUser}")
-    }
-
-    /**
-     * Hide current engagement alert and show next in queue
-     */
-    fun hideEngagementAlert() {
-        _pendingAlert.value = null
-
-        // Show next alert in queue
-        val queue = _alertQueue.value
-        if (queue.isNotEmpty()) {
-            val nextAlert = queue.first()
-            val remainingQueue = queue.drop(1)
-
-            _alertQueue.value = remainingQueue
-            showEngagementAlert(nextAlert)
-        }
-    }
-
-    // MARK: - Helper Methods
-
-    /**
-     * Get current user ID (placeholder - should come from AuthService)
-     */
-    private fun getCurrentUserId(): String {
-        return "current_user_id" // TODO: Get from AuthService
+        Log.d(TAG, "🔍 Filtered to ${filtered.size} notifications")
     }
 
     /**
@@ -393,19 +327,30 @@ class NotificationViewModel(
         }
     }
 
+    // MARK: - Helper Methods
+
+    /**
+     * Get current user ID from AuthService
+     */
+    private fun getCurrentUserId(): String {
+        val userId = authService.currentUser.value?.uid ?: ""
+        if (userId.isEmpty()) {
+            Log.w(TAG, "⚠️ No authenticated user found")
+        }
+        return userId
+    }
+
     // MARK: - Cleanup
 
     override fun onCleared() {
         super.onCleared()
-        println("🧹 NOTIFICATION VM: Cleaning up resources")
+        notificationService.stopListening()
+        Log.d(TAG, "🧹 NOTIFICATION VM: Cleaned up resources")
     }
 }
 
 // MARK: - Supporting Data Classes
 
-/**
- * Notification item for display
- */
 data class NotificationItem(
     val id: String,
     val type: NotificationType,
@@ -430,18 +375,8 @@ data class NotificationItem(
                 else -> "${days / 7}w"
             }
         }
-
-    companion object {
-        fun fromFirebaseData(data: Any?): NotificationItem? {
-            // TODO: Implement Firebase data conversion
-            return null
-        }
-    }
 }
 
-/**
- * Notification types
- */
 enum class NotificationType {
     HYPE_RECEIVED,
     REPLY_RECEIVED,
@@ -456,7 +391,7 @@ enum class NotificationType {
         get() = when (this) {
             HYPE_RECEIVED -> "🔥"
             REPLY_RECEIVED -> "💬"
-            SHARE_RECEIVED -> "📤"
+            SHARE_RECEIVED -> "🔤"
             NEW_FOLLOWER -> "👤"
             FOLLOWING_VIDEO -> "🎬"
             TAP_MILESTONE -> "🎯"
@@ -465,9 +400,6 @@ enum class NotificationType {
         }
 }
 
-/**
- * Notification filter options
- */
 enum class NotificationFilter {
     ALL,
     ENGAGEMENT,
@@ -482,35 +414,5 @@ enum class NotificationFilter {
             SOCIAL -> "Social"
             SYSTEM -> "System"
             UNREAD -> "Unread"
-        }
-}
-
-/**
- * Engagement alert for real-time display
- */
-data class EngagementAlert(
-    val id: String,
-    val type: InteractionType,
-    val fromUser: String,
-    val videoTitle: String,
-    val cloutGain: Int,
-    val timestamp: Date
-)
-
-/**
- * Celebration animation types
- */
-enum class CelebrationType {
-    MILESTONE_REACHED,
-    TIER_UPGRADED,
-    FIRST_HYPE,
-    VIRAL_VIDEO;
-
-    val duration: Long
-        get() = when (this) {
-            MILESTONE_REACHED -> 3000L
-            TIER_UPGRADED -> 4000L
-            FIRST_HYPE -> 2000L
-            VIRAL_VIDEO -> 5000L
         }
 }

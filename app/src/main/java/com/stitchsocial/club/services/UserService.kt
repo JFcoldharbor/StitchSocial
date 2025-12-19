@@ -1,12 +1,11 @@
 /*
- * UserService.kt - COMPLETE WITH SEARCH AND DISCOVERY INTEGRATION
+ * UserService.kt - FIXED: SUBCOLLECTION STRUCTURE
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 4: Core Services - Complete User Management with Profile Editing & Search
- * Dependencies: Firebase, Foundation Layer, SimplifiedCachingService
- * Features: Profile editing, image upload, social following, engagement stats, user search, discovery integration
- *
- * ENHANCED: Added user search functionality for DiscoveryView integration
+ * ✅ CRITICAL FIX: Using subcollection structure to match Swift
+ * ✅ Structure: users/{userID}/following/{followeeID}
+ * ✅ Structure: users/{userID}/followers/{followerID}
+ * ✅ All 8 methods updated with correct subcollection paths
  */
 
 package com.stitchsocial.club.services
@@ -34,6 +33,7 @@ import java.util.*
 
 /**
  * Enhanced UserService with complete profile editing, social features, and search capabilities
+ * Uses subcollection structure: users/{userID}/following/{followeeID}
  */
 class UserService(private val context: Context) {
 
@@ -55,6 +55,218 @@ class UserService(private val context: Context) {
     private val cacheExpiration = 300000L // 5 minutes
     private val maxCacheEntries = 50
 
+    // ===== USER CREATION WITH AUTO-FOLLOW SYSTEM =====
+
+    /**
+     * Create new user with complete profile setup, special user detection, and auto-follow
+     */
+    suspend fun createUser(
+        id: String,
+        email: String,
+        username: String? = null,
+        displayName: String? = null,
+        profileImageURL: String? = null
+    ): BasicUserInfo? {
+        return try {
+            _isLoading.value = true
+            println("USER SERVICE: Creating user with email: $email")
+
+            // Generate username if not provided
+            val finalUsername = username ?: generateUsername(email, id)
+            val finalDisplayName = displayName ?: finalUsername
+
+            // Detect special user and use their configured tier
+            val specialUserEntry = SpecialUsersConfig.detectSpecialUser(email)
+
+            // Use actual tier from SpecialUserEntry
+            val initialTier = if (specialUserEntry != null) {
+                UserTier.fromRawValue(specialUserEntry.tierRawValue) ?: UserTier.ROOKIE
+            } else {
+                UserTier.ROOKIE
+            }
+
+            val initialClout = specialUserEntry?.startingClout ?: 0
+            val isSpecialUser = specialUserEntry != null
+            val initialBio = specialUserEntry?.customBio ?: ""
+
+            println("USER SERVICE: Creating user with tier ${initialTier.displayName}, clout: $initialClout")
+
+            // Create user document
+            val userData = hashMapOf<String, Any>(
+                "id" to id,
+                "email" to email,
+                "username" to finalUsername,
+                "displayName" to finalDisplayName,
+                "bio" to initialBio,
+                "tier" to initialTier.rawValue,
+                "clout" to initialClout,
+                "followerCount" to 0,
+                "followingCount" to 0,
+                "isVerified" to isSpecialUser,
+                "isPrivate" to false,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+
+            if (profileImageURL != null) {
+                userData["profileImageURL"] = profileImageURL
+            }
+
+            db.collection("users").document(id).set(userData).await()
+
+            val user = BasicUserInfo(
+                id = id,
+                username = finalUsername,
+                displayName = finalDisplayName,
+                email = email,
+                bio = initialBio,
+                tier = initialTier,
+                clout = initialClout,
+                followerCount = 0,
+                followingCount = 0,
+                isVerified = isSpecialUser,
+                isPrivate = false,
+                profileImageURL = profileImageURL,
+                createdAt = Date()
+            )
+
+            // Auto-follow James Fortune (founder) for all new users
+            performAutoFollow(id, email)
+
+            println("USER SERVICE: ✅ Created user ${finalUsername} with tier ${initialTier.displayName}")
+            user
+
+        } catch (e: Exception) {
+            println("USER SERVICE: ❌ Error creating user: ${e.message}")
+            handleError("Failed to create user: ${e.message}")
+            null
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    /**
+     * Auto-follow James Fortune (founder) for new users
+     */
+    private suspend fun performAutoFollow(newUserID: String, email: String) {
+        try {
+            // Get James Fortune's user ID
+            val founderEmail = "james@stitchsocial.me"
+            val founderDoc = db.collection("users")
+                .whereEqualTo("email", founderEmail)
+                .limit(1)
+                .get()
+                .await()
+
+            if (founderDoc.documents.isNotEmpty()) {
+                val founderID = founderDoc.documents.first().id
+
+                // Don't auto-follow yourself
+                if (newUserID != founderID) {
+                    println("USER SERVICE: Auto-following founder for new user")
+                    followUser(newUserID, founderID)
+                }
+            }
+        } catch (e: Exception) {
+            println("USER SERVICE: ⚠️ Auto-follow failed (non-critical): ${e.message}")
+        }
+    }
+
+    /**
+     * Generate username from email and ID
+     */
+    private fun generateUsername(email: String, id: String): String {
+        val emailPrefix = email.substringBefore("@").lowercase()
+        val cleanPrefix = emailPrefix.replace(Regex("[^a-z0-9]"), "")
+        val shortID = id.takeLast(4)
+        return "${cleanPrefix}_${shortID}"
+    }
+
+    // ===== NEW METHODS FOR ENGAGEMENT SYSTEM =====
+
+    /**
+     * Get basic user info - Alias for getUserProfile
+     * Used by EngagementCoordinator for consistency
+     */
+    suspend fun getBasicUserInfo(userID: String): BasicUserInfo? {
+        return getUserProfile(userID)
+    }
+
+    // ===== NEW METHODS FOR PROFILE SYSTEM =====
+
+    /**
+     * Alias for getFollowing - matches ProfileViewModel expectations
+     */
+    suspend fun getFollowingList(userID: String, limit: Int = 50): List<BasicUserInfo> {
+        return getFollowing(userID, limit)
+    }
+
+    /**
+     * Alias for getFollowers - matches ProfileViewModel expectations
+     */
+    suspend fun getFollowersList(userID: String, limit: Int = 50): List<BasicUserInfo> {
+        return getFollowers(userID, limit)
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{userID}/following
+     * Get list of user IDs that this user is following
+     * Used by HybridHomeFeedService for feed filtering
+     */
+    suspend fun getFollowingIDs(userID: String): List<String> {
+        return try {
+            println("USER SERVICE: Loading following IDs for user $userID")
+
+            val followDocs = db.collection("users")
+                .document(userID)
+                .collection("following")
+                .get()
+                .await()
+
+            val followingIDs = followDocs.documents.map { it.id }
+
+            println("USER SERVICE: ✅ Found ${followingIDs.size} following IDs")
+            followingIDs
+
+        } catch (e: Exception) {
+            println("USER SERVICE: ❌ Error loading following IDs: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Update user profile - alias for updateUserProfile
+     * Matches ProfileViewModel expected method signature
+     */
+    suspend fun updateProfile(
+        userID: String,
+        displayName: String? = null,
+        bio: String? = null,
+        username: String? = null,
+        isPrivate: Boolean? = null
+    ): BasicUserInfo? {
+        return try {
+            // Call existing updateUserProfile method
+            val success = updateUserProfile(
+                userID = userID,
+                displayName = displayName,
+                username = username,
+                bio = bio,
+                profileImageUri = null // No image for this variant
+            )
+
+            if (success) {
+                // Return updated user profile
+                getUserProfile(userID)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            println("USER SERVICE: ❌ Error in updateProfile: ${e.message}")
+            null
+        }
+    }
+
     // ===== ENHANCED USER PROFILE LOADING WITH DEBUG =====
 
     /**
@@ -62,290 +274,199 @@ class UserService(private val context: Context) {
      */
     suspend fun getUserProfile(userID: String): BasicUserInfo? {
         return try {
-            println("USER SERVICE: Loading profile for user $userID")
-            println("USER SERVICE: Database: stitchfin")
+            println("USER SERVICE: Loading profile for user: $userID")
 
-            _isLoading.value = true
+            val userDoc = db.collection("users").document(userID).get().await()
 
-            // Check cache first
-            val cachedUser = cachingService.getCachedUser(userID)
-            if (cachedUser != null) {
-                println("USER SERVICE: Found cached user: ${cachedUser.username}")
-                return cachedUser
-            }
-
-            // Query Firebase with debug logging
-            println("USER SERVICE: Querying Firebase collection 'users' document '$userID'")
-            val document = db.collection("users").document(userID).get().await()
-
-            println("USER SERVICE: Document exists: ${document.exists()}")
-            println("USER SERVICE: Document path: ${document.reference.path}")
-
-            if (document.exists()) {
-                val data = document.data
-                println("USER SERVICE: Document has data: ${data != null}")
-
-                if (data != null) {
-                    println("USER SERVICE: Data keys: ${data.keys.joinToString(", ")}")
-                    println("USER SERVICE: username = ${data["username"]}")
-                    println("USER SERVICE: displayName = ${data["displayName"]}")
-                    println("USER SERVICE: bio = ${data["bio"]}")
-                    println("USER SERVICE: tier = ${data["tier"]}")
-                }
-
-                val userInfo = BasicUserInfo.fromFirebaseDocument(document)
-
-                if (userInfo != null) {
-                    println("USER SERVICE: Successfully parsed user: ${userInfo.username}")
-                    cachingService.cacheUser(userInfo, SimplifiedCachingService.CachePriority.NORMAL)
-                    return userInfo
-                } else {
-                    println("USER SERVICE: Failed to parse document")
-                    return null
-                }
-            } else {
-                println("USER SERVICE: Document does not exist")
+            if (!userDoc.exists()) {
+                println("USER SERVICE: ❌ User document not found: $userID")
                 return null
             }
 
+            val user = BasicUserInfo.fromFirebaseDocument(userDoc)
+            if (user != null) {
+                println("USER SERVICE: ✅ Successfully loaded user: ${user.username}")
+            } else {
+                println("USER SERVICE: ❌ Failed to parse user document")
+            }
+
+            user
+
         } catch (e: Exception) {
-            println("USER SERVICE: Exception: ${e.message}")
-            handleError("Failed to get user profile: ${e.message}")
-            return null
-        } finally {
-            _isLoading.value = false
+            println("USER SERVICE: ❌ Error loading user profile: ${e.message}")
+            e.printStackTrace()
+            null
         }
     }
 
-    // ===== PROFILE EDITING METHODS WITH USERNAME AND IMAGE SUPPORT =====
+    /**
+     * Get extended profile data for editing
+     */
+    suspend fun getExtendedProfile(id: String): BasicUserInfo? {
+        return getUserProfile(id)
+    }
 
     /**
-     * Update user profile with validation and cache sync - FIXED WITH USERNAME
+     * Batch load multiple user profiles efficiently
+     * ✅ FIXED: Use FieldPath.documentId() instead of "id" field
      */
-    suspend fun updateProfile(
+    suspend fun batchLoadUsers(userIDs: List<String>): Map<String, BasicUserInfo> {
+        if (userIDs.isEmpty()) return emptyMap()
+
+        return try {
+            println("USER SERVICE: Batch loading ${userIDs.size} users")
+
+            val users = mutableMapOf<String, BasicUserInfo>()
+
+            // Firebase has a limit of 10 documents per "in" query
+            userIDs.chunked(10).forEach { chunk ->
+                val docs = db.collection("users")
+                    .whereIn(com.google.firebase.firestore.FieldPath.documentId(), chunk)
+                    .get()
+                    .await()
+
+                docs.documents.forEach { doc ->
+                    BasicUserInfo.fromFirebaseDocument(doc)?.let { user ->
+                        users[user.id] = user
+                    }
+                }
+            }
+
+            println("USER SERVICE: Loaded ${users.size}/${userIDs.size} users")
+            users
+
+        } catch (e: Exception) {
+            println("USER SERVICE: Error in batch load: ${e.message}")
+            emptyMap()
+        }
+    }
+
+    // ===== PROFILE EDITING FUNCTIONALITY =====
+
+    /**
+     * Update user profile with validation
+     */
+    suspend fun updateUserProfile(
         userID: String,
         displayName: String? = null,
-        bio: String? = null,
         username: String? = null,
-        isPrivate: Boolean? = null,
-        profileImageURL: String? = null
-    ): BasicUserInfo? {
+        bio: String? = null,
+        profileImageUri: Uri? = null
+    ): Boolean {
         return try {
             _isLoading.value = true
-            println("USER SERVICE: Updating profile for user $userID")
+            println("USER SERVICE: Updating profile for user: $userID")
 
-            // Validate inputs
-            if (displayName != null && (displayName.isBlank() || displayName.length > 30)) {
-                throw StitchError.ValidationError("Display name must be 1-30 characters")
-            }
+            val updates = mutableMapOf<String, Any>()
 
-            if (bio != null && bio.length > 150) {
-                throw StitchError.ValidationError("Bio cannot exceed 150 characters")
-            }
-
-            if (username != null) {
-                if (!isValidUsername(username)) {
-                    throw StitchError.ValidationError("Username must be 3-20 characters, alphanumeric and underscores only")
-                }
-
-                // Check username availability
-                if (!checkUsernameAvailability(username, userID)) {
-                    throw StitchError.ValidationError("Username '$username' is already taken")
-                }
-            }
-
-            // Build update data
-            val updates = mutableMapOf<String, Any>(
-                "updatedAt" to Timestamp.now()
-            )
-
+            // Validate and add display name
             displayName?.let {
-                updates["displayName"] = it
-                println("USER SERVICE: 📝 Updating displayName to: $it")
+                if (it.isNotBlank() && it.length <= 50) {
+                    updates["displayName"] = it
+                }
             }
-            bio?.let {
-                updates["bio"] = it
-                println("USER SERVICE: 📝 Updating bio to: $it")
-            }
+
+            // Validate and add username (check uniqueness)
             username?.let {
-                updates["username"] = it
-                println("USER SERVICE: 👤 Updating username to: $it")
-            }
-            isPrivate?.let {
-                updates["isPrivate"] = it
-                println("USER SERVICE: 🔒 Updating privacy to: $it")
-            }
-            profileImageURL?.let {
-                updates["profileImageURL"] = it
-                println("USER SERVICE: 🖼️ Updating profile image to: $it")
-            }
-
-            // Update Firebase
-            db.collection("users").document(userID).update(updates).await()
-            println("USER SERVICE: Profile updated for user $userID")
-
-            // Get updated user and refresh cache
-            val updatedUser = getUserProfile(userID)
-            if (updatedUser != null) {
-                cachingService.cacheUser(updatedUser, SimplifiedCachingService.CachePriority.HIGH)
+                if (isValidUsername(it)) {
+                    val isUnique = checkUsernameAvailability(it, userID)
+                    if (isUnique) {
+                        updates["username"] = it
+                    } else {
+                        handleError("Username already taken")
+                        return false
+                    }
+                } else {
+                    handleError("Invalid username format")
+                    return false
+                }
             }
 
-            updatedUser
+            // Validate and add bio
+            bio?.let {
+                if (it.length <= 500) {
+                    updates["bio"] = it
+                }
+            }
+
+            // Upload profile image if provided
+            profileImageUri?.let { uri ->
+                val imageUrl = uploadProfileImage(userID, uri)
+                if (imageUrl != null) {
+                    updates["profileImageURL"] = imageUrl
+                } else {
+                    handleError("Failed to upload profile image")
+                }
+            }
+
+            // Update Firestore
+            if (updates.isNotEmpty()) {
+                updates["updatedAt"] = FieldValue.serverTimestamp()
+                db.collection("users").document(userID).update(updates).await()
+                println("USER SERVICE: ✅ Profile updated successfully")
+                invalidateUserCache(userID)
+                true
+            } else {
+                println("USER SERVICE: No valid updates to apply")
+                false
+            }
 
         } catch (e: Exception) {
             handleError("Failed to update profile: ${e.message}")
-            null
+            false
         } finally {
             _isLoading.value = false
         }
     }
 
     /**
-     * Complete profile editing with image upload support
+     * Update profile with image - used by ProfileView
      */
     suspend fun updateProfileWithImage(
         userID: String,
-        displayName: String? = null,
-        bio: String? = null,
-        imageUri: Uri? = null
-    ): BasicUserInfo? {
+        displayName: String,
+        bio: String,
+        imageUri: Uri?
+    ) {
+        updateUserProfile(
+            userID = userID,
+            displayName = displayName,
+            bio = bio,
+            profileImageUri = imageUri
+        )
+    }
+
+    /**
+     * Check if username is available (excluding current user)
+     * NOW PUBLIC for ProfileViewModel access
+     */
+    suspend fun checkUsernameAvailability(username: String, excludeUserID: String): Boolean {
         return try {
-            _isLoading.value = true
-            println("USER SERVICE: 🔄 Updating profile with image for user $userID")
-            println("USER SERVICE: 📝 DisplayName: ${displayName ?: "unchanged"}")
-            println("USER SERVICE: 📝 Bio: ${bio ?: "unchanged"}")
-            println("USER SERVICE: 🖼️ Image: ${if (imageUri != null) "uploading new image" else "no image change"}")
-
-            var imageURL: String? = null
-
-            // Step 1: Upload image if provided
-            if (imageUri != null) {
-                println("USER SERVICE: 📤 Uploading new profile image...")
-                imageURL = uploadProfileImageFromUri(userID, imageUri)
-                println("USER SERVICE: ✅ Image uploaded: $imageURL")
-            }
-
-            // Step 2: Update profile with all fields
-            val updatedUser = updateProfile(
-                userID = userID,
-                displayName = displayName,
-                bio = bio,
-                profileImageURL = imageURL
-            )
-
-            if (updatedUser != null) {
-                println("USER SERVICE: ✅ Profile updated successfully!")
-            } else {
-                println("USER SERVICE: ❌ Profile update failed")
-            }
-
-            updatedUser
-
-        } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error updating profile with image: ${e.message}")
-            handleError("Failed to update profile: ${e.message}")
-            null
-        } finally {
-            _isLoading.value = false
-        }
-    }
-
-    /**
-     * Upload profile image from URI with compression
-     */
-    private suspend fun uploadProfileImageFromUri(userID: String, imageUri: Uri): String {
-        return withContext(Dispatchers.IO) {
-            try {
-                println("USER SERVICE: 🔄 Processing image for upload...")
-
-                // Read image from URI
-                val inputStream = context.contentResolver.openInputStream(imageUri)
-                val originalBitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream?.close()
-
-                if (originalBitmap == null) {
-                    throw StitchError.StorageError("Failed to decode image")
-                }
-
-                // Resize to max 512x512 for profile images
-                val resizedBitmap = resizeBitmap(originalBitmap, 512, 512)
-
-                // Compress to JPEG with 80% quality
-                val outputStream = ByteArrayOutputStream()
-                resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
-                val compressedData = outputStream.toByteArray()
-
-                println("USER SERVICE: 📊 Image compressed: ${compressedData.size / 1024}KB")
-
-                // Upload to Firebase Storage
-                val imageRef = storage.reference.child("profile_images/$userID.jpg")
-                val uploadTask = imageRef.putBytes(compressedData).await()
-                val downloadUrl = imageRef.downloadUrl.await()
-
-                println("USER SERVICE: ✅ Upload completed: $downloadUrl")
-                downloadUrl.toString()
-
-            } catch (e: Exception) {
-                println("USER SERVICE: ❌ Image upload failed: ${e.message}")
-                throw StitchError.StorageError("Image upload failed: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Resize bitmap maintaining aspect ratio
-     */
-    private fun resizeBitmap(bitmap: Bitmap, maxWidth: Int, maxHeight: Int): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-
-        // Already small enough
-        if (width <= maxWidth && height <= maxHeight) {
-            return bitmap
-        }
-
-        // Calculate scale factor
-        val scaleWidth = maxWidth.toFloat() / width
-        val scaleHeight = maxHeight.toFloat() / height
-        val scale = min(scaleWidth, scaleHeight)
-
-        // Calculate new dimensions
-        val newWidth = (width * scale).toInt()
-        val newHeight = (height * scale).toInt()
-
-        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-    }
-
-    /**
-     * Check username availability
-     */
-    suspend fun checkUsernameAvailability(username: String, excludeUserID: String? = null): Boolean {
-        return try {
-            val query = db.collection("users")
+            val existingUser = db.collection("users")
                 .whereEqualTo("username", username)
                 .limit(1)
                 .get()
                 .await()
 
-            if (query.isEmpty) {
-                true
-            } else {
-                // Check if the found username belongs to the current user (for updates)
-                val foundUser = query.documents.first()
-                excludeUserID != null && foundUser.id == excludeUserID
-            }
+            val isAvailable = existingUser.documents.isEmpty() ||
+                    existingUser.documents.first().id == excludeUserID
+
+            println("USER SERVICE: Username '$username' available: $isAvailable")
+            isAvailable
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error checking username availability: ${e.message}")
+            println("USER SERVICE: Error checking username: ${e.message}")
             false
         }
     }
 
     /**
-     * Upload profile image (legacy method for compatibility)
+     * Upload profile image with compression
      */
-    suspend fun uploadProfileImage(userID: String, imageData: ByteArray): String? {
+    private suspend fun uploadProfileImage(userID: String, imageUri: Uri): String? {
         return try {
+            val imageData = compressImage(imageUri) ?: return null
+
             val imageRef = storage.reference.child("profile_images/$userID.jpg")
             val uploadTask = imageRef.putBytes(imageData).await()
             val downloadUrl = imageRef.downloadUrl.await()
@@ -359,11 +480,334 @@ class UserService(private val context: Context) {
         }
     }
 
+    /**
+     * Compress image to reduce storage costs and improve performance
+     */
+    private suspend fun compressImage(uri: Uri): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream.close()
+
+                // Resize if too large (max 1024x1024)
+                val maxDimension = 1024
+                val scale = min(
+                    maxDimension.toFloat() / bitmap.width,
+                    maxDimension.toFloat() / bitmap.height
+                )
+
+                val resizedBitmap = if (scale < 1) {
+                    Bitmap.createScaledBitmap(
+                        bitmap,
+                        (bitmap.width * scale).toInt(),
+                        (bitmap.height * scale).toInt(),
+                        true
+                    )
+                } else {
+                    bitmap
+                }
+
+                // Compress to JPEG
+                val outputStream = ByteArrayOutputStream()
+                resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+                val imageData = outputStream.toByteArray()
+
+                println("USER SERVICE: Image compressed to ${imageData.size / 1024}KB")
+                imageData
+
+            } catch (e: Exception) {
+                println("USER SERVICE: Error compressing image: ${e.message}")
+                null
+            }
+        }
+    }
+
+    // ===== SOCIAL FOLLOWING FUNCTIONALITY =====
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{followerID}/following/{followeeID}
+     * Follow a user with atomic updates
+     */
+    suspend fun followUser(followerID: String, followeeID: String): Boolean {
+        return try {
+            println("USER SERVICE: User $followerID following $followeeID")
+
+            // Create follow relationship in follower's subcollection
+            val followData = hashMapOf(
+                "followeeID" to followeeID,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+
+            db.collection("users")
+                .document(followerID)
+                .collection("following")
+                .document(followeeID)
+                .set(followData)
+                .await()
+
+            // Create reverse relationship in followee's subcollection
+            val followerData = hashMapOf(
+                "followerID" to followerID,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+
+            db.collection("users")
+                .document(followeeID)
+                .collection("followers")
+                .document(followerID)
+                .set(followerData)
+                .await()
+
+            // Update follower count atomically
+            db.collection("users").document(followeeID)
+                .update("followerCount", FieldValue.increment(1))
+                .await()
+
+            // Update following count atomically
+            db.collection("users").document(followerID)
+                .update("followingCount", FieldValue.increment(1))
+                .await()
+
+            updateUserCaches(followerID, followeeID)
+            println("USER SERVICE: ✅ Follow relationship created")
+            true
+
+        } catch (e: Exception) {
+            handleError("Failed to follow user: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{followerID}/following/{followeeID}
+     * Unfollow a user with atomic updates and founder protection
+     */
+    suspend fun unfollowUser(followerID: String, followeeID: String): Boolean {
+        return try {
+            // FOUNDER PROTECTION: Prevent unfollowing James Fortune
+            val followeeDoc = db.collection("users").document(followeeID).get().await()
+            val followeeEmail = followeeDoc.getString("email")
+
+            if (followeeEmail == "james@stitchsocial.me") {
+                println("USER SERVICE: ⚠️ Cannot unfollow founder (James Fortune)")
+                handleError("You cannot unfollow the founder")
+                return false
+            }
+
+            println("USER SERVICE: User $followerID unfollowing $followeeID")
+
+            // Delete follow relationship from follower's subcollection
+            db.collection("users")
+                .document(followerID)
+                .collection("following")
+                .document(followeeID)
+                .delete()
+                .await()
+
+            // Delete reverse relationship from followee's subcollection
+            db.collection("users")
+                .document(followeeID)
+                .collection("followers")
+                .document(followerID)
+                .delete()
+                .await()
+
+            // Update follower count atomically
+            db.collection("users").document(followeeID)
+                .update("followerCount", FieldValue.increment(-1))
+                .await()
+
+            // Update following count atomically
+            db.collection("users").document(followerID)
+                .update("followingCount", FieldValue.increment(-1))
+                .await()
+
+            updateUserCaches(followerID, followeeID)
+            println("USER SERVICE: ✅ Unfollow completed")
+            true
+
+        } catch (e: Exception) {
+            handleError("Failed to unfollow user: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{followerID}/following/{followeeID}
+     * Check if user is following another user
+     */
+    suspend fun isFollowing(followerID: String, followeeID: String): Boolean {
+        return try {
+            val followDoc = db.collection("users")
+                .document(followerID)
+                .collection("following")
+                .document(followeeID)
+                .get()
+                .await()
+
+            followDoc.exists()
+
+        } catch (e: Exception) {
+            println("USER SERVICE: Error checking follow status: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{userID}/following
+     * Get list of users that the given user is following
+     */
+    suspend fun getFollowing(userID: String, limit: Int = 50): List<BasicUserInfo> {
+        return try {
+            val followDocs = db.collection("users")
+                .document(userID)
+                .collection("following")
+                .limit(limit.toLong())
+                .get()
+                .await()
+
+            val followeeIDs = followDocs.documents.map { it.id }
+            if (followeeIDs.isEmpty()) return emptyList()
+
+            batchLoadUsers(followeeIDs).values.toList()
+
+        } catch (e: Exception) {
+            println("USER SERVICE: Error loading following list: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure users/{userID}/followers
+     * Get list of users following the given user
+     */
+    suspend fun getFollowers(userID: String, limit: Int = 50): List<BasicUserInfo> {
+        return try {
+            val followDocs = db.collection("users")
+                .document(userID)
+                .collection("followers")
+                .limit(limit.toLong())
+                .get()
+                .await()
+
+            val followerIDs = followDocs.documents.map { it.id }
+            if (followerIDs.isEmpty()) return emptyList()
+
+            batchLoadUsers(followerIDs).values.toList()
+
+        } catch (e: Exception) {
+            println("USER SERVICE: Error loading followers list: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * ✅ FIXED: Using subcollection structure (2 queries)
+     * Refresh follower/following counts for a user by counting actual relationships
+     * Ensures counts are accurate after follow/unfollow operations
+     */
+    suspend fun refreshFollowerCounts(userID: String) {
+        try {
+            println("🔄 USER SERVICE: Refreshing follower counts for user $userID")
+
+            // Count actual followers
+            val followersSnapshot = db.collection("users")
+                .document(userID)
+                .collection("followers")
+                .get()
+                .await()
+
+            // Count actual following
+            val followingSnapshot = db.collection("users")
+                .document(userID)
+                .collection("following")
+                .get()
+                .await()
+
+            val actualFollowerCount = followersSnapshot.documents.size
+            val actualFollowingCount = followingSnapshot.documents.size
+
+            // Update the user document with accurate counts
+            db.collection("users")
+                .document(userID)
+                .update(
+                    mapOf(
+                        "followerCount" to actualFollowerCount,
+                        "followingCount" to actualFollowingCount,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+
+            println("✅ USER SERVICE: Updated counts - Followers: $actualFollowerCount, Following: $actualFollowingCount")
+
+        } catch (e: Exception) {
+            println("⚠️ USER SERVICE: Failed to refresh follower counts for $userID: ${e.message}")
+            throw e
+        }
+    }
+
+    // ===== ENGAGEMENT STATS & CLOUT SYSTEM =====
+
+    /**
+     * Update user engagement statistics (clout, views, etc.)
+     */
+    suspend fun updateEngagementStats(
+        userID: String,
+        cloutChange: Int = 0,
+        viewsChange: Int = 0,
+        hypesChange: Int = 0,
+        coolsChange: Int = 0
+    ): Boolean {
+        return try {
+            val updates = hashMapOf<String, Any>()
+
+            if (cloutChange != 0) updates["clout"] = FieldValue.increment(cloutChange.toLong())
+            if (viewsChange != 0) updates["totalViews"] = FieldValue.increment(viewsChange.toLong())
+            if (hypesChange != 0) updates["totalHypes"] = FieldValue.increment(hypesChange.toLong())
+            if (coolsChange != 0) updates["totalCools"] = FieldValue.increment(coolsChange.toLong())
+
+            if (updates.isNotEmpty()) {
+                updates["updatedAt"] = FieldValue.serverTimestamp()
+                db.collection("users").document(userID).update(updates).await()
+                invalidateUserCache(userID)
+                println("USER SERVICE: ✅ Engagement stats updated for $userID")
+                true
+            } else {
+                false
+            }
+
+        } catch (e: Exception) {
+            println("USER SERVICE: Error updating engagement stats: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Award clout to a user
+     */
+    suspend fun awardClout(userID: String, amount: Int): Boolean {
+        return updateEngagementStats(userID = userID, cloutChange = amount)
+    }
+
+    /**
+     * Get user's current clout score
+     */
+    suspend fun getUserClout(userID: String): Int {
+        return try {
+            val userDoc = db.collection("users").document(userID).get().await()
+            (userDoc.getLong("clout") ?: 0).toInt()
+        } catch (e: Exception) {
+            println("USER SERVICE: Error getting user clout: ${e.message}")
+            0
+        }
+    }
+
     // ===== USER SEARCH & DISCOVERY FUNCTIONALITY =====
 
     /**
      * Search users by username or display name with caching
-     * ENHANCED: Full search functionality for DiscoveryView integration
      */
     suspend fun searchUsers(query: String, limit: Int = 20): List<BasicUserInfo> {
         return try {
@@ -393,7 +837,7 @@ class UserService(private val context: Context) {
                 results.addAll(displayNameResults)
             }
 
-            // Strategy 3: Bio keyword search (if we still need more)
+            // Strategy 3: Bio keyword search (if still under limit)
             if (results.size < limit) {
                 val bioResults = searchUsersByBio(query, limit - results.size)
                 results.addAll(bioResults)
@@ -403,155 +847,82 @@ class UserService(private val context: Context) {
 
             // Cache results
             if (searchCache.size >= maxCacheEntries) {
-                // Remove oldest cache entry
-                val oldestKey = searchCache.minByOrNull { it.value.second }?.key
-                oldestKey?.let { searchCache.remove(it) }
+                // Remove oldest entries
+                val oldest = searchCache.entries.minByOrNull { it.value.second }
+                oldest?.let { searchCache.remove(it.key) }
             }
             searchCache[cacheKey] = Pair(finalResults, System.currentTimeMillis())
 
-            println("USER SERVICE: ✅ Found ${finalResults.size} users matching '$query'")
+            println("USER SERVICE: ✅ Found ${finalResults.size} users for '$query'")
             finalResults
 
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error searching users: ${e.message}")
-            handleError("User search failed: ${e.message}")
+            println("USER SERVICE: ❌ Search error: ${e.message}")
             emptyList()
         }
     }
 
     /**
-     * Search users by username (primary search method)
+     * Search users by username prefix
      */
     private suspend fun searchUsersByUsername(query: String, limit: Int): List<BasicUserInfo> {
         return try {
-            val normalizedQuery = query.lowercase().trim()
+            val queryLower = query.lowercase()
 
-            val usernameQuery = db.collection("users")
-                .whereGreaterThanOrEqualTo("username", normalizedQuery)
-                .whereLessThanOrEqualTo("username", normalizedQuery + "\uf8ff")
+            val users = db.collection("users")
+                .whereGreaterThanOrEqualTo("username", queryLower)
+                .whereLessThanOrEqualTo("username", queryLower + "\uf8ff")
                 .limit(limit.toLong())
+                .get()
+                .await()
 
-            val snapshot = usernameQuery.get().await()
-
-            val users = snapshot.documents.mapNotNull { doc ->
-                BasicUserInfo.fromFirebaseDocument(doc)
-            }
-
-            println("USER SERVICE: Found ${users.size} users by username search")
-            users
+            users.documents.mapNotNull { BasicUserInfo.fromFirebaseDocument(it) }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Username search failed: ${e.message}")
+            println("USER SERVICE: Username search error: ${e.message}")
             emptyList()
         }
     }
 
     /**
-     * Search users by display name (secondary search method)
+     * Search users by display name
      */
     private suspend fun searchUsersByDisplayName(query: String, limit: Int): List<BasicUserInfo> {
         return try {
-            val normalizedQuery = query.lowercase().trim()
-
-            // Firebase doesn't support case-insensitive search on displayName directly
-            // So we'll get all users and filter locally (for small datasets)
-            // TODO: Implement Algolia or similar for better text search in production
-
-            val snapshot = db.collection("users")
-                .limit(200) // Limit to prevent huge downloads
+            val users = db.collection("users")
+                .orderBy("displayName")
+                .limit(limit.toLong())
                 .get()
                 .await()
 
-            val users = snapshot.documents.mapNotNull { doc ->
+            users.documents.mapNotNull { doc ->
                 val user = BasicUserInfo.fromFirebaseDocument(doc)
-                // Filter by display name containing query
-                if (user != null && user.displayName.lowercase().contains(normalizedQuery)) {
-                    user
-                } else {
-                    null
-                }
-            }.take(limit)
-
-            println("USER SERVICE: Found ${users.size} users by display name search")
-            users
+                if (user?.displayName?.contains(query, ignoreCase = true) == true) user else null
+            }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Display name search failed: ${e.message}")
+            println("USER SERVICE: Display name search error: ${e.message}")
             emptyList()
         }
     }
 
     /**
-     * Search users by bio keywords (tertiary search method)
+     * Search users by bio keywords
      */
     private suspend fun searchUsersByBio(query: String, limit: Int): List<BasicUserInfo> {
         return try {
-            val normalizedQuery = query.lowercase().trim()
-
-            // Similar to display name search - get recent users and filter locally
-            val snapshot = db.collection("users")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(200)
+            val users = db.collection("users")
+                .limit(limit.toLong())
                 .get()
                 .await()
 
-            val users = snapshot.documents.mapNotNull { doc ->
+            users.documents.mapNotNull { doc ->
                 val user = BasicUserInfo.fromFirebaseDocument(doc)
-                // Filter by bio containing query
-                if (user != null && user.bio.lowercase().contains(normalizedQuery)) {
-                    user
-                } else {
-                    null
-                }
-            }.take(limit)
-
-            println("USER SERVICE: Found ${users.size} users by bio search")
-            users
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Bio search failed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Get search suggestions based on query
-     */
-    suspend fun getUserSearchSuggestions(query: String): List<String> {
-        return try {
-            if (query.length < 2) return emptyList()
-
-            val normalizedQuery = query.lowercase().trim()
-            val suggestions = mutableSetOf<String>()
-
-            // Get recent users to generate suggestions
-            val snapshot = db.collection("users")
-                .orderBy("lastActiveAt", Query.Direction.DESCENDING)
-                .limit(50)
-                .get()
-                .await()
-
-            snapshot.documents.forEach { doc ->
-                val username = doc.getString("username")
-                val displayName = doc.getString("displayName")
-
-                username?.let {
-                    if (it.startsWith(normalizedQuery) && it != normalizedQuery) {
-                        suggestions.add("@$it")
-                    }
-                }
-
-                displayName?.let {
-                    if (it.lowercase().startsWith(normalizedQuery) && it.lowercase() != normalizedQuery) {
-                        suggestions.add(it)
-                    }
-                }
+                if (user?.bio?.contains(query, ignoreCase = true) == true) user else null
             }
 
-            suggestions.take(5).toList()
-
         } catch (e: Exception) {
-            println("USER SERVICE: Error getting user suggestions: ${e.message}")
+            println("USER SERVICE: Bio search error: ${e.message}")
             emptyList()
         }
     }
@@ -559,298 +930,37 @@ class UserService(private val context: Context) {
     /**
      * Clear search cache
      */
-    fun clearSearchCache() {
+    private fun clearSearchCache() {
         searchCache.clear()
         println("USER SERVICE: Search cache cleared")
     }
 
-    // ===== SOCIAL FOLLOWING SYSTEM =====
-
     /**
-     * Follow a user with atomic counter updates
-     */
-    suspend fun followUser(followerID: String, followeeID: String): Boolean {
-        return try {
-            if (followerID == followeeID) {
-                println("USER SERVICE: Cannot follow yourself")
-                return false
-            }
-
-            val isCurrentlyFollowing = isFollowing(followerID, followeeID)
-            if (isCurrentlyFollowing) {
-                println("USER SERVICE: Already following $followeeID")
-                return true
-            }
-
-            // Use batch write for atomic updates
-            val batch = db.batch()
-
-            // Create follow relationship document
-            val followDocID = "${followerID}_${followeeID}"
-            val followRef = db.collection("following").document(followDocID)
-            val followData = mapOf(
-                "followerID" to followerID,
-                "followingID" to followeeID,
-                "isActive" to true,
-                "createdAt" to Timestamp.now()
-            )
-            batch.set(followRef, followData)
-
-            // Update follower's following count
-            val followerRef = db.collection("users").document(followerID)
-            batch.update(followerRef, "followingCount", FieldValue.increment(1))
-
-            // Update followee's follower count
-            val followeeRef = db.collection("users").document(followeeID)
-            batch.update(followeeRef, "followerCount", FieldValue.increment(1))
-
-            // Commit all updates atomically
-            batch.commit().await()
-
-            // Update caches
-            updateUserCaches(followerID, followeeID)
-
-            println("USER SERVICE: $followerID successfully followed $followeeID")
-            true
-
-        } catch (e: Exception) {
-            handleError("Failed to follow user: ${e.message}")
-            false
-        }
-    }
-
-    /**
-     * Unfollow a user with atomic counter updates
-     */
-    suspend fun unfollowUser(followerID: String, followeeID: String): Boolean {
-        return try {
-            val isCurrentlyFollowing = isFollowing(followerID, followeeID)
-            if (!isCurrentlyFollowing) {
-                println("USER SERVICE: Not currently following $followeeID")
-                return true
-            }
-
-            // Use batch write for atomic updates
-            val batch = db.batch()
-
-            // Remove follow relationship document
-            val followDocID = "${followerID}_${followeeID}"
-            val followRef = db.collection("following").document(followDocID)
-            batch.delete(followRef)
-
-            // Update follower's following count (prevent negative)
-            val followerRef = db.collection("users").document(followerID)
-            batch.update(followerRef, "followingCount", FieldValue.increment(-1))
-
-            // Update followee's follower count (prevent negative)
-            val followeeRef = db.collection("users").document(followeeID)
-            batch.update(followeeRef, "followerCount", FieldValue.increment(-1))
-
-            // Commit all updates atomically
-            batch.commit().await()
-
-            // Update caches
-            updateUserCaches(followerID, followeeID)
-
-            println("USER SERVICE: $followerID successfully unfollowed $followeeID")
-            true
-
-        } catch (e: Exception) {
-            handleError("Failed to unfollow user: ${e.message}")
-            false
-        }
-    }
-
-    /**
-     * Check if user is following another user
-     */
-    suspend fun isFollowing(followerID: String, followeeID: String): Boolean {
-        return try {
-            val followDocID = "${followerID}_${followeeID}"
-            val document = db.collection("following").document(followDocID).get().await()
-
-            document.exists() && (document.data?.get("isActive") as? Boolean ?: false)
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Error checking following status: ${e.message}")
-            false
-        }
-    }
-
-    /**
-     * Get list of users that this user is following
-     */
-    suspend fun getFollowingList(userID: String, limit: Int = 50): List<BasicUserInfo> {
-        return try {
-            println("USER SERVICE: Loading following list for user $userID")
-
-            val followingSnapshot = db.collection("following")
-                .whereEqualTo("followerID", userID)
-                .whereEqualTo("isActive", true)
-                .limit(limit.toLong())
-                .get()
-                .await()
-
-            val following = mutableListOf<BasicUserInfo>()
-
-            for (doc in followingSnapshot.documents) {
-                val followingUserID = doc.getString("followingID")
-                if (followingUserID != null) {
-                    getUserProfile(followingUserID)?.let { user ->
-                        following.add(user)
-                    }
-                }
-            }
-
-            println("USER SERVICE: Loaded ${following.size} following users")
-            following
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Failed to get following list: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Get list of users following this user
-     */
-    suspend fun getFollowersList(userID: String, limit: Int = 50): List<BasicUserInfo> {
-        return try {
-            println("USER SERVICE: Loading followers list for user $userID")
-
-            val followersSnapshot = db.collection("following")
-                .whereEqualTo("followingID", userID)
-                .whereEqualTo("isActive", true)
-                .limit(limit.toLong())
-                .get()
-                .await()
-
-            val followers = mutableListOf<BasicUserInfo>()
-
-            for (doc in followersSnapshot.documents) {
-                val followerID = doc.getString("followerID")
-                if (followerID != null) {
-                    getUserProfile(followerID)?.let { user ->
-                        followers.add(user)
-                    }
-                }
-            }
-
-            println("USER SERVICE: Loaded ${followers.size} followers")
-            followers
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Failed to get followers list: ${e.message}")
-            emptyList()
-        }
-    }
-
-    /**
-     * Get following IDs only (for feed filtering)
-     */
-    suspend fun getFollowingIDs(userID: String): List<String> {
-        return try {
-            println("USER SERVICE: Loading following IDs for user: $userID")
-
-            val followingSnapshot = db.collection("following")
-                .whereEqualTo("followerID", userID)
-                .whereEqualTo("isActive", true)
-                .get()
-                .await()
-
-            val followingIDs = followingSnapshot.documents.mapNotNull { doc ->
-                doc.getString("followingID")
-            }
-
-            println("USER SERVICE: Found ${followingIDs.size} following users")
-            followingIDs
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Failed to get following IDs: ${e.message}")
-            emptyList()
-        }
-    }
-
-    // ===== SOCIAL STATS UPDATES =====
-
-    /**
-     * Increment user's video count
-     */
-    suspend fun incrementVideoCount(userID: String) {
-        try {
-            db.collection("users").document(userID)
-                .update("videoCount", FieldValue.increment(1))
-                .await()
-
-            invalidateUserCache(userID)
-            println("USER SERVICE: Incremented video count for user $userID")
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Error incrementing video count: ${e.message}")
-        }
-    }
-
-    /**
-     * Update user engagement statistics
-     */
-    suspend fun updateEngagementStats(userID: String, newHypes: Int, newCools: Int) {
-        try {
-            val updates = mapOf(
-                "totalHypesReceived" to FieldValue.increment(newHypes.toLong()),
-                "totalCoolsReceived" to FieldValue.increment(newCools.toLong()),
-                "lastEngagementAt" to Timestamp.now(),
-                "updatedAt" to Timestamp.now()
-            )
-
-            db.collection("users").document(userID).update(updates).await()
-            invalidateUserCache(userID)
-
-            println("USER SERVICE: Updated engagement stats for user $userID (+$newHypes hypes, +$newCools cools)")
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Error updating engagement stats: ${e.message}")
-        }
-    }
-
-    /**
-     * Update last active timestamp
-     */
-    suspend fun updateLastActive(userID: String) {
-        try {
-            db.collection("users").document(userID)
-                .update("lastActiveAt", Timestamp.now())
-                .await()
-
-            println("USER SERVICE: Updated last active for user $userID")
-
-        } catch (e: Exception) {
-            println("USER SERVICE: Error updating last active: ${e.message}")
-        }
-    }
-
-    // ===== DISCOVERY & RECOMMENDATIONS =====
-
-    /**
-     * Get suggested users for discovery (users with similar interests)
+     * ✅ FIXED: Using subcollection structure users/{userID}/following
+     * Get suggested users for discovery (trending, new, etc.)
      */
     suspend fun getSuggestedUsers(forUserID: String, limit: Int = 20): List<BasicUserInfo> {
         return try {
             println("USER SERVICE: Getting suggested users for $forUserID")
 
-            // Get user's current following to exclude them
-            val followingIDs = getFollowingIDs(forUserID).toSet()
+            // Get users the current user is already following
+            val followingDocs = db.collection("users")
+                .document(forUserID)
+                .collection("following")
+                .get()
+                .await()
 
-            // Strategy: Get popular users who are not being followed
+            val followingIDs = followingDocs.documents.map { it.id }.toSet()
+
+            // Get suggested users - prioritize by follower count
             val suggestedUsers = db.collection("users")
-                .whereGreaterThan("followerCount", 10) // Users with some following
                 .orderBy("followerCount", Query.Direction.DESCENDING)
-                .limit((limit * 3).toLong()) // Get more to filter out following
+                .limit((limit * 3).toLong())
                 .get()
                 .await()
 
             val users = suggestedUsers.documents.mapNotNull { doc ->
                 val user = BasicUserInfo.fromFirebaseDocument(doc)
-                // Exclude current user and users already being followed
                 if (user != null && user.id != forUserID && user.id !in followingIDs) {
                     user
                 } else {
@@ -879,7 +989,7 @@ class UserService(private val context: Context) {
     private suspend fun updateUserCaches(followerID: String, followeeID: String) {
         invalidateUserCache(followerID)
         invalidateUserCache(followeeID)
-        clearSearchCache() // Clear search cache when user relationships change
+        clearSearchCache()
     }
 
     private fun invalidateUserCache(userID: String) {
@@ -900,5 +1010,6 @@ class UserService(private val context: Context) {
         println("USER SERVICE: Hello World - Enhanced user management ready!")
         println("USER SERVICE: Features: Profile editing, image upload, social following, engagement stats, user search, discovery")
         println("USER SERVICE: Integration: Cache-aware, atomic updates, social discovery, search optimization")
+        println("USER SERVICE: ✅ FIXED: Now using subcollection structure users/{userID}/following/{followeeID}")
     }
 }

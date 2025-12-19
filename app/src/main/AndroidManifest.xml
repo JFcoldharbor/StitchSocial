@@ -15,6 +15,10 @@
     <!-- VIDEO SURFACE FIX: Wake lock for video playback -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- ✅ FCM PERMISSIONS (NEW) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+
     <!-- Camera hardware -->
     <uses-feature
         android:name="android.hardware.camera"
@@ -47,6 +51,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ✅ FCM SERVICE (NEW) -->
+        <service
+            android:name=".services.FCMService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- ✅ FCM DEFAULT NOTIFICATION ICON (Using built-in icon) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@android:drawable/ic_dialog_info" />
+
+        <!-- ✅ FCM DEFAULT NOTIFICATION COLOR (Using built-in color) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@android:color/holo_blue_light" />
+
+        <!-- ✅ FCM DEFAULT NOTIFICATION CHANNEL (NEW) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="stitch_notifications" />
 
     </application>
 

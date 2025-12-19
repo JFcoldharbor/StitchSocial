@@ -1,10 +1,10 @@
 /*
- * CameraView.kt - SAMSUNG REC INDICATOR FIX APPLIED
+ * CameraView.kt - GALLERY PICKER INTEGRATION FIXED
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Camera recording interface with complete VideoCoordinator integration
- * FIXED: Samsung device REC indicator removed via optimized CameraX config
- * UPDATED: Added tier-based recording duration limits and auto-stop
+ * FIXED: Gallery picker now routes through NavigationCoordinator for proper processing
+ * UPDATED: Gallery videos go through same parallel processing pipeline as recorded videos
  */
 
 package com.stitchsocial.club.views
@@ -50,7 +50,7 @@ import com.stitchsocial.club.viewmodels.CameraViewModel
 
 /**
  * Complete Camera recording interface with VideoCoordinator pipeline integration
- * SAMSUNG FIX: Optimized VideoCapture configuration prevents REC indicator overlay
+ * GALLERY FIX: Gallery button now triggers NavigationCoordinator for proper processing
  */
 @Composable
 fun CameraView(
@@ -61,6 +61,7 @@ fun CameraView(
     onCancel: () -> Unit,
     onStopAllVideos: () -> Unit = {},
     onDisposeAllVideos: () -> Unit = {},
+    onGalleryRequested: () -> Unit = {},  // NEW: Gallery picker callback
     modifier: Modifier = Modifier,
     viewModel: CameraViewModel = viewModel()
 ) {
@@ -100,32 +101,6 @@ fun CameraView(
         onStopAllVideos()
         onDisposeAllVideos()
         println("CAMERA: Stopped and disposed all background videos")
-    }
-
-    // Video picker launcher
-    val videoPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { selectedVideoUri ->
-            println("CAMERA: Video selected from gallery: $selectedVideoUri")
-
-            try {
-                println("CAMERA: Processing selected video from gallery")
-
-                val videoMetadata = createVideoMetadataFromUri(
-                    uri = selectedVideoUri,
-                    recordingContext = recordingContext,
-                    parentVideo = parentVideo,
-                    context = context
-                )
-
-                onVideoRecorded(videoMetadata)
-                println("CAMERA: Gallery video sent to VideoCoordinator pipeline")
-
-            } catch (e: Exception) {
-                println("CAMERA: Failed to process gallery video - ${e.message}")
-            }
-        }
     }
 
     // Camera permission launcher
@@ -202,6 +177,14 @@ fun CameraView(
                 println("CAMERA: Camera flip failed - ${exc.message}")
             }
         }
+    }
+
+    // ===== GALLERY PICKER HANDLER (FIXED) =====
+
+    val handleGalleryRequest: () -> Unit = {
+        println("CAMERA: Gallery button pressed - closing camera and triggering gallery picker")
+        onCancel() // Close camera first
+        onGalleryRequested() // Trigger NavigationCoordinator gallery flow
     }
 
     // ===== RECORDING PIPELINE =====
@@ -367,14 +350,14 @@ fun CameraView(
                 )
             }
 
-            // Bottom controls
+            // Bottom controls - FIXED: Gallery uses NavigationCoordinator
             CameraBottomControls(
                 isRecording = isRecording,
                 onStartRecording = startRecording,
                 onStopRecording = stopRecording,
                 onCancel = cancelRecording,
                 onFlipCamera = flipCamera,
-                onOpenGallery = { videoPickerLauncher.launch("video/*") },
+                onOpenGallery = handleGalleryRequest,  // FIXED: Routes through NavigationCoordinator
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
@@ -405,7 +388,7 @@ fun CameraView(
 
 // ===== HELPER FUNCTIONS =====
 
-fun createCompleteRecordedVideoData(
+private fun createCompleteRecordedVideoData(
     recordingContext: RecordingContext,
     parentVideo: CoreVideoMetadata?,
     videoFile: File,
@@ -447,76 +430,6 @@ fun createCompleteRecordedVideoData(
                 fileSize = videoFile.length()
             )
         }
-    }
-}
-
-private fun createVideoMetadataFromUri(
-    uri: Uri,
-    recordingContext: RecordingContext,
-    parentVideo: CoreVideoMetadata?,
-    context: android.content.Context
-): CoreVideoMetadata {
-    val timestamp = System.currentTimeMillis()
-    val videoId = "gallery_${timestamp}"
-
-    println("CAMERA: Creating video data from gallery URI:")
-    println("  - Context: $recordingContext")
-    println("  - Parent: ${parentVideo?.title ?: "None"}")
-    println("  - URI: $uri")
-
-    val duration = getVideoDurationFromUri(context, uri)
-    val fileSize = getFileSizeFromUri(context, uri)
-
-    return when (recordingContext) {
-        RecordingContext.NewThread -> {
-            CoreVideoMetadata.newThread(
-                id = videoId,
-                title = "Gallery Video",
-                videoURL = uri.toString(),
-                thumbnailURL = "",
-                creatorID = "current_user_id",
-                creatorName = "Current User",
-                duration = duration,
-                fileSize = fileSize
-            )
-        }
-        else -> {
-            CoreVideoMetadata.childReply(
-                id = videoId,
-                title = if (parentVideo != null) "Reply to ${parentVideo.title}" else "Reply Video",
-                videoURL = uri.toString(),
-                thumbnailURL = "",
-                creatorID = "current_user_id",
-                creatorName = "Current User",
-                parentThreadID = parentVideo?.id ?: "unknown_thread",
-                duration = duration,
-                fileSize = fileSize
-            )
-        }
-    }
-}
-
-private fun getVideoDurationFromUri(context: android.content.Context, uri: Uri): Double {
-    return try {
-        val retriever = android.media.MediaMetadataRetriever()
-        retriever.setDataSource(context, uri)
-        val duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        retriever.release()
-        duration / 1000.0
-    } catch (e: Exception) {
-        println("CAMERA: Failed to get video duration - ${e.message}")
-        30.0
-    }
-}
-
-private fun getFileSizeFromUri(context: android.content.Context, uri: Uri): Long {
-    return try {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            inputStream.available().toLong()
-        } ?: 1024L
-    } catch (e: Exception) {
-        println("CAMERA: Failed to get file size - ${e.message}")
-        1024L
     }
 }
 
@@ -700,6 +613,7 @@ private fun CameraBottomControls(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // GALLERY BUTTON - Routes through NavigationCoordinator
         IconButton(
             onClick = onOpenGallery,
             modifier = Modifier
@@ -709,12 +623,13 @@ private fun CameraBottomControls(
         ) {
             Icon(
                 imageVector = Icons.Filled.PhotoLibrary,
-                contentDescription = "Select Video",
+                contentDescription = "Select Video from Gallery",
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
             )
         }
 
+        // RECORD BUTTON
         IconButton(
             onClick = if (isRecording) onStopRecording else onStartRecording,
             modifier = Modifier
@@ -730,6 +645,7 @@ private fun CameraBottomControls(
             )
         }
 
+        // FLIP CAMERA BUTTON
         IconButton(
             onClick = onFlipCamera,
             modifier = Modifier
