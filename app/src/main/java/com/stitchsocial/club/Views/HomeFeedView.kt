@@ -35,15 +35,23 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import android.content.Intent
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 // Foundation imports
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.ContentType
+import com.stitchsocial.club.foundation.UserTier
+
+// Camera imports
+import com.stitchsocial.club.camera.RecordingContext
+import com.stitchsocial.club.camera.RecordingContextFactory
 
 // ViewModel imports
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
+import com.stitchsocial.club.FollowManager
 
 /**
  * HomeFeedView with FOLLOWING feed ONLY
@@ -70,14 +78,32 @@ fun HomeFeedView(
         }
     }
     val iconManager = remember { FloatingIconManager() }
+    val followManager = remember { FollowManager(context) }
+
+    // Helper to pause all videos
+    val pauseAllVideos: () -> Unit = {
+        val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
+        LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
+        println("📹 PAUSE ALL VIDEOS broadcast sent")
+    }
 
     var threads by remember { mutableStateOf<List<ThreadData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var followingCount by remember { mutableStateOf(0) }
 
+    // Creator profile state - when set, shows CreatorProfileView
+    var showingCreatorProfileID by remember { mutableStateOf<String?>(null) }
+
     val verticalPagerState = rememberPagerState(pageCount = { threads.size })
     val scope = rememberCoroutineScope()
+
+    // Pause videos when creator profile overlay is shown
+    LaunchedEffect(showingCreatorProfileID) {
+        if (showingCreatorProfileID != null) {
+            pauseAllVideos()
+        }
+    }
 
     LaunchedEffect(userID) {
         try {
@@ -176,12 +202,16 @@ fun HomeFeedView(
             )
 
             else -> {
+                // Check if any overlay is showing - pause videos when true
+                val isOverlayShowing = showingCreatorProfileID != null
+
                 VerticalPager(
                     state = verticalPagerState,
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     val thread = threads[page]
-                    val isActive = page == verticalPagerState.currentPage
+                    // Video should only be active if it's the current page AND no overlay is showing
+                    val isActive = page == verticalPagerState.currentPage && !isOverlayShowing
 
                     ThreadContainer(
                         thread = thread,
@@ -189,11 +219,52 @@ fun HomeFeedView(
                         userID = userID,
                         engagementViewModel = engagementViewModel,
                         iconManager = iconManager,
-                        navigationCoordinator = navigationCoordinator
+                        followManager = followManager,
+                        navigationCoordinator = navigationCoordinator,
+                        onCreatorProfileTap = { creatorID ->
+                            pauseAllVideos()
+                            showingCreatorProfileID = creatorID
+                        },
+                        onStitchTap = { video ->
+                            pauseAllVideos()
+                            // Use NavigationCoordinator modal system for proper flow
+                            val isOwnVideo = video.creatorID == userID
+                            val recordingContext = if (isOwnVideo) {
+                                RecordingContextFactory.createContinueThread(
+                                    threadId = video.threadID ?: video.id,
+                                    creatorName = video.creatorName,
+                                    title = video.title
+                                )
+                            } else {
+                                RecordingContextFactory.createStitchToThread(
+                                    threadId = video.threadID ?: video.id,
+                                    creatorName = video.creatorName,
+                                    title = video.title
+                                )
+                            }
+                            navigationCoordinator?.showRecordingModal(recordingContext, video)
+                        }
                     )
                 }
             }
         }
+
+        // Creator Profile Full Screen Overlay
+        showingCreatorProfileID?.let { profileUserID ->
+            CreatorProfileView(
+                userID = profileUserID,
+                currentUserID = userID,
+                navigationCoordinator = navigationCoordinator,
+                onDismiss = { showingCreatorProfileID = null },
+                onVideoTap = { video ->
+                    // TODO: Handle video tap from profile
+                    println("🎬 Tapped video: ${video.id}")
+                }
+            )
+        }
+
+        // NOTE: CameraView is now handled by ModalOverlay in MainActivity
+        // The navigationCoordinator.showRecordingModal() call above triggers it
     }
 }
 
@@ -205,7 +276,10 @@ private fun ThreadContainer(
     userID: String,
     engagementViewModel: EngagementViewModel,
     iconManager: FloatingIconManager,
-    navigationCoordinator: NavigationCoordinator?
+    followManager: FollowManager,
+    navigationCoordinator: NavigationCoordinator?,
+    onCreatorProfileTap: (String) -> Unit = {},
+    onStitchTap: (CoreVideoMetadata) -> Unit = {}
 ) {
     val allVideos = remember(thread) {
         listOf(thread.parentVideo) + thread.childVideos
@@ -243,20 +317,24 @@ private fun ThreadContainer(
                     threadVideo = if (isChildVideo) parentVideo else null,  // ✅ Pass parent for stitch display
                     engagementViewModel = engagementViewModel,
                     iconManager = iconManager,
+                    followManager = followManager,
                     navigationCoordinator = navigationCoordinator,
                     onAction = { action ->
                         when (action) {
                             is OverlayAction.NavigateToProfile -> {
                                 println("👤 Navigate to profile: ${action.userID}")
-                                navigationCoordinator?.navigateTo(
-                                    com.stitchsocial.club.coordination.NavigationDestination.UserProfile(action.userID)
-                                )
+                                // Show CreatorProfileView via callback
+                                onCreatorProfileTap(action.userID)
                             }
                             is OverlayAction.Engagement -> {
                                 println("⚡ Engagement: ${action.type}")
                             }
                             is OverlayAction.NavigateToThread -> {
                                 println("🧵 Navigate to thread view")
+                            }
+                            is OverlayAction.StitchRecording -> {
+                                println("🎬 STITCH RECORDING - Opening camera for video ${video.id}")
+                                onStitchTap(video)
                             }
                             else -> {}
                         }
@@ -282,35 +360,6 @@ private fun ThreadContainer(
                                 else Color.White.copy(alpha = 0.5f),
                                 shape = CircleShape
                             )
-                    )
-                }
-            }
-        }
-
-        // Swipe hint for parent with children (show arrow on right edge)
-        if (isOnParent && hasChildren) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(8.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = "${thread.childVideos.size}",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Icon(
-                        Icons.Default.ChevronRight,
-                        contentDescription = "Swipe for replies",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

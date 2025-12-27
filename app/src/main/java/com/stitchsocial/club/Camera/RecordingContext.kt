@@ -61,7 +61,7 @@ fun RecordingContext.getButtonText(): String {
     return when (this) {
         is RecordingContext.NewThread -> "Create Thread"
         is RecordingContext.StitchToThread -> "Create Stitch"
-        is RecordingContext.ReplyToVideo -> "Create Reply" 
+        is RecordingContext.ReplyToVideo -> "Create Reply"
         is RecordingContext.ContinueThread -> "Continue Thread"
     }
 }
@@ -114,11 +114,11 @@ fun RecordingContext.getContextColor(): Color {
 // MARK: - Context Creation Helpers
 
 object RecordingContextFactory {
-    
+
     fun createNewThread(): RecordingContext {
         return RecordingContext.NewThread
     }
-    
+
     fun createStitchToThread(threadId: String, creatorName: String, title: String): RecordingContext {
         val threadInfo = ThreadInfo(
             title = title,
@@ -129,7 +129,7 @@ object RecordingContextFactory {
         )
         return RecordingContext.StitchToThread(threadId, threadInfo)
     }
-    
+
     fun createReplyToVideo(videoId: String, creatorName: String, title: String): RecordingContext {
         val videoInfo = VideoInfo(
             title = title,
@@ -138,7 +138,7 @@ object RecordingContextFactory {
         )
         return RecordingContext.ReplyToVideo(videoId, videoInfo)
     }
-    
+
     fun createContinueThread(threadId: String, creatorName: String, title: String): RecordingContext {
         val threadInfo = ThreadInfo(
             title = title,

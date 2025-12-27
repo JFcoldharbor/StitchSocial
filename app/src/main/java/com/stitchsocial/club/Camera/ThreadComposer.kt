@@ -3,8 +3,8 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * CRITICAL FIXES:
- * ✅ Uses VideoAnalysisResult from coordination package (correct properties)
- * ✅ All property references resolve: suggestedTitle, suggestedDescription, suggestedHashtags
+ * ✅ Uses VideoAnalysisResult from services package (correct properties)
+ * ✅ All property references resolve: title, description, hashtags
  * ✅ Continuously observes AI analysis results
  * ✅ Video preview at 50% width
  */
@@ -44,14 +44,14 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
-// FIXED IMPORTS - Correct coordination package
+// FIXED IMPORTS - Use services package VideoAnalysisResult
 import com.stitchsocial.club.foundation.*
-import com.stitchsocial.club.coordination.VideoAnalysisResult
+import com.stitchsocial.club.services.VideoAnalysisResult
 import com.stitchsocial.club.coordination.VideoCoordinator
 
 /**
  * ThreadComposer - Complete video editing UI after parallel processing
- * Uses VideoAnalysisResult from coordination package with correct properties
+ * Uses VideoAnalysisResult from services package with correct properties
  */
 @Composable
 fun ThreadComposer(
@@ -183,17 +183,17 @@ fun ThreadComposer(
         aiResultFromCoordinator?.let { result ->
             // Only update if we don't have content yet or still have mock content
             if (title.isBlank() || title == "AI Generated Title" || !hasAnalyzed) {
-                title = result.suggestedTitle
-                description = result.suggestedDescription
-                hashtags = result.suggestedHashtags
+                title = result.title
+                description = result.description
+                hashtags = result.hashtags
                 analysisResult = result
                 hasAnalyzed = true
                 isAnalyzing = false
 
                 println("THREAD COMPOSER: Updated with REAL AI results:")
-                println("  Title: '${result.suggestedTitle}'")
-                println("  Description: '${result.suggestedDescription}'")
-                println("  Hashtags: ${result.suggestedHashtags}")
+                println("  Title: '${result.title}'")
+                println("  Description: '${result.description}'")
+                println("  Hashtags: ${result.hashtags}")
             }
         }
     }
@@ -202,9 +202,9 @@ fun ThreadComposer(
     LaunchedEffect(aiResult) {
         aiResult?.let { result ->
             if (title.isBlank()) {
-                title = result.suggestedTitle
-                description = result.suggestedDescription
-                hashtags = result.suggestedHashtags
+                title = result.title
+                description = result.description
+                hashtags = result.hashtags
                 analysisResult = result
                 hasAnalyzed = true
                 println("THREAD COMPOSER: Pre-filled with passed AI results")

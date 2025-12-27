@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.*
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.VideoManager
 import com.stitchsocial.club.coordination.VideoCoordinator
-import com.stitchsocial.club.coordination.VideoAnalysisResult
 import com.stitchsocial.club.camera.RecordingContext
 import java.util.UUID
 
@@ -224,6 +223,18 @@ class NavigationCoordinator(
         _recordingContext.value = context
         showModal(ModalState.RECORDING, mapOf("context" to context))
         println("🧭 RECORDING: Modal shown for ${context.displayName}")
+    }
+
+    /**
+     * Show recording modal with camera.RecordingContext and parent video (for stitching)
+     */
+    fun showRecordingModal(recordingContext: RecordingContext, parentVideo: CoreVideoMetadata? = null) {
+        val data = mutableMapOf<String, Any>()
+        data["context"] = recordingContext
+        parentVideo?.let { data["parentVideo"] = it }
+
+        showModal(ModalState.RECORDING, data)
+        println("🧭 RECORDING: Modal shown for stitch/continue with parentVideo=${parentVideo?.id}")
     }
 
     /**

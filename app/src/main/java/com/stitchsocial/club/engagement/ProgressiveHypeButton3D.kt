@@ -34,6 +34,7 @@ import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.EngagementConfig
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -56,11 +57,14 @@ fun ProgressiveHypeButton3D(
     var isPressed by remember { mutableStateOf(false) }
     var buttonPosition by remember { mutableStateOf(Offset.Zero) }
 
-    // 🔥 LOCAL COUNT: Starts from video count, increments on tap
-    var displayCount by remember(videoID) { mutableStateOf(hypeCount) }
+    // 🔥 PERSISTENT COUNT: Use rememberSaveable to survive recomposition
+    var localTapIncrement by rememberSaveable(videoID) { mutableStateOf(0) }
+
+    // Display count = passed-in count + local increment for immediate feedback
+    val displayCount = hypeCount + localTapIncrement
 
     // Track if this is user's first tap on this video
-    var userTapCount by remember(videoID) { mutableStateOf(0) }
+    var userTapCount by rememberSaveable(videoID) { mutableStateOf(0) }
 
     // Pulse animation
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -170,8 +174,8 @@ fun ProgressiveHypeButton3D(
                             isPressed = true
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                            // 🔥 INCREMENT COUNT IMMEDIATELY
-                            displayCount += visualMultiplier
+                            // 🔥 INCREMENT LOCAL TAP COUNT FOR IMMEDIATE VISUAL FEEDBACK
+                            localTapIncrement += visualMultiplier
                             userTapCount++
 
                             // 🔥 Spawn floating flame

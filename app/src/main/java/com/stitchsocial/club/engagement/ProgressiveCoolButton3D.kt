@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.foundation.UserTier
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -55,14 +56,17 @@ fun ProgressiveCoolButton3D(
     var isPressed by remember { mutableStateOf(false) }
     var buttonPosition by remember { mutableStateOf(Offset.Zero) }
 
-    // ❄️ LOCAL COUNT: Starts from video count, increments on tap
-    var displayCount by remember(videoID) { mutableStateOf(coolCount) }
+    // ❄️ PERSISTENT COUNT: Use rememberSaveable to survive recomposition
+    var localTapIncrement by rememberSaveable(videoID) { mutableStateOf(0) }
+
+    // Display count = passed-in count + local increment for immediate feedback
+    val displayCount = coolCount + localTapIncrement
 
     // Track user's taps for first-tap detection
-    var userTapCount by remember(videoID) { mutableStateOf(0) }
+    var userTapCount by rememberSaveable(videoID) { mutableStateOf(0) }
 
-    // Anti-troll
-    var userCoolTaps by remember(videoID) { mutableStateOf(0) }
+    // Anti-troll (persistent to prevent circumvention by scrolling)
+    var userCoolTaps by rememberSaveable(videoID) { mutableStateOf(0) }
     var showTrollWarning by remember { mutableStateOf(false) }
     val warningThreshold = 80
     val blockingThreshold = 100
@@ -218,8 +222,8 @@ fun ProgressiveCoolButton3D(
                                 isPressed = true
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                                // ❄️ INCREMENT COUNT IMMEDIATELY
-                                displayCount += 1
+                                // ❄️ INCREMENT LOCAL TAP COUNT FOR IMMEDIATE VISUAL FEEDBACK
+                                localTapIncrement += 1
                                 userTapCount++
 
                                 // ❄️ Spawn floating snowflake

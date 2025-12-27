@@ -28,6 +28,7 @@ import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AIVideoAnalyzer
+import com.stitchsocial.club.services.VideoAnalysisResult
 
 // Firebase imports
 import com.google.firebase.firestore.FirebaseFirestore
@@ -165,7 +166,7 @@ class VideoCoordinator(
             println("✅ VIDEO COORDINATOR: Parallel processing complete in ${totalTime}ms")
             println("🎤 Audio: $audioResult")
             println("🗜️ Compressed: $compressedPath")
-            println("🤖 AI: ${aiResult.suggestedTitle}")
+            println("🤖 AI: ${aiResult.title}")
 
         } catch (e: Exception) {
             println("❌ VIDEO COORDINATOR: Processing failed - ${e.message}")
@@ -565,11 +566,7 @@ class VideoCoordinator(
 
                 if (aiResult != null) {
                     println("✅ AI: Real analysis complete - ${aiResult.title}")
-                    VideoAnalysisResult(
-                        suggestedTitle = aiResult.title,
-                        suggestedDescription = aiResult.description,
-                        suggestedHashtags = aiResult.hashtags
-                    )
+                    aiResult  // Return directly - already correct type
                 } else {
                     println("⚠️ AI: Returned null, using fallback")
                     generateFallbackAI()
@@ -597,9 +594,9 @@ class VideoCoordinator(
         }
 
         return VideoAnalysisResult(
-            suggestedTitle = "AI Generated Title",
-            suggestedDescription = "AI generated description for this amazing video",
-            suggestedHashtags = listOf("ai", "video", "stitch")
+            title = "AI Generated Title",
+            description = "AI generated description for this amazing video",
+            hashtags = listOf("ai", "video", "stitch")
         )
     }
 
@@ -749,11 +746,4 @@ data class ThreadHierarchyData(
     val contentType: ContentType
 )
 
-/**
- * AI analysis result for video
- */
-data class VideoAnalysisResult(
-    val suggestedTitle: String,
-    val suggestedDescription: String,
-    val suggestedHashtags: List<String>
-)
+// Note: VideoAnalysisResult is imported from com.stitchsocial.club.services

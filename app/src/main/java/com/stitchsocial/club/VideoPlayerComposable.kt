@@ -144,7 +144,7 @@ fun VideoPlayerComposable(
         val pauseReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                 when (intent?.action) {
-                    "com.stitchsocial.PAUSE_ALL_VIDEOS" -> {
+                    "com.stitchsocial.club.PAUSE_ALL_VIDEOS" -> {
                         Log.i("VIDEO_PLAYER", "📡 PAUSE BROADCAST RECEIVED for $videoId")
                         exoPlayer.pause()
                         exoPlayer.playWhenReady = false
@@ -155,7 +155,7 @@ fun VideoPlayerComposable(
             }
         }
 
-        val filter = IntentFilter("com.stitchsocial.PAUSE_ALL_VIDEOS")
+        val filter = IntentFilter("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
         LocalBroadcastManager.getInstance(context).registerReceiver(pauseReceiver, filter)
         Log.d("VIDEO_PLAYER", "📻 Registered pause receiver for $videoId")
 

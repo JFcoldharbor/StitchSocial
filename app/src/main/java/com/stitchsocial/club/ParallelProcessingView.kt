@@ -54,7 +54,7 @@ fun ParallelProcessingView(
             Log.d("PARALLEL", "   Audio: ${(audioProgress * 100).toInt()}%")
             Log.d("PARALLEL", "   Compression: ${(compressionProgress * 100).toInt()}%")
             Log.d("PARALLEL", "   AI: ${(aiProgress * 100).toInt()}%")
-            Log.d("PARALLEL", "   AI Result: ${currentAIResult?.suggestedTitle}")
+            Log.d("PARALLEL", "   AI Result: ${currentAIResult?.title}")
 
             delay(800) // Brief pause to show 100%
 

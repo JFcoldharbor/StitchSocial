@@ -8,6 +8,7 @@
  * ✅ Clickable stats (Stitchers shows followers)
  * ✅ FollowManager integration
  * ✅ Video player modal
+ * ✅ UPDATED: Uses StitchersFollowingSheet component
  * ✅ UPDATED: Added AMBASSADOR tier support
  */
 
@@ -145,7 +146,6 @@ fun ProfileView(
     val userService = remember { UserService(context) }
     val videoService = remember { VideoServiceImpl() }
     val authService = remember { AuthService() }
-    val followManager = remember { com.stitchsocial.club.FollowManager(context) }
 
     // ViewModel
     val viewModel = engagementViewModel ?: remember {
@@ -169,13 +169,8 @@ fun ProfileView(
     var videoToDelete by remember { mutableStateOf<CoreVideoMetadata?>(null) }
     var showingDeleteConfirmation by remember { mutableStateOf(false) }
 
-    // Followers State
-    var showFollowersModal by remember { mutableStateOf(false) }
-    var followersTab by remember { mutableStateOf(0) }
-    var followersList by remember { mutableStateOf<List<BasicUserInfo>>(emptyList()) }
-    var followingList by remember { mutableStateOf<List<BasicUserInfo>>(emptyList()) }
-    var isLoadingFollowers by remember { mutableStateOf(false) }
-    var isLoadingFollowing by remember { mutableStateOf(false) }
+    // Stitchers/Following Sheet State
+    var showStitchersSheet by remember { mutableStateOf(false) }
 
     val scrollState = rememberLazyListState()
     val tabTitles = listOf("Threads", "Stitches", "Replies")
@@ -218,30 +213,6 @@ fun ProfileView(
         }
     }
 
-    // Load followers
-    suspend fun loadFollowers() {
-        isLoadingFollowers = true
-        try {
-            followersList = userService.getFollowersList(userID, limit = 100)
-        } catch (e: Exception) {
-            // Silent failure
-        } finally {
-            isLoadingFollowers = false
-        }
-    }
-
-    // Load following
-    suspend fun loadFollowing() {
-        isLoadingFollowing = true
-        try {
-            followingList = userService.getFollowingList(userID, limit = 100)
-        } catch (e: Exception) {
-            // Silent failure
-        } finally {
-            isLoadingFollowing = false
-        }
-    }
-
     // Initial load
     LaunchedEffect(userID) {
         loadUser()
@@ -268,10 +239,7 @@ fun ProfileView(
                             onToggleBio = { isShowingFullBio = !isShowingFullBio },
                             onEditProfile = { showingEditProfile = true },
                             onSettingsClick = { showingSettings = true },
-                            onFollowersClick = {
-                                followersTab = 0
-                                showFollowersModal = true
-                            }
+                            onFollowersClick = { showStitchersSheet = true }
                         )
                     }
 
@@ -405,102 +373,15 @@ fun ProfileView(
         )
     }
 
-    // Followers/Following Modal
-    if (showFollowersModal) {
-        LaunchedEffect(showFollowersModal) {
-            if (showFollowersModal) {
-                loadFollowers()
-                loadFollowing()
-            }
+    // Stitchers/Following Sheet - using reusable component
+    StitchersFollowingSheet(
+        userID = userID,
+        isVisible = showStitchersSheet,
+        onDismiss = { showStitchersSheet = false },
+        onUserTap = { tappedUserID: String ->
+            navigationCoordinator?.navigateTo(NavigationDestination.UserProfile(tappedUserID))
         }
-
-        AlertDialog(
-            onDismissRequest = { showFollowersModal = false },
-            title = {
-                Text(
-                    text = if (followersTab == 0) "Followers (${followersList.size})" else "Following (${followingList.size})",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    // Tab selector
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        TextButton(onClick = { followersTab = 0 }) {
-                            Text(
-                                "Followers",
-                                color = if (followersTab == 0) Color.Cyan else Color.Gray,
-                                fontWeight = if (followersTab == 0) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                        TextButton(onClick = { followersTab = 1 }) {
-                            Text(
-                                "Following",
-                                color = if (followersTab == 1) Color.Cyan else Color.Gray,
-                                fontWeight = if (followersTab == 1) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // List content
-                    val listToShow = if (followersTab == 0) followersList else followingList
-                    val isLoadingList = if (followersTab == 0) isLoadingFollowers else isLoadingFollowing
-
-                    if (isLoadingList) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = Color.Cyan)
-                        }
-                    } else if (listToShow.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (followersTab == 0) "No followers yet" else "Not following anyone",
-                                color = Color.Gray
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth().height(300.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(listToShow) { user ->
-                                FollowerRow(
-                                    user = user,
-                                    followManager = followManager,
-                                    onProfileClick = {
-                                        showFollowersModal = false
-                                        navigationCoordinator?.navigateTo(NavigationDestination.UserProfile(user.id))
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showFollowersModal = false }) {
-                    Text("Close", color = Color.Cyan)
-                }
-            },
-            containerColor = Color.Black,
-            titleContentColor = Color.White,
-            textContentColor = Color.White
-        )
-    }
+    )
 }
 
 // MARK: - Components
@@ -515,11 +396,15 @@ private fun ProfileHeader(
     onFollowersClick: () -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 60.dp)
     ) {
+        // Top row with settings
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
             horizontalArrangement = Arrangement.End
         ) {
             IconButton(onClick = onSettingsClick) {
@@ -527,57 +412,131 @@ private fun ProfileHeader(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Profile image with tier border
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
         ) {
-            ProfileImage(user)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(user.displayName, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    if (user.isVerified) {
-                        Icon(Icons.Default.Verified, null, tint = Color.Red, modifier = Modifier.size(20.dp))
-                    }
-                }
-                Text("@${user.username}", color = Color.Gray, fontSize = 14.sp)
-                TierBadge(user.tier)
+            ProfileImage(user = user)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Username and verification
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = user.displayName,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            if (user.isVerified) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    Icons.Default.Verified,
+                    contentDescription = "Verified",
+                    tint = Color.Red,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
 
-        if (getBioText(user).isNotEmpty()) {
-            BioSection(user, isShowingFullBio, onToggleBio)
+        Text(
+            text = "@${user.username}",
+            fontSize = 14.sp,
+            color = Color.Gray,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Tier Badge
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            TierBadge(tier = user.tier)
         }
 
-        HypeMeter(user)
-        Stats(user, onFollowersClick)
+        Spacer(modifier = Modifier.height(16.dp))
 
+        // Bio
+        BioSection(
+            user = user,
+            isShowingFullBio = isShowingFullBio,
+            onToggleBio = onToggleBio
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Hype Meter
+        HypeMeter(user = user)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Stats
+        Stats(user = user, onFollowersClick = onFollowersClick)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Edit Profile Button
         Button(
             onClick = onEditProfile,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Gray.copy(alpha = 0.3f)
+            ),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Text("Edit Profile", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Edit Profile", color = Color.White)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
 @Composable
 private fun ProfileImage(user: BasicUserInfo) {
     val tierColors = getTierColors(user.tier)
-    Box(modifier = Modifier.size(80.dp)) {
+
+    Box(
+        modifier = Modifier.size(100.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // Tier gradient border
         Box(
-            modifier = Modifier.fillMaxSize().border(
-                width = 3.dp,
-                brush = if (tierColors.size > 1) Brush.linearGradient(tierColors)
-                else Brush.linearGradient(listOf(tierColors[0], tierColors[0])),
-                shape = CircleShape
-            )
+            modifier = Modifier
+                .size(100.dp)
+                .clip(CircleShape)
+                .background(
+                    brush = if (tierColors.size > 1) {
+                        Brush.linearGradient(tierColors)
+                    } else {
+                        Brush.linearGradient(listOf(tierColors[0], tierColors[0]))
+                    }
+                )
         )
+
+        // Profile image
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(user.profileImageURL ?: "").crossfade(true).build(),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize().padding(3.dp).clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(user.profileImageURL ?: "")
+                .crossfade(true)
+                .build(),
+            contentDescription = "Profile",
+            modifier = Modifier
+                .size(92.dp)
+                .clip(CircleShape)
+                .background(Color.Gray.copy(alpha = 0.3f)),
             contentScale = ContentScale.Crop
         )
     }
@@ -585,25 +544,53 @@ private fun ProfileImage(user: BasicUserInfo) {
 
 @Composable
 private fun TierBadge(tier: UserTier) {
-    val tierColor = getTierColors(tier).first()
+    val tierColors = getTierColors(tier)
+    val tierIcon = getTierIcon(tier)
+
     Row(
-        modifier = Modifier.background(tierColor.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier
+            .background(
+                brush = if (tierColors.size > 1) {
+                    Brush.horizontalGradient(tierColors)
+                } else {
+                    Brush.horizontalGradient(listOf(tierColors[0], tierColors[0]))
+                },
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(getTierIcon(tier), null, tint = tierColor, modifier = Modifier.size(12.dp))
-        Text(tier.displayName.uppercase(), color = tierColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Icon(
+            imageVector = tierIcon,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = tier.displayName,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
 @Composable
-private fun BioSection(user: BasicUserInfo, isShowingFullBio: Boolean, onToggleBio: () -> Unit) {
+private fun BioSection(
+    user: BasicUserInfo,
+    isShowingFullBio: Boolean,
+    onToggleBio: () -> Unit
+) {
     val bioText = getBioText(user)
+    if (bioText.isEmpty()) return
+
     val shouldTruncate = bioText.length > 100
+
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
     ) {
         if (shouldTruncate && !isShowingFullBio) {
             Text(bioText.take(100) + "...", color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
@@ -673,7 +660,7 @@ private fun StatItem(count: Int, label: String, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(formatLargeNumber(count), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = Color.Gray, fontSize = 12.sp)
+        Text(label, color = if (label == "Stitchers") Color.Cyan else Color.Gray, fontSize = 12.sp)
     }
 }
 
@@ -714,55 +701,6 @@ private fun TabBar(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun FollowerRow(
-    user: BasicUserInfo,
-    followManager: com.stitchsocial.club.FollowManager,
-    onProfileClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onProfileClick)
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(user.profileImageURL ?: "")
-                .crossfade(true)
-                .build(),
-            contentDescription = null,
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(Color.Gray.copy(alpha = 0.3f)),
-            contentScale = ContentScale.Crop
-        )
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user.displayName,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "@${user.username}",
-                color = Color.Gray,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        TierBadge(user.tier)
     }
 }
 

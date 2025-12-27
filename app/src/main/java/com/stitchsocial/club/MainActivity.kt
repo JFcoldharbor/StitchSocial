@@ -51,7 +51,6 @@ import com.stitchsocial.club.views.*
 import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.coordination.ModalState
-import com.stitchsocial.club.coordination.VideoAnalysisResult
 import com.stitchsocial.club.ui.theme.StitchSocialClubTheme
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.camera.ThreadComposer
@@ -344,12 +343,17 @@ fun MainScreen() {
             currentUser != null -> {
                 Box(modifier = Modifier.fillMaxSize()) {
                     TabContent(selectedTab, currentUser!!, videoService, userService, feedService, navigationCoordinator)
-                    CustomDippedTabBar(
-                        selectedTab = selectedTab,
-                        onTabSelected = { tab -> selectedTab = tab },
-                        onCreateTapped = { navigationCoordinator.showModal(ModalState.RECORDING) },
-                        modifier = Modifier.align(Alignment.BottomCenter)
-                    )
+
+                    // Only show tab bar when no modal is active
+                    if (currentModal == ModalState.NONE) {
+                        CustomDippedTabBar(
+                            selectedTab = selectedTab,
+                            onTabSelected = { tab -> selectedTab = tab },
+                            onCreateTapped = { navigationCoordinator.showModal(ModalState.RECORDING) },
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
+                    }
+
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
                 }
             }
@@ -370,19 +374,44 @@ private fun ModalOverlay(
             when (currentModal) {
                 ModalState.RECORDING -> {
                     val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
+                    val parentVideo = modalData["parentVideo"] as? CoreVideoMetadata
+                    println("🎬 MAINACT: RECORDING Modal active - context: $recordingContext")
                     CameraView(
                         recordingContext = recordingContext,
+                        parentVideo = parentVideo,
                         onVideoRecorded = { recordedVideo ->
-                            navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
-                            kotlinx.coroutines.GlobalScope.launch {
-                                try {
-                                    videoCoordinator.startParallelProcessing(recordedVideo.videoURL, recordedVideo, recordingContext)
-                                } catch (e: Exception) {
-                                    Log.e("STITCH_MAIN", "Video processing failed: ${e.message}")
+                            try {
+                                println("📹📹📹 MAINACT: === onVideoRecorded CALLBACK START ===")
+                                println("📹 MAINACT: Video ID: ${recordedVideo.id}")
+                                println("📹 MAINACT: Video path: ${recordedVideo.videoURL}")
+                                println("📹 MAINACT: Recording context: $recordingContext")
+
+                                println("📹 MAINACT: About to call showModal(PARALLEL_PROCESSING)...")
+                                navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
+                                println("📹 MAINACT: showModal called successfully!")
+
+                                println("📹 MAINACT: Launching coroutine for processing...")
+                                kotlinx.coroutines.GlobalScope.launch {
+                                    try {
+                                        println("🔄 MAINACT: Inside coroutine - starting parallel processing...")
+                                        videoCoordinator.startParallelProcessing(recordedVideo.videoURL, recordedVideo, recordingContext)
+                                        println("✅ MAINACT: Parallel processing completed!")
+                                    } catch (e: Exception) {
+                                        println("❌ MAINACT: Processing EXCEPTION: ${e.message}")
+                                        e.printStackTrace()
+                                    }
                                 }
+                                println("📹 MAINACT: Coroutine launched!")
+                                println("📹📹📹 MAINACT: === onVideoRecorded CALLBACK END ===")
+                            } catch (e: Exception) {
+                                println("❌❌❌ MAINACT: EXCEPTION in onVideoRecorded: ${e.message}")
+                                e.printStackTrace()
                             }
                         },
-                        onCancel = { navigationCoordinator.dismissModal() },
+                        onCancel = {
+                            println("❌ MAINACT: Camera CANCELLED - dismissing modal")
+                            navigationCoordinator.dismissModal()
+                        },
                         onStopAllVideos = {},
                         onDisposeAllVideos = {},
                         onGalleryRequested = { navigationCoordinator.requestGalleryPicker() },
@@ -392,11 +421,14 @@ private fun ModalOverlay(
                 ModalState.PARALLEL_PROCESSING -> ParallelProcessingView(navigationCoordinator, Modifier.fillMaxSize())
                 ModalState.THREAD_COMPOSER -> {
                     val videoPath = modalData["videoPath"] as? String
-                    val aiResult = modalData["aiResult"] as? VideoAnalysisResult
+                    // Get AI result directly from VideoCoordinator (stored as services.VideoAnalysisResult)
+                    val aiResult = videoCoordinator.lastAIResult.value
+                    // Get the recording context from VideoCoordinator (stored during startParallelProcessing)
+                    val recordingContext = videoCoordinator.lastRecordingContext.value ?: RecordingContext.NewThread
                     if (videoPath != null) {
                         ThreadComposer(
                             recordedVideoURL = videoPath,
-                            recordingContext = RecordingContext.NewThread,
+                            recordingContext = recordingContext,
                             aiResult = aiResult,
                             videoCoordinator = videoCoordinator,
                             onVideoCreated = { navigationCoordinator.dismissModal(); onTabChange(MainAppTab.HOME) },

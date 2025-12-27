@@ -65,6 +65,10 @@ fun CameraView(
     modifier: Modifier = Modifier,
     viewModel: CameraViewModel = viewModel()
 ) {
+    // Instance tracking for debugging
+    val instanceId = remember { System.currentTimeMillis() }
+    println("📷 CAMERA INSTANCE $instanceId: CameraView composing - context=$recordingContext")
+
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -191,10 +195,12 @@ fun CameraView(
 
     // Start recording function with proper file management
     val startRecording: () -> Unit = {
+        println("🎬 CAMERA: Start recording pressed!")
         videoCapture?.let { capture ->
             val timestamp = System.currentTimeMillis()
             val videoFile = File(context.cacheDir, "STITCH_${timestamp}.mp4")
             currentVideoFile = videoFile
+            println("🎬 CAMERA: Video file will be: ${videoFile.absolutePath}")
 
             val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
@@ -204,14 +210,16 @@ fun CameraView(
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
-                            println("CAMERA: Recording started - ${videoFile.name}")
+                            println("🎬 CAMERA: Recording STARTED - ${videoFile.name}")
                         }
                         is VideoRecordEvent.Finalize -> {
+                            println("🎬 CAMERA INSTANCE $instanceId FINALIZE: Event received!")
+                            println("🎬 CAMERA FINALIZE: hasError = ${event.hasError()}")
                             if (!event.hasError()) {
-                                println("CAMERA: Recording completed successfully")
-                                println("CAMERA: File: ${videoFile.absolutePath}")
-                                println("CAMERA: Size: ${videoFile.length() / 1024}KB")
-                                println("CAMERA: Duration: ${recordingDuration}s")
+                                println("🎬 CAMERA: Recording completed successfully")
+                                println("🎬 CAMERA: File: ${videoFile.absolutePath}")
+                                println("🎬 CAMERA: Size: ${videoFile.length() / 1024}KB")
+                                println("🎬 CAMERA: Duration: ${recordingDuration}s")
 
                                 val recordedVideoData = createCompleteRecordedVideoData(
                                     recordingContext = recordingContext,
@@ -220,11 +228,12 @@ fun CameraView(
                                     duration = recordingDuration
                                 )
 
-                                println("CAMERA: Calling onVideoRecorded callback")
+                                println("🎬 CAMERA INSTANCE $instanceId: Calling onVideoRecorded callback NOW! [MODAL_CAMERAVIEW]")
                                 onVideoRecorded(recordedVideoData)
+                                println("🎬 CAMERA INSTANCE $instanceId: onVideoRecorded callback RETURNED! [MODAL_CAMERAVIEW]")
 
                             } else {
-                                println("CAMERA: Recording failed - ${event.error}")
+                                println("🎬 CAMERA: Recording failed - ${event.error}")
                                 videoFile.delete()
                             }
                             recording = null
@@ -235,20 +244,25 @@ fun CameraView(
 
             isRecording = true
             viewModel.startRecording()
-            println("CAMERA: Recording initiated")
+            println("🎬 CAMERA: Recording initiated successfully")
+        } ?: run {
+            println("❌ CAMERA: videoCapture is NULL - cannot start recording!")
         }
     }
 
     // Stop recording function
     val stopRecording: () -> Unit = {
+        println("🛑 CAMERA: Stop button pressed!")
+        println("🛑 CAMERA: recording = $recording")
         recording?.stop()
         isRecording = false
         viewModel.stopRecording()
-        println("CAMERA: Recording stopped")
+        println("🛑 CAMERA: Recording stop called, waiting for Finalize event...")
     }
 
     // Cancel recording function with cleanup
     val cancelRecording: () -> Unit = {
+        println("❌ CAMERA: CANCEL button pressed (X button)!")
         recording?.stop()
         isRecording = false
         viewModel.stopRecording()
@@ -256,12 +270,12 @@ fun CameraView(
         currentVideoFile?.let { file ->
             if (file.exists()) {
                 file.delete()
-                println("CAMERA: Cancelled recording file deleted")
+                println("❌ CAMERA: Cancelled recording file deleted")
             }
         }
         currentVideoFile = null
 
-        println("CAMERA: Camera cancelled - videos will reload on return to feed")
+        println("❌ CAMERA: Camera cancelled - calling onCancel()")
         onCancel()
     }
 
