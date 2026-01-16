@@ -6,6 +6,9 @@
  * Dependencies: UserService, FollowManager, VideoService
  * Features: Follow/unfollow, share, report, video grid
  * PORTED FROM: iOS CreatorProfileView.swift
+ *
+ * ✅ FIXED: Added internal video player handling with fullscreen Dialog
+ * ✅ FIXED: Video player now opens when tapping videos in grid
  */
 
 package com.stitchsocial.club.views
@@ -35,6 +38,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
@@ -43,12 +48,17 @@ import kotlinx.coroutines.launch
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.VideoServiceImpl
+import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.viewmodels.EngagementViewModel
+import com.stitchsocial.club.viewmodels.FloatingIconManager
 import androidx.compose.runtime.collectAsState
 
 /**
  * External user profile view - displays another user's profile
+ * ✅ FIXED: Now includes internal video player handling
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,6 +66,7 @@ fun CreatorProfileView(
     userID: String,
     currentUserID: String? = null,
     navigationCoordinator: NavigationCoordinator? = null,
+    engagementCoordinator: EngagementCoordinator? = null,
     onDismiss: () -> Unit = {},
     onVideoTap: ((CoreVideoMetadata) -> Unit)? = null
 ) {
@@ -65,7 +76,14 @@ fun CreatorProfileView(
     // Services
     val userService = remember { UserService(context) }
     val videoService = remember { VideoServiceImpl() }
+    val authService = remember { AuthService() }
     val followManager = remember { FollowManager(context) }
+
+    // ViewModel & IconManager for video player
+    val engagementViewModel = remember {
+        EngagementViewModel(authService, videoService, userService)
+    }
+    val iconManager = remember { FloatingIconManager() }
 
     // Observe follow states from FollowManager
     val followingStates by followManager.followingStates.collectAsState()
@@ -80,6 +98,11 @@ fun CreatorProfileView(
     var showingFullBio by remember { mutableStateOf(false) }
     var showStitchersSheet by remember { mutableStateOf(false) }
 
+    // ✅ FIXED: Video player state - internal handling
+    var showingVideoPlayer by remember { mutableStateOf(false) }
+    var selectedVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+    var selectedVideoIndex by remember { mutableStateOf(0) }
+
     // Stats
     var stitchersCount by remember { mutableStateOf(0) }
     var cloutCount by remember { mutableStateOf(0) }
@@ -90,6 +113,21 @@ fun CreatorProfileView(
 
     // Check if this is own profile
     val isOwnProfile = currentUserID != null && userID == currentUserID
+
+    // Get current user tier for video player
+    val currentUserTier = remember(currentUserID) {
+        // Default to ROOKIE if we can't get the tier
+        UserTier.ROOKIE
+    }
+
+    // Filtered videos based on tab
+    val filteredVideos = remember(userVideos, selectedTab) {
+        when (selectedTab) {
+            0 -> userVideos.filter { it.conversationDepth == 0 } // Threads (parents)
+            1 -> userVideos.filter { it.conversationDepth > 0 }  // Stitches (children)
+            else -> userVideos
+        }
+    }
 
     // Load user profile
     LaunchedEffect(userID) {
@@ -130,11 +168,6 @@ fun CreatorProfileView(
         }
     }
 
-    // Update follower count when follow state changes
-    LaunchedEffect(isFollowing) {
-        // This will update the UI when follow state changes
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -150,7 +183,8 @@ fun CreatorProfileView(
             })
             user != null -> ProfileContent(
                 user = user!!,
-                userVideos = userVideos,
+                userVideos = filteredVideos,
+                allVideos = userVideos,
                 stitchersCount = stitchersCount,
                 cloutCount = cloutCount,
                 isFollowing = isFollowing,
@@ -173,7 +207,16 @@ fun CreatorProfileView(
                     context.startActivity(Intent.createChooser(shareIntent, "Share Profile"))
                 },
                 onStitchersClick = { showStitchersSheet = true },
-                onVideoTap = onVideoTap,
+                onVideoTap = { video, index ->
+                    // ✅ FIXED: Handle video tap internally
+                    println("🎬 CREATOR PROFILE: Video tapped - ${video.title} at index $index")
+                    selectedVideo = video
+                    selectedVideoIndex = index
+                    showingVideoPlayer = true
+
+                    // Also call external handler if provided
+                    onVideoTap?.invoke(video)
+                },
                 onDismiss = onDismiss
             )
         }
@@ -186,9 +229,55 @@ fun CreatorProfileView(
             onUserTap = { tappedUserID: String ->
                 // Navigate to tapped user's profile
                 println("👤 Tapped user: $tappedUserID")
-                // TODO: Navigate to their CreatorProfileView
             }
         )
+    }
+
+    // ✅ FIXED: Video Player as Fullscreen Dialog
+    if (showingVideoPlayer && selectedVideo != null) {
+        Dialog(
+            onDismissRequest = {
+                showingVideoPlayer = false
+                selectedVideo = null
+            },
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                VideoPlayer(
+                    video = selectedVideo!!,
+                    currentUserID = currentUserID,
+                    currentUserTier = currentUserTier,
+                    engagementCoordinator = engagementCoordinator,
+                    engagementViewModel = engagementViewModel,
+                    iconManager = iconManager,
+                    onClose = {
+                        showingVideoPlayer = false
+                        selectedVideo = null
+                    },
+                    onNavigateToProfile = { profileUserID ->
+                        // If tapping different user's profile, could navigate there
+                        println("👤 CREATOR PROFILE VIDEO: Navigate to profile $profileUserID")
+                    },
+                    onEngagement = {
+                        println("🔥 CREATOR PROFILE VIDEO: Engagement action")
+                    },
+                    onShare = {
+                        println("📤 CREATOR PROFILE VIDEO: Share video ${selectedVideo?.id}")
+                    },
+                    onStitchRecording = {
+                        println("🎬 CREATOR PROFILE VIDEO: Start stitch recording")
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -251,6 +340,7 @@ private fun ErrorView(error: String, onRetry: () -> Unit) {
 private fun ProfileContent(
     user: BasicUserInfo,
     userVideos: List<CoreVideoMetadata>,
+    allVideos: List<CoreVideoMetadata>,
     stitchersCount: Int,
     cloutCount: Int,
     isFollowing: Boolean,
@@ -263,13 +353,12 @@ private fun ProfileContent(
     onFollowToggle: () -> Unit,
     onShareProfile: () -> Unit,
     onStitchersClick: () -> Unit,
-    onVideoTap: ((CoreVideoMetadata) -> Unit)?,
+    onVideoTap: (CoreVideoMetadata, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     // Separate videos into threads (parents) and stitches (children)
-    val threads = userVideos.filter { it.conversationDepth == 0 }
-    val stitches = userVideos.filter { it.conversationDepth > 0 }
-    val displayVideos = if (selectedTab == 0) threads else stitches
+    val threads = allVideos.filter { it.conversationDepth == 0 }
+    val stitches = allVideos.filter { it.conversationDepth > 0 }
 
     Column(
         modifier = Modifier
@@ -288,7 +377,7 @@ private fun ProfileContent(
         ProfileHeader(
             user = user,
             stitchersCount = stitchersCount,
-            videosCount = userVideos.size,
+            videosCount = allVideos.size,
             cloutCount = cloutCount,
             showingFullBio = showingFullBio,
             onBioToggle = onBioToggle,
@@ -318,7 +407,7 @@ private fun ProfileContent(
 
         // Video Grid - shows threads or stitches based on tab
         VideoGridSection(
-            videos = displayVideos,
+            videos = userVideos,
             onVideoTap = onVideoTap
         )
     }
@@ -830,7 +919,7 @@ private fun TabButton(
 @Composable
 private fun VideoGridSection(
     videos: List<CoreVideoMetadata>,
-    onVideoTap: ((CoreVideoMetadata) -> Unit)?
+    onVideoTap: (CoreVideoMetadata, Int) -> Unit
 ) {
     if (videos.isEmpty()) {
         Box(
@@ -854,15 +943,19 @@ private fun VideoGridSection(
         // Video grid - 3 columns
         val rows: List<List<CoreVideoMetadata>> = videos.chunked(3)
         Column {
-            rows.forEach { rowVideos: List<CoreVideoMetadata> ->
+            rows.forEachIndexed { rowIndex, rowVideos: List<CoreVideoMetadata> ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    rowVideos.forEach { video: CoreVideoMetadata ->
+                    rowVideos.forEachIndexed { colIndex, video: CoreVideoMetadata ->
+                        val videoIndex = rowIndex * 3 + colIndex
                         VideoThumbnailItem(
                             video = video,
-                            onClick = { onVideoTap?.invoke(video) },
+                            onClick = {
+                                // ✅ FIXED: Pass video and index to handler
+                                onVideoTap(video, videoIndex)
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }

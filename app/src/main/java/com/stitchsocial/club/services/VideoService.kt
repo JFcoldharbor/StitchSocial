@@ -5,6 +5,7 @@
  * Layer 4: Core Services - Video Management
  * ✅ FIXED: Both getFeedVideos signatures for compatibility
  * ✅ FIXED: Simplified queries - no composite index required
+ * ✅ ADDED: Video deletion (soft delete)
  */
 
 package com.stitchsocial.club.services
@@ -70,6 +71,28 @@ class VideoServiceImpl {
             println("VIDEO SERVICE: ✅ Updated engagement counts for $videoID")
         } catch (e: Exception) {
             println("VIDEO SERVICE: ❌ Failed to update counts: ${e.message}")
+            throw e
+        }
+    }
+
+    /**
+     * Delete a video (soft delete - marks as deleted)
+     */
+    suspend fun deleteVideo(videoID: String) {
+        try {
+            println("VIDEO SERVICE: 🗑️ Deleting video: $videoID")
+
+            // Soft delete - mark as deleted rather than removing from database
+            val updates = hashMapOf<String, Any>(
+                "isDeleted" to true,
+                "deletedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+            )
+
+            db.collection("videos").document(videoID).update(updates).await()
+            println("VIDEO SERVICE: ✅ Video marked as deleted: $videoID")
+
+        } catch (e: Exception) {
+            println("VIDEO SERVICE: ❌ Failed to delete video: ${e.message}")
             throw e
         }
     }

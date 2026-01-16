@@ -1,5 +1,5 @@
 /*
- * MainActivity.kt - WITH FCM PUSH NOTIFICATIONS (FIXED)
+ * MainActivity.kt - WITH FCM PUSH NOTIFICATIONS & ANNOUNCEMENTS
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * ✅ FIXED: FCM registration now happens AFTER authentication completes
@@ -12,6 +12,7 @@
  * ✅ NEW: NotificationView integrated in NOTIFICATIONS tab
  * ✅ NEW: FCM push notifications fully integrated
  * ✅ NEW: Android 13+ notification permission request added
+ * ✅ NEW: Announcement system integrated
  */
 
 package com.stitchsocial.club
@@ -28,12 +29,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,6 +46,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.tasks.await
 
 // Foundation and Services
 import com.stitchsocial.club.foundation.*
@@ -52,24 +56,30 @@ import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.coordination.ModalState
 import com.stitchsocial.club.ui.theme.StitchSocialClubTheme
+import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.camera.ThreadComposer
+import com.stitchsocial.club.VideoReviewView
+import com.stitchsocial.club.VideoEditState
+import java.io.File
 
-// Stitch colors theme
-object StitchColors {
-    val primary = Color(0xFF00BCD4)
-    val background = Color.Black
-    val textSecondary = Color.Gray
-    val error = Color.Red
-    val modalOverlay = Color.Black.copy(alpha = 0.7f)
-    val cardBackground = Color(0xFF1E1E1E)
-}
+// ✅ NEW: Announcement imports
+import com.stitchsocial.club.models.Announcement
+import com.stitchsocial.club.services.AnnouncementService
+import com.stitchsocial.club.views.AnnouncementOverlayView
+
 
 class MainActivity : ComponentActivity() {
 
     companion object {
         // ✅ FIXED: Store pending notification intent for Compose processing
         var pendingNotificationIntent: Intent? = null
+
+        // ✅ NEW: Broadcast action for pausing videos
+        const val ACTION_PAUSE_ALL_VIDEOS = "com.stitchsocial.club.PAUSE_ALL_VIDEOS"
+
+        // ✅ NEW: Broadcast action for resuming videos after camera/modal closes
+        const val ACTION_RESUME_ALL_VIDEOS = "com.stitchsocial.club.RESUME_ALL_VIDEOS"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,6 +120,50 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+    }
+
+    /**
+     * ✅ NEW: Pause all videos when app goes to background
+     */
+    override fun onPause() {
+        super.onPause()
+        Log.d("STITCH_MAIN", "⏸️ App pausing - broadcasting pause all videos")
+        pauseAllVideos()
+    }
+
+    /**
+     * ✅ NEW: Stop all videos when app is no longer visible
+     */
+    override fun onStop() {
+        super.onStop()
+        Log.d("STITCH_MAIN", "⏹️ App stopping - broadcasting pause all videos")
+        pauseAllVideos()
+    }
+
+    /**
+     * ✅ NEW: Broadcast pause intent to all video players
+     */
+    private fun pauseAllVideos() {
+        try {
+            val intent = Intent(ACTION_PAUSE_ALL_VIDEOS)
+            androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            Log.d("STITCH_MAIN", "✅ Pause broadcast sent")
+        } catch (e: Exception) {
+            Log.e("STITCH_MAIN", "❌ Failed to send pause broadcast: ${e.message}")
+        }
+    }
+
+    /**
+     * ✅ NEW: Broadcast resume intent to all video players (called when camera/modal closes)
+     */
+    private fun resumeAllVideos() {
+        try {
+            val intent = Intent(ACTION_RESUME_ALL_VIDEOS)
+            androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            Log.d("STITCH_MAIN", "✅ Resume broadcast sent")
+        } catch (e: Exception) {
+            Log.e("STITCH_MAIN", "❌ Failed to send resume broadcast: ${e.message}")
+        }
     }
 
     /**
@@ -193,6 +247,9 @@ fun MainScreen() {
     val videoCoordinator = remember { VideoCoordinator(videoService, context) }
     val navigationCoordinator = remember { NavigationCoordinator(videoCoordinator) }
     val feedService = remember { HybridHomeFeedService(videoService, userService) }
+
+    // ✅ NEW: Announcement service reference
+    val announcementService = remember { AnnouncementService.shared }
 
     // ✅ FIXED: Process pending notification intent
     LaunchedEffect(navigationCoordinator) {
@@ -278,6 +335,10 @@ fun MainScreen() {
     var isLoadingUser by remember { mutableStateOf(true) }
     var userError by remember { mutableStateOf<String?>(null) }
 
+    // ✅ NEW: Announcement state
+    val isShowingAnnouncement by announcementService.isShowingAnnouncement.collectAsState()
+    val currentAnnouncement by announcementService.currentAnnouncement.collectAsState()
+
     // ✅ FIXED: FCM registration moved HERE - after authentication completes
     LaunchedEffect(firebaseUser, isAuthenticated) {
         scope.launch {
@@ -312,6 +373,28 @@ fun MainScreen() {
                     if (userProfile != null) {
                         currentUser = userProfile
                         Log.d("STITCH_MAIN", "✅ User profile loaded: ${userProfile.username}")
+
+                        // ✅ NEW: Check for announcements after user profile loads
+                        Log.d("STITCH_MAIN", "📢 Checking for announcements...")
+                        try {
+                            // Calculate account age (days since account created)
+                            val accountAgeDays = userProfile.createdAt?.let { createdAt ->
+                                val diffMs = System.currentTimeMillis() - createdAt.time
+                                (diffMs / (1000 * 60 * 60 * 24)).toInt()
+                            } ?: 0
+
+                            // ✅ MINIMAL FIX: Wait for Firestore to initialize (Android-specific)
+                            delay(2000)
+
+                            announcementService.checkForCriticalAnnouncements(
+                                userId = userProfile.id,
+                                userTier = userProfile.tier.name.lowercase(),  // ✅ FIXED: Convert UserTier enum to lowercase string
+                                accountAge = accountAgeDays
+                            )
+                            Log.d("STITCH_MAIN", "✅ Announcement check completed")
+                        } catch (e: Exception) {
+                            Log.e("STITCH_MAIN", "❌ Announcement check failed: ${e.message}")
+                        }
                     } else {
                         userError = "Could not load user profile"
                     }
@@ -344,8 +427,8 @@ fun MainScreen() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     TabContent(selectedTab, currentUser!!, videoService, userService, feedService, navigationCoordinator)
 
-                    // Only show tab bar when no modal is active
-                    if (currentModal == ModalState.NONE) {
+                    // Only show tab bar when no modal is active AND no announcement showing
+                    if (currentModal == ModalState.NONE && !isShowingAnnouncement) {
                         CustomDippedTabBar(
                             selectedTab = selectedTab,
                             onTabSelected = { tab -> selectedTab = tab },
@@ -354,7 +437,98 @@ fun MainScreen() {
                         )
                     }
 
+                    // Regular modal overlay
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
+
+                    // ✅ NEW: Announcement overlay (shows on top of everything)
+                    if (isShowingAnnouncement && currentAnnouncement != null) {
+                        // ✅ BLOCKING MODAL BOX - Prevents swipes and interactions with content underneath
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black)  // Solid background
+                                .pointerInput(Unit) {
+                                    // Consume ALL gestures - prevents swipes from reaching HomeFeed
+                                    detectDragGestures { _, _ ->
+                                        // Do nothing - just consume the gesture
+                                    }
+                                }
+                        ) {
+                            val announcement = currentAnnouncement!!
+                            val userId = currentUser!!.id
+
+                            // State to hold video URL
+                            var announcementVideoUrl by remember { mutableStateOf<String?>(null) }
+
+                            // Fetch video URL when announcement changes
+                            LaunchedEffect(announcement.id) {  // ✅ FIXED: Use announcement.id as key
+                                try {
+                                    Log.d("STITCH_MAIN", "📢 Announcement ID: ${announcement.id}")
+                                    Log.d("STITCH_MAIN", "📢 Announcement videoId: ${announcement.videoId}")
+                                    Log.d("STITCH_MAIN", "📢 Announcement title: ${announcement.title}")
+
+                                    // Fetch video metadata from Firestore (stitchfin database)
+                                    val firebaseApp = com.google.firebase.FirebaseApp.getInstance()
+                                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance(firebaseApp, "stitchfin")
+                                    val videoDoc = db.collection("videos")
+                                        .document(announcement.videoId)  // ✅ videoId is already a String
+                                        .get()
+                                        .await()
+
+                                    if (videoDoc.exists()) {
+                                        announcementVideoUrl = videoDoc.getString("videoURL")
+                                        Log.d("STITCH_MAIN", "📢 Loaded announcement video URL from stitchfin: $announcementVideoUrl")
+                                        Log.d("STITCH_MAIN", "📢 Video title from Firestore: ${videoDoc.getString("title")}")
+                                    } else {
+                                        Log.e("STITCH_MAIN", "📢 Video document does not exist for ID: ${announcement.videoId}")
+                                        announcementVideoUrl = null
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("STITCH_MAIN", "📢 Failed to load announcement video: ${e.message}")
+                                    e.printStackTrace()
+                                    announcementVideoUrl = null
+                                }
+                            }
+
+                            AnnouncementOverlayView(
+                                announcement = announcement,
+                                videoUrl = announcementVideoUrl,
+                                creatorName = "Stitch Official",
+                                creatorProfileImageUrl = null,
+                                onComplete = { watchedSeconds ->
+                                    scope.launch {
+                                        try {
+                                            announcementService.markAsCompleted(userId, announcement.id, watchedSeconds)
+                                            Log.d("STITCH_MAIN", "📢 Completed announcement '${announcement.title}' after ${watchedSeconds}s")
+                                            announcementService.hideAnnouncement()  // ✅ HIDE THE OVERLAY
+                                        } catch (e: Exception) {
+                                            Log.e("STITCH_MAIN", "📢 Error completing announcement: ${e.message}")
+                                            announcementService.hideAnnouncement()
+                                        }
+                                    }
+                                },
+                                onDismiss = {
+                                    scope.launch {
+                                        try {
+                                            announcementService.dismissAnnouncement(userId, announcement.id)
+                                            announcementService.hideAnnouncement()  // ✅ HIDE THE OVERLAY
+                                        } catch (e: Exception) {
+                                            Log.e("STITCH_MAIN", "📢 Error dismissing announcement: ${e.message}")
+                                            announcementService.hideAnnouncement()
+                                        }
+                                    }
+                                },
+                                onCreatorTap = { creatorId ->
+                                    // Navigate to creator profile
+                                    Log.d("STITCH_MAIN", "📢 Creator profile tapped: $creatorId")
+                                    navigationCoordinator.showModal(
+                                        modal = ModalState.USER_PROFILE,
+                                        data = mapOf("userID" to creatorId)
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -381,30 +555,21 @@ private fun ModalOverlay(
                         parentVideo = parentVideo,
                         onVideoRecorded = { recordedVideo ->
                             try {
-                                println("📹📹📹 MAINACT: === onVideoRecorded CALLBACK START ===")
-                                println("📹 MAINACT: Video ID: ${recordedVideo.id}")
+                                println("📹 MAINACT: Video recorded, going to VIDEO_REVIEW")
                                 println("📹 MAINACT: Video path: ${recordedVideo.videoURL}")
-                                println("📹 MAINACT: Recording context: $recordingContext")
 
-                                println("📹 MAINACT: About to call showModal(PARALLEL_PROCESSING)...")
-                                navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
-                                println("📹 MAINACT: showModal called successfully!")
-
-                                println("📹 MAINACT: Launching coroutine for processing...")
-                                kotlinx.coroutines.GlobalScope.launch {
-                                    try {
-                                        println("🔄 MAINACT: Inside coroutine - starting parallel processing...")
-                                        videoCoordinator.startParallelProcessing(recordedVideo.videoURL, recordedVideo, recordingContext)
-                                        println("✅ MAINACT: Parallel processing completed!")
-                                    } catch (e: Exception) {
-                                        println("❌ MAINACT: Processing EXCEPTION: ${e.message}")
-                                        e.printStackTrace()
-                                    }
-                                }
-                                println("📹 MAINACT: Coroutine launched!")
-                                println("📹📹📹 MAINACT: === onVideoRecorded CALLBACK END ===")
+                                // Go to VIDEO_REVIEW for editing before processing
+                                navigationCoordinator.showModal(
+                                    ModalState.VIDEO_REVIEW,
+                                    mapOf(
+                                        "videoPath" to recordedVideo.videoURL,
+                                        "context" to recordingContext,
+                                        "metadata" to recordedVideo
+                                    )
+                                )
+                                println("📹 MAINACT: VIDEO_REVIEW modal shown")
                             } catch (e: Exception) {
-                                println("❌❌❌ MAINACT: EXCEPTION in onVideoRecorded: ${e.message}")
+                                println("❌ MAINACT: EXCEPTION in onVideoRecorded: ${e.message}")
                                 e.printStackTrace()
                             }
                         },
@@ -418,12 +583,135 @@ private fun ModalOverlay(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                ModalState.PARALLEL_PROCESSING -> ParallelProcessingView(navigationCoordinator, Modifier.fillMaxSize())
+
+                // Video Review/Edit screen (trim, filters, captions)
+                ModalState.VIDEO_REVIEW -> {
+                    val videoPath = modalData["videoPath"] as? String
+                    val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
+                    val metadata = modalData["metadata"] as? CoreVideoMetadata
+
+                    println("✂️ MAINACT: VIDEO_REVIEW Modal active")
+                    println("✂️ MAINACT: Video path: $videoPath")
+
+                    if (videoPath != null) {
+                        // Properly parse video path to URI
+                        val videoUri = if (videoPath.startsWith("content://") || videoPath.startsWith("file://")) {
+                            Uri.parse(videoPath)
+                        } else {
+                            // It's a file path without scheme - add file:// prefix
+                            Uri.fromFile(java.io.File(videoPath))
+                        }
+
+                        println("✂️ MAINACT: Parsed video URI: $videoUri")
+
+                        VideoReviewView(
+                            initialState = VideoEditState.create(
+                                videoUri = videoUri,
+                                duration = 0.0
+                            ),
+                            onContinueToThread = { editedState ->
+                                println("✅ MAINACT: Video editing complete, starting processing")
+                                println("✅ MAINACT: hasEdits=${editedState.hasEdits}, hasTrimEdits=${editedState.hasTrimEdits}")
+                                println("✅ MAINACT: processedVideoUri=${editedState.processedVideoUri}")
+
+                                // Use processed video if available, otherwise original
+                                // Convert URI to file path (VideoCoordinator expects raw path, not URI)
+                                val finalVideoPath = when {
+                                    editedState.processedVideoUri != null -> {
+                                        // Processed video - get path from URI
+                                        editedState.processedVideoUri!!.path ?: videoPath
+                                    }
+                                    videoPath.startsWith("file://") -> {
+                                        // Strip file:// prefix
+                                        videoPath.removePrefix("file://")
+                                    }
+                                    videoPath.startsWith("/") -> {
+                                        // Already a raw path
+                                        videoPath
+                                    }
+                                    else -> {
+                                        // Try parsing as URI
+                                        Uri.parse(videoPath).path ?: videoPath
+                                    }
+                                }
+                                println("✅ MAINACT: Using finalVideoPath=$finalVideoPath")
+
+                                navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
+
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    try {
+                                        println("🔄 MAINACT: Starting parallel processing after edit...")
+                                        println("🔄 MAINACT: finalVideoPath = $finalVideoPath")
+                                        println("🔄 MAINACT: File exists = ${java.io.File(finalVideoPath).exists()}")
+
+                                        val finalMetadata = metadata ?: CoreVideoMetadata(
+                                            id = "temp_${System.currentTimeMillis()}",
+                                            title = "",
+                                            description = "",
+                                            videoURL = finalVideoPath,
+                                            thumbnailURL = "",
+                                            creatorID = "",
+                                            creatorName = "",
+                                            hashtags = emptyList(),
+                                            createdAt = java.util.Date(),
+                                            threadID = null,
+                                            replyToVideoID = null,
+                                            conversationDepth = 0,
+                                            viewCount = 0,
+                                            hypeCount = 0,
+                                            coolCount = 0,
+                                            replyCount = 0,
+                                            shareCount = 0,
+                                            lastEngagementAt = null,
+                                            duration = editedState.trimmedDuration,
+                                            aspectRatio = 9.0/16.0,
+                                            fileSize = 0L,
+                                            contentType = ContentType.THREAD,
+                                            temperature = Temperature.WARM,
+                                            qualityScore = 50,
+                                            engagementRatio = 0.0,
+                                            velocityScore = 0.0,
+                                            trendingScore = 0.0,
+                                            discoverabilityScore = 0.5,
+                                            isPromoted = false,
+                                            isProcessing = false,
+                                            isDeleted = false
+                                        )
+
+                                        videoCoordinator.startParallelProcessing(
+                                            finalVideoPath,
+                                            finalMetadata,
+                                            recordingContext
+                                        )
+                                        println("✅ MAINACT: Parallel processing completed!")
+                                        // ParallelProcessingView will auto-transition when complete
+
+                                    } catch (e: Exception) {
+                                        println("❌ MAINACT: Processing EXCEPTION: ${e.message}")
+                                        e.printStackTrace()
+                                    }
+                                }
+                            },
+                            onCancel = {
+                                println("❌ MAINACT: Video editing CANCELLED")
+                                navigationCoordinator.dismissModal()
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        println("❌ MAINACT: No video path for VIDEO_REVIEW")
+                        navigationCoordinator.dismissModal()
+                    }
+                }
+
+                ModalState.PARALLEL_PROCESSING -> ParallelProcessingView(
+                    navigationCoordinator = navigationCoordinator,
+                    modifier = Modifier.fillMaxSize()
+                )
+
                 ModalState.THREAD_COMPOSER -> {
                     val videoPath = modalData["videoPath"] as? String
-                    // Get AI result directly from VideoCoordinator (stored as services.VideoAnalysisResult)
                     val aiResult = videoCoordinator.lastAIResult.value
-                    // Get the recording context from VideoCoordinator (stored during startParallelProcessing)
                     val recordingContext = videoCoordinator.lastRecordingContext.value ?: RecordingContext.NewThread
                     if (videoPath != null) {
                         ThreadComposer(

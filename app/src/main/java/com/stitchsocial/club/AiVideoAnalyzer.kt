@@ -59,7 +59,19 @@ class AIVideoAnalyzer {
      * UPDATED: Check if AI is available using centralized config
      */
     fun isAIAvailable(): Boolean {
-        return AppConfig.Features.enableAIAnalysis && AppConfig.API.OpenAI.isConfigured()
+        val aiEnabled = AppConfig.Features.enableAIAnalysis
+        val apiConfigured = AppConfig.API.OpenAI.isConfigured()
+
+        println("🤖 AI AVAILABLE CHECK:")
+        println("   - enableAIAnalysis: $aiEnabled")
+        println("   - API isConfigured: $apiConfigured")
+        println("   - API Key length: ${openAIApiKey.length}")
+        println("   - API Key prefix: ${openAIApiKey.take(10)}...")
+
+        val available = aiEnabled && apiConfigured
+        println("   - RESULT: $available")
+
+        return available
     }
 
     /**
@@ -156,27 +168,42 @@ class AIVideoAnalyzer {
     }
 
     /**
-     * UPDATED: Transcribe audio file using OpenAI Whisper API with AppConfig settings
+     * FIXED: Transcribe audio/video file using OpenAI Whisper API
+     * Whisper supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
      */
-    private suspend fun transcribeAudio(audioPath: String): String? {
+    private suspend fun transcribeAudio(filePath: String): String? {
         return try {
-            val audioFile = JavaFile(audioPath)
-            if (!audioFile.exists()) {
-                println("⛔ WHISPER: Audio file not found")
+            val file = JavaFile(filePath)
+            if (!file.exists()) {
+                println("⛔ WHISPER: File not found: $filePath")
                 return null
             }
 
-            println("🎵 WHISPER: Transcribing ${audioFile.length() / 1024}KB audio file")
+            // Determine correct media type based on file extension
+            val extension = file.extension.lowercase()
+            val mediaType = when (extension) {
+                "mp3" -> "audio/mpeg"
+                "mp4", "m4v" -> "video/mp4"
+                "m4a" -> "audio/m4a"
+                "wav" -> "audio/wav"
+                "webm" -> "video/webm"
+                "mpeg", "mpg" -> "video/mpeg"
+                "mpga" -> "audio/mpeg"
+                else -> "video/mp4"  // Default to video/mp4 for unknown
+            }
+
+            println("🎵 WHISPER: Transcribing ${file.length() / 1024}KB file ($extension -> $mediaType)")
+            println("🎵 WHISPER: API Key configured: ${openAIApiKey.isNotEmpty()}")
+            println("🎵 WHISPER: URL: $whisperUrl")
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(
                     "file",
-                    audioFile.name,
-                    audioFile.asRequestBody("audio/mpeg".toMediaType())
+                    file.name,
+                    file.asRequestBody(mediaType.toMediaType())
                 )
                 .addFormDataPart("model", AppConfig.API.OpenAI.Whisper.MODEL)
-                .addFormDataPart("language", AppConfig.API.OpenAI.Whisper.LANGUAGE ?: "en")
                 .addFormDataPart("response_format", AppConfig.API.OpenAI.Whisper.RESPONSE_FORMAT)
                 .build()
 
@@ -186,28 +213,35 @@ class AIVideoAnalyzer {
                 .post(requestBody)
                 .build()
 
+            println("🎵 WHISPER: Sending request...")
             val response = client.newCall(request).execute()
             val responseBody = response.body?.string()
 
+            println("🎵 WHISPER: Response code: ${response.code}")
+
             if (response.isSuccessful && responseBody != null) {
-                val jsonResponse = JSONObject(responseBody)
-                val transcript = jsonResponse.optString("text", "")
+                // Whisper returns plain text when response_format is "text"
+                val transcript = if (responseBody.startsWith("{")) {
+                    // JSON response
+                    val jsonResponse = JSONObject(responseBody)
+                    jsonResponse.optString("text", "")
+                } else {
+                    // Plain text response
+                    responseBody.trim()
+                }
 
                 println("✅ WHISPER: Transcription complete - ${transcript.length} chars")
+                println("✅ WHISPER: \"${transcript.take(100)}...\"")
                 transcript.takeIf { it.isNotBlank() }
             } else {
                 println("⛔ WHISPER: API error - ${response.code}: ${response.message}")
-                if (AppConfig.Features.enableDebugLogging) {
-                    println("⛔ WHISPER: Response body - $responseBody")
-                }
+                println("⛔ WHISPER: Response body - $responseBody")
                 null
             }
 
         } catch (e: Exception) {
             println("⛔ WHISPER: Exception - ${e.message}")
-            if (AppConfig.Features.enableDebugLogging) {
-                e.printStackTrace()
-            }
+            e.printStackTrace()
             null
         }
     }
@@ -410,58 +444,21 @@ class AIVideoAnalyzer {
     }
 
     /**
-     * UPDATED: Generate fallback content when AI fails - NOW PUBLIC
+     * FIXED: Generate fallback content when AI fails - returns BLANK fields
+     * User will enter their own title/description/hashtags manually
+     * Matches iOS behavior when AI is not available
      */
     fun generateFallbackContent(recordingContext: RecordingContext): VideoAnalysisResult {
-        val (fallbackTitles, defaultHashtags) = when (recordingContext) {
-            is RecordingContext.NewThread -> Pair(
-                listOf(
-                    "Fresh perspective incoming",
-                    "Let's talk about this",
-                    "Something worth sharing",
-                    "New thoughts dropping",
-                    "Here's what I think"
-                ),
-                listOf("#thread", "#content", "#thoughts", "#share")
-            )
-            is RecordingContext.StitchToThread -> Pair(
-                listOf(
-                    "Stitching to ${recordingContext.threadInfo.creatorName}",
-                    "Adding to the conversation",
-                    "Building on this thread",
-                    "Another angle to consider",
-                    "Contributing to the discussion"
-                ),
-                listOf("#stitch", "#thread", "#response", "#conversation")
-            )
-            is RecordingContext.ReplyToVideo -> Pair(
-                listOf(
-                    "Replying to ${recordingContext.videoInfo.creatorName}",
-                    "Here's my response",
-                    "Adding my perspective",
-                    "Following up on this",
-                    "Continuing the conversation"
-                ),
-                listOf("#reply", "#response", "#video", "#discussion")
-            )
-            is RecordingContext.ContinueThread -> Pair(
-                listOf(
-                    "Continuing ${recordingContext.threadInfo.creatorName}'s thread",
-                    "Adding to the thread",
-                    "Building on the conversation",
-                    "More thoughts on this",
-                    "Keeping the discussion going"
-                ),
-                listOf("#continue", "#thread", "#conversation", "#discussion")
-            )
-        }
+        // Return BLANK fields - let user fill in manually
+        // This matches iOS behavior when AI analysis fails or is unavailable
+        println("⚠️ AI FALLBACK: Returning blank fields for manual entry")
 
         return VideoAnalysisResult(
-            title = fallbackTitles.random(),
-            description = "Share your thoughts and connect with others",
-            hashtags = defaultHashtags,
+            title = "",  // Blank - user enters manually
+            description = "",  // Blank - user enters manually
+            hashtags = emptyList(),  // Empty - user adds manually
             confidence = 0.0,
-            analysisType = "fallback"
+            analysisType = "manual"  // Changed from "fallback" to "manual"
         )
     }
 }

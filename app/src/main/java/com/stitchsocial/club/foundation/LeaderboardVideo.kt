@@ -6,6 +6,7 @@
  * Dependencies: None (Pure Kotlin data class)
  * Features: Top performing video data for leaderboard section
  *
+ * ✅ FIXED: More lenient fromFirestore parsing (doesn't fail on missing createdAt)
  * EXACT PORT: LeaderboardVideo.swift (LeaderboardModels.swift)
  */
 
@@ -32,16 +33,36 @@ data class LeaderboardVideo(
     companion object {
         /**
          * Create LeaderboardVideo from Firestore document data
+         * ✅ FIXED: More lenient - uses defaults instead of returning null
          */
         fun fromFirestore(id: String, data: Map<String, Any>): LeaderboardVideo? {
-            val title = data["title"] as? String ?: return null
-            val creatorID = data["creatorID"] as? String ?: return null
-            val creatorName = data["creatorName"] as? String ?: return null
+            // Only require title and creatorID - everything else has defaults
+            val title = data["title"] as? String
+            val creatorID = data["creatorID"] as? String
+
+            // If we don't have title or creatorID, skip this video
+            if (title.isNullOrBlank() || creatorID.isNullOrBlank()) {
+                println("⚠️ LeaderboardVideo.fromFirestore: Missing title or creatorID for $id")
+                return null
+            }
+
+            val creatorName = data["creatorName"] as? String ?: "Unknown"
             val thumbnailURL = data["thumbnailURL"] as? String
-            val hypeCount = (data["hypeCount"] as? Long)?.toInt() ?: 0
-            val coolCount = (data["coolCount"] as? Long)?.toInt() ?: 0
+            val hypeCount = (data["hypeCount"] as? Long)?.toInt()
+                ?: (data["hypeCount"] as? Int)
+                ?: 0
+            val coolCount = (data["coolCount"] as? Long)?.toInt()
+                ?: (data["coolCount"] as? Int)
+                ?: 0
             val temperature = data["temperature"] as? String ?: "cool"
-            val createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: return null
+
+            // Handle createdAt more flexibly
+            val createdAt = when (val timestamp = data["createdAt"]) {
+                is Timestamp -> timestamp.toDate()
+                is Date -> timestamp
+                is Long -> Date(timestamp)
+                else -> Date() // Default to now if missing
+            }
 
             return LeaderboardVideo(
                 id = id,

@@ -7,9 +7,11 @@
  * ✅ Tier gradient borders
  * ✅ Clickable stats (Stitchers shows followers)
  * ✅ FollowManager integration
- * ✅ Video player modal
+ * ✅ Video player modal - FIXED with fullscreen Dialog
  * ✅ UPDATED: Uses StitchersFollowingSheet component
  * ✅ UPDATED: Added AMBASSADOR tier support
+ * ✅ FIXED: Video player now shows as fullscreen dialog on tap
+ * ✅ VIDEO DELETION: Users can delete videos from their own profile
  */
 
 package com.stitchsocial.club.views
@@ -40,12 +42,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 
 // Foundation
 import com.stitchsocial.club.foundation.BasicUserInfo
+import com.stitchsocial.club.foundation.BasicVideoInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
@@ -63,6 +68,7 @@ import com.stitchsocial.club.coordination.EngagementCoordinator
 
 // ViewModels
 import com.stitchsocial.club.viewmodels.EngagementViewModel
+import com.stitchsocial.club.viewmodels.FloatingIconManager
 
 // Views
 import com.stitchsocial.club.ProfileVideoGrid
@@ -80,7 +86,7 @@ private fun getTierColors(tier: UserTier): List<Color> {
         UserTier.RISING -> listOf(Color(0xFF4A90E2), Color(0xFF64B5F6))
         UserTier.VETERAN -> listOf(Color(0xFF50C878), Color(0xFF81C784))
         UserTier.INFLUENCER -> listOf(Color(0xFFFFD700), Color(0xFFFDD835))
-        UserTier.AMBASSADOR -> listOf(Color(0xFF9B59B6), Color(0xFFAB47BC))  // ✅ ADDED
+        UserTier.AMBASSADOR -> listOf(Color(0xFF9B59B6), Color(0xFFAB47BC))
         UserTier.ELITE -> listOf(Color(0xFF9B59B6), Color(0xFFBA68C8))
         UserTier.PARTNER -> listOf(Color(0xFFE74C3C), Color(0xFFEF5350))
         UserTier.LEGENDARY -> listOf(Color(0xFFFF6B35), Color(0xFFFF8A65))
@@ -100,7 +106,7 @@ private fun getTierIcon(tier: UserTier): ImageVector {
         UserTier.RISING -> Icons.Default.TrendingUp
         UserTier.VETERAN -> Icons.Default.Shield
         UserTier.INFLUENCER -> Icons.Default.Star
-        UserTier.AMBASSADOR -> Icons.Default.Public  // ✅ ADDED (globe icon)
+        UserTier.AMBASSADOR -> Icons.Default.Public
         UserTier.ELITE -> Icons.Default.Diamond
         UserTier.PARTNER -> Icons.Default.Handshake
         UserTier.LEGENDARY -> Icons.Default.EmojiEvents
@@ -147,10 +153,11 @@ fun ProfileView(
     val videoService = remember { VideoServiceImpl() }
     val authService = remember { AuthService() }
 
-    // ViewModel
+    // ViewModel & IconManager
     val viewModel = engagementViewModel ?: remember {
         EngagementViewModel(authService, videoService, userService)
     }
+    val iconManager = remember { FloatingIconManager() }
 
     // Profile State
     var currentUser by remember { mutableStateOf<BasicUserInfo?>(null) }
@@ -163,9 +170,15 @@ fun ProfileView(
     var isShowingFullBio by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(0) }
     var showingEditProfile by remember { mutableStateOf(false) }
-    var showingVideoPlayer by remember { mutableStateOf(false) }
     var showingSettings by remember { mutableStateOf(false) }
+
+    // ✅ FIXED: Video player state with proper video list for navigation
+    var showingVideoPlayer by remember { mutableStateOf(false) }
     var selectedVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+    var selectedVideoIndex by remember { mutableStateOf(0) }
+    var currentVideoList by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
+
+    // Delete state
     var videoToDelete by remember { mutableStateOf<CoreVideoMetadata?>(null) }
     var showingDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -259,19 +272,35 @@ fun ProfileView(
 
                     // Grid
                     item {
+                        val currentUserId = authService.getCurrentUserId()
+                        val isOwnProfile = (userID == currentUserId)
+
+                        // Debug logging
+                        println("🔍 PROFILE VIEW - VIDEO GRID:")
+                        println("   userID (viewing) = $userID")
+                        println("   currentUserId (logged in) = $currentUserId")
+                        println("   isOwnProfile = $isOwnProfile")
+                        println("   onVideoDelete callback = PROVIDED")
+
                         ProfileVideoGrid(
                             videos = filteredVideos.map { it.toBasicVideoInfo() },
                             selectedTab = selectedTab,
                             tabTitles = tabTitles,
                             isLoading = isLoadingVideos,
-                            isCurrentUserProfile = true,
-                            onVideoTap = { basicVideo, _, _ ->
-                                userVideos.find { it.id == basicVideo.id }?.let {
-                                    selectedVideo = it
+                            isCurrentUserProfile = isOwnProfile,
+                            onVideoTap = { basicVideo, index, videoList ->
+                                // ✅ FIXED: Find the CoreVideoMetadata and set up player
+                                val coreVideo = filteredVideos.find { it.id == basicVideo.id }
+                                if (coreVideo != null) {
+                                    selectedVideo = coreVideo
+                                    selectedVideoIndex = index
+                                    currentVideoList = filteredVideos
                                     showingVideoPlayer = true
+                                    println("🎬 PROFILE: Opening video player for ${coreVideo.title} at index $index")
                                 }
                             },
                             onVideoDelete = { basicVideo ->
+                                println("🗑️ PROFILE: Delete callback triggered for ${basicVideo.title}")
                                 userVideos.find { it.id == basicVideo.id }?.let {
                                     videoToDelete = it
                                     showingDeleteConfirmation = true
@@ -286,6 +315,53 @@ fun ProfileView(
                     }
                 }
             }
+        }
+    }
+
+    // ✅ Video Player as Fullscreen Overlay (not Dialog)
+    if (showingVideoPlayer && selectedVideo != null) {
+        LaunchedEffect(Unit) {
+            println("🎬 VIDEO PLAYER SHOWING")
+            println("   Video: ${selectedVideo?.title}")
+            println("   Video ID: ${selectedVideo?.id}")
+            println("   Video URL: ${selectedVideo?.videoURL}")
+            println("   Duration: ${selectedVideo?.duration}")
+            println("   Aspect Ratio: ${selectedVideo?.aspectRatio}")
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            VideoPlayer(
+                video = selectedVideo!!,
+                currentUserID = userID,
+                currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
+                engagementCoordinator = engagementCoordinator,
+                engagementViewModel = viewModel,
+                iconManager = iconManager,
+                modifier = Modifier.fillMaxSize(),
+                onClose = {
+                    showingVideoPlayer = false
+                    selectedVideo = null
+                    // Refresh videos after closing
+                    scope.launch { loadVideos() }
+                },
+                onNavigateToProfile = { profileUserID ->
+                    // Navigate to creator profile
+                    navigationCoordinator?.navigateTo(NavigationDestination.UserProfile(profileUserID))
+                },
+                onEngagement = {
+                    scope.launch { loadVideos() }
+                },
+                onShare = {
+                    println("📤 PROFILE: Share video ${selectedVideo?.id}")
+                },
+                onStitchRecording = {
+                    println("🎬 PROFILE: Start stitch recording for ${selectedVideo?.id}")
+                }
+            )
         }
     }
 
@@ -325,25 +401,6 @@ fun ProfileView(
         )
     }
 
-    // Video Player Modal
-    if (showingVideoPlayer && selectedVideo != null) {
-        VideoPlayer(
-            video = selectedVideo!!,
-            currentUserID = userID,
-            currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
-            engagementCoordinator = engagementCoordinator,
-            engagementViewModel = viewModel,
-            onClose = {
-                showingVideoPlayer = false
-                selectedVideo = null
-            },
-            onNavigateToProfile = { },
-            onEngagement = { scope.launch { loadVideos() } },
-            onShare = { },
-            onStitchRecording = { }
-        )
-    }
-
     // Delete Confirmation Dialog
     if (showingDeleteConfirmation && videoToDelete != null) {
         AlertDialog(
@@ -354,8 +411,16 @@ fun ProfileView(
                 TextButton(onClick = {
                     scope.launch {
                         videoToDelete?.let { video ->
-                            // Remove from local list (actual deletion would need backend implementation)
-                            userVideos = userVideos.filter { it.id != video.id }
+                            try {
+                                // Delete from backend
+                                videoService.deleteVideo(video.id)
+                                // Remove from local list
+                                userVideos = userVideos.filter { it.id != video.id }
+                                println("✅ PROFILE: Video deleted successfully: ${video.id}")
+                            } catch (e: Exception) {
+                                println("❌ PROFILE: Failed to delete video: ${e.message}")
+                                errorMessage = "Failed to delete video: ${e.message}"
+                            }
                         }
                         showingDeleteConfirmation = false
                         videoToDelete = null
@@ -732,8 +797,8 @@ private fun NoUserView() {
 
 // MARK: - Extensions
 
-private fun CoreVideoMetadata.toBasicVideoInfo(): com.stitchsocial.club.foundation.BasicVideoInfo {
-    return com.stitchsocial.club.foundation.BasicVideoInfo(
+private fun CoreVideoMetadata.toBasicVideoInfo(): BasicVideoInfo {
+    return BasicVideoInfo(
         id = this.id,
         title = this.title,
         creatorName = this.creatorName,

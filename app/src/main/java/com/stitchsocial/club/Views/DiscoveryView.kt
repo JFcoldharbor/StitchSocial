@@ -1,12 +1,13 @@
 /*
- * DiscoveryView.kt - WITH SEARCH SHEET MODAL - COMPLETE
+ * DiscoveryView.kt - COMPLETE iOS PORT WITH SWIPE CARDS
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * ✅ COMPLETE REWRITE: All compilation errors fixed
- * ✅ FIXED: Proper StateFlow collection with initial values
- * ✅ FIXED: VideoPlayer (not FullscreenVideoPlayer)
- * ✅ FIXED: FollowManager(context) parameter
- * ✅ WORKING: Grid mode, categories, fullscreen video playback, search modal
+ * âœ… ADDED: Swipe mode with DiscoverySwipeCards (matches iOS)
+ * âœ… ADDED: Shuffle button for content randomization
+ * âœ… ADDED: Swipe instructions indicator
+ * âœ… ADDED: Category icons matching iOS
+ * âœ… ADDED: Deep randomization with creator diversity
+ * âœ… FIXED: Mode toggle cycles through Swipe/Grid/List
  */
 
 package com.stitchsocial.club.views
@@ -15,11 +16,14 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -68,27 +72,35 @@ import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.SearchView
 import com.stitchsocial.club.FollowManager
 
-// MARK: - Discovery Category & Mode
+// MARK: - Discovery Category (with icons matching iOS)
 
-enum class DiscoveryCategory(val displayName: String) {
-    ALL("All"),
-    TRENDING("Trending"),
-    RECENT("Recent"),
-    POPULAR("Popular"),
-    FOLLOWING("Following")
+enum class DiscoveryCategory(
+    val displayName: String,
+    val icon: ImageVector
+) {
+    ALL("All", Icons.Default.Apps),
+    TRENDING("Trending", Icons.Default.LocalFireDepartment),
+    RECENT("Recent", Icons.Default.Schedule),
+    POPULAR("Popular", Icons.Default.Star),
+    FOLLOWING("Following", Icons.Default.People)
 }
 
-enum class DiscoveryMode(val displayName: String, val icon: ImageVector) {
-    GRID("Grid", Icons.Default.Apps),
-    LIST("List", Icons.Default.List);
+// MARK: - Discovery Mode (matching iOS: swipe, grid)
+
+enum class DiscoveryMode(
+    val displayName: String,
+    val icon: ImageVector
+) {
+    SWIPE("Swipe", Icons.Default.Layers),
+    GRID("Grid", Icons.Default.GridView);
 
     fun toggle(): DiscoveryMode = when (this) {
-        GRID -> LIST
-        LIST -> GRID
+        SWIPE -> GRID
+        GRID -> SWIPE
     }
 }
 
-// MARK: - Discovery ViewModel
+// MARK: - Discovery ViewModel with Deep Randomization (iOS port)
 
 class DiscoveryViewModel(
     private val videoService: VideoServiceImpl,
@@ -111,28 +123,40 @@ class DiscoveryViewModel(
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
 
     init {
-        loadContent()
+        loadInitialContent()
     }
 
-    fun loadContent() {
+    // MARK: - Load Initial Content - PARENT THREADS ONLY
+
+    fun loadInitialContent() {
         viewModelScope.launch {
+            if (_isLoading.value) return@launch
+
             _isLoading.value = true
             _errorMessage.value = null
 
             try {
-                println("DISCOVERY VM: Loading discovery content...")
+                println("DISCOVERY: Loading parent threads only (no replies)")
 
-                val result: List<CoreVideoMetadata> = searchService.getRecentVideos(50)
-                _videos.value = result
-                _filteredVideos.value = result
+                val result = searchService.getRecentVideos(100)
 
-                println("DISCOVERY VM: Loaded ${result.size} videos")
+                // FIX: Filter for parent videos only (conversationDepth == 0)
+                val parentVideos = result.filter {
+                    it.id.isNotEmpty() && it.conversationDepth == 0
+                }
+
+                println("DISCOVERY: Filtered ${result.size} -> ${parentVideos.size} (parents only)")
+
+                _videos.value = parentVideos
+                applyFilterAndShuffle()
+
+                println("DISCOVERY: Loaded ${_filteredVideos.value.size} parent threads")
 
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to load discovery content"
                 _videos.value = emptyList()
                 _filteredVideos.value = emptyList()
-                println("DISCOVERY VM: Failed to load content: ${e.message}")
+                println("DISCOVERY: Load failed: ${e.message}")
 
             } finally {
                 _isLoading.value = false
@@ -140,26 +164,138 @@ class DiscoveryViewModel(
         }
     }
 
+
+    // MARK: - Load More Content - PARENT THREADS ONLY
+
+    fun loadMoreContent() {
+        viewModelScope.launch {
+            if (_isLoading.value) return@launch
+
+            _isLoading.value = true
+
+            try {
+                println("DISCOVERY: Loading more parent threads")
+
+                val newVideos = searchService.getRecentVideos(50)
+
+                // FIX: Filter for parent videos only (conversationDepth == 0)
+                val parentVideos = newVideos.filter {
+                    it.id.isNotEmpty() && it.conversationDepth == 0
+                }
+
+                // Add to existing videos, avoiding duplicates
+                val currentIds = _videos.value.map { it.id }.toSet()
+                val uniqueNewVideos = parentVideos.filter { it.id !in currentIds }
+
+                val currentVideos = _videos.value.toMutableList()
+                currentVideos.addAll(uniqueNewVideos)
+                _videos.value = currentVideos
+
+                applyFilterAndShuffle()
+
+                println("DISCOVERY: Added ${uniqueNewVideos.size} more parent threads, total: ${_filteredVideos.value.size}")
+
+            } catch (e: Exception) {
+                println("DISCOVERY: Failed to load more: ${e.message}")
+
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+
+    // MARK: - Refresh Content
+
+    fun refreshContent() {
+        _videos.value = emptyList()
+        loadInitialContent()
+    }
+
+    // MARK: - Randomize Content (shuffle button)
+
+    fun randomizeContent() {
+        _videos.value = _videos.value.shuffled()
+        applyFilterAndShuffle()
+        println("ðŸŽ² DISCOVERY: Content randomized - ${_filteredVideos.value.size} videos reshuffled")
+    }
+
+    // MARK: - Category Filtering
+
     fun filterBy(category: DiscoveryCategory) {
         _currentCategory.value = category
 
         val allVideos = _videos.value
 
-        _filteredVideos.value = when (category) {
+        val filtered = when (category) {
             DiscoveryCategory.ALL -> allVideos
             DiscoveryCategory.TRENDING -> allVideos.filter {
                 it.temperature == Temperature.HOT || it.temperature == Temperature.BLAZING
             }
             DiscoveryCategory.RECENT -> allVideos.sortedByDescending { it.createdAt }
             DiscoveryCategory.POPULAR -> allVideos.sortedByDescending { it.hypeCount }
-            DiscoveryCategory.FOLLOWING -> allVideos
+            DiscoveryCategory.FOLLOWING -> allVideos // TODO: Filter by followed creators
         }
 
-        println("DISCOVERY VM: Filtered to ${_filteredVideos.value.size} videos for ${category.displayName}")
+        _filteredVideos.value = diversifyShuffle(filtered)
+
+        println("ðŸ“Š DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos")
+    }
+
+    // MARK: - Filtering and Shuffling
+
+    private fun applyFilterAndShuffle() {
+        _filteredVideos.value = diversifyShuffle(_videos.value)
+    }
+
+    /**
+     * Shuffle with maximum creator variety (iOS port)
+     */
+    private fun diversifyShuffle(videos: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
+        if (videos.size <= 1) return videos
+
+        // Group by creator
+        val creatorBuckets = videos.groupBy { it.creatorID }.toMutableMap()
+            .mapValues { it.value.shuffled().toMutableList() }
+            .toMutableMap()
+
+        // Interleave to maximize variety
+        val result = mutableListOf<CoreVideoMetadata>()
+        val recentCreators = mutableListOf<String>()
+        val maxRecentTracking = 5
+
+        while (creatorBuckets.isNotEmpty()) {
+            val availableCreators = creatorBuckets.keys.filter { !recentCreators.contains(it) }
+
+            val chosenCreatorID = if (availableCreators.isNotEmpty()) {
+                availableCreators.random()
+            } else {
+                creatorBuckets.keys.random().also {
+                    recentCreators.clear()
+                }
+            }
+
+            val creatorVideos = creatorBuckets[chosenCreatorID]
+            if (creatorVideos != null && creatorVideos.isNotEmpty()) {
+                val video = creatorVideos.removeAt(0)
+                result.add(video)
+
+                recentCreators.add(chosenCreatorID)
+                if (recentCreators.size > maxRecentTracking) {
+                    recentCreators.removeAt(0)
+                }
+
+                if (creatorVideos.isEmpty()) {
+                    creatorBuckets.remove(chosenCreatorID)
+                }
+            }
+        }
+
+        return result
     }
 }
 
-// MARK: - Main Discovery View (WITH SEARCH SHEET)
+// MARK: - Main Discovery View (with Swipe Mode - iOS port)
 
 @Composable
 fun DiscoveryView(
@@ -201,8 +337,14 @@ fun DiscoveryView(
     val errorMessage by viewModel.errorMessage.collectAsState()
     val currentCategory by viewModel.currentCategory.collectAsState()
 
-    var discoveryMode by remember { mutableStateOf(DiscoveryMode.GRID) }
+    // Discovery Mode - default to SWIPE like iOS
+    var discoveryMode by remember { mutableStateOf(DiscoveryMode.SWIPE) }
     var selectedCategory by remember { mutableStateOf(DiscoveryCategory.ALL) }
+
+    // Swipe cards state
+    var currentSwipeIndex by remember { mutableStateOf(0) }
+
+    // Fullscreen video state
     var showVideoPlayer by remember { mutableStateOf(false) }
     var currentPlayingVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
 
@@ -212,6 +354,13 @@ fun DiscoveryView(
     // Get current user info
     val currentUserID = authService.getCurrentUserId()
     val currentUserTier = UserTier.ROOKIE // TODO: Load from user profile
+
+    // Load more when nearing end of swipe cards
+    LaunchedEffect(currentSwipeIndex, videos.size) {
+        if (currentSwipeIndex >= videos.size - 10 && videos.isNotEmpty()) {
+            viewModel.loadMoreContent()
+        }
+    }
 
     // Lifecycle observer to pause ALL videos when app goes to background
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -234,30 +383,51 @@ fun DiscoveryView(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color.Black,
+                        Color(0xFF800080).copy(alpha = 0.3f),
+                        Color(0xFFFF69B4).copy(alpha = 0.2f),
+                        Color.Black
+                    )
+                )
+            )
+    ) {
 
         // Main Discovery Content
         if (!showVideoPlayer) {
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // Header
+                // Header with shuffle and mode toggle
                 DiscoveryHeader(
                     videoCount = videos.size,
+                    isLoading = isLoading,
                     discoveryMode = discoveryMode,
-                    onModeToggle = { discoveryMode = discoveryMode.toggle() },
+                    onShuffleTapped = {
+                        viewModel.randomizeContent()
+                        currentSwipeIndex = 0 // Reset to first card
+                    },
+                    onModeToggle = {
+                        discoveryMode = discoveryMode.toggle()
+                    },
                     onSearchTapped = {
                         println("DISCOVERY: Search button tapped")
                         showSearchSheet = true
                     }
                 )
 
-                // Category Selector
+                // Category Selector with icons
                 DiscoveryCategorySelector(
                     selectedCategory = selectedCategory,
                     onCategorySelected = { category ->
                         selectedCategory = category
                         viewModel.filterBy(category)
+                        currentSwipeIndex = 0 // Reset swipe position
                     }
                 )
 
@@ -270,19 +440,47 @@ fun DiscoveryView(
                     currentErrorMessage != null -> {
                         DiscoveryErrorView(
                             message = currentErrorMessage,
-                            onRetry = { viewModel.loadContent() }
+                            onRetry = { viewModel.loadInitialContent() }
                         )
                     }
                     else -> {
-                        DiscoveryContentView(
-                            videos = videos,
-                            mode = discoveryMode,
-                            onVideoTapped = { video ->
-                                println("DISCOVERY: Video tapped - ${video.title}")
-                                currentPlayingVideo = video
-                                showVideoPlayer = true
+                        when (discoveryMode) {
+                            DiscoveryMode.SWIPE -> {
+                                // Swipe Cards Mode (iOS style)
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    DiscoverySwipeCards(
+                                        videos = videos,
+                                        currentIndex = currentSwipeIndex,
+                                        onIndexChange = { newIndex ->
+                                            currentSwipeIndex = newIndex
+                                        },
+                                        onVideoTap = { video ->
+                                            println("DISCOVERY: Video tapped - ${video.title}")
+                                            currentPlayingVideo = video
+                                            showVideoPlayer = true
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+
+                                    // Swipe Instructions Indicator (iOS style)
+                                    SwipeInstructionsIndicator(
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .padding(top = 20.dp)
+                                    )
+                                }
                             }
-                        )
+                            DiscoveryMode.GRID -> {
+                                DiscoveryGridView(
+                                    videos = videos,
+                                    onVideoTapped = { video ->
+                                        println("DISCOVERY: Video tapped - ${video.title}")
+                                        currentPlayingVideo = video
+                                        showVideoPlayer = true
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -340,12 +538,14 @@ fun DiscoveryView(
     }
 }
 
-// MARK: - Header Component
+// MARK: - Header Component (iOS style with shuffle)
 
 @Composable
 private fun DiscoveryHeader(
     videoCount: Int,
+    isLoading: Boolean,
     discoveryMode: DiscoveryMode,
+    onShuffleTapped: () -> Unit,
     onModeToggle: () -> Unit,
     onSearchTapped: () -> Unit
 ) {
@@ -363,83 +563,212 @@ private fun DiscoveryHeader(
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
-            Text(
-                text = "$videoCount videos",
-                fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.7f)
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$videoCount videos",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
+
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.Cyan
+                    )
+                    Text(
+                        text = "Loading...",
+                        fontSize = 12.sp,
+                        color = Color.Cyan
+                    )
+                }
+            }
         }
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Shuffle button
+            IconButton(onClick = onShuffleTapped) {
+                Icon(
+                    imageVector = Icons.Default.Shuffle,
+                    contentDescription = "Shuffle",
+                    tint = Color.Cyan
+                )
+            }
+
+            // Mode toggle
             IconButton(onClick = onModeToggle) {
                 Icon(
                     imageVector = discoveryMode.icon,
                     contentDescription = "Toggle ${discoveryMode.displayName}",
-                    tint = Color.White
+                    tint = if (discoveryMode == DiscoveryMode.SWIPE) Color.Cyan else Color.White.copy(alpha = 0.7f)
                 )
             }
+
+            // Search button
             IconButton(onClick = onSearchTapped) {
                 Icon(
                     Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = Color.White
+                    tint = Color.White.copy(alpha = 0.7f)
                 )
             }
         }
     }
 }
 
-// MARK: - Category Selector
+// MARK: - Category Selector (iOS style with icons and underline)
 
 @Composable
 private fun DiscoveryCategorySelector(
     selectedCategory: DiscoveryCategory,
     onCategorySelected: (DiscoveryCategory) -> Unit
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(DiscoveryCategory.values()) { category ->
-            FilterChip(
-                onClick = { onCategorySelected(category) },
-                label = {
+        DiscoveryCategory.values().forEach { category ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clickable { onCategorySelected(category) }
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = category.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (selectedCategory == category) Color.Cyan else Color.White.copy(alpha = 0.7f)
+                    )
                     Text(
                         text = category.displayName,
-                        color = if (selectedCategory == category) Color.Black else Color.White
+                        fontSize = 14.sp,
+                        fontWeight = if (selectedCategory == category) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (selectedCategory == category) Color.Cyan else Color.White.copy(alpha = 0.7f)
                     )
-                },
-                selected = selectedCategory == category,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Color.White,
-                    containerColor = Color.Transparent
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = selectedCategory == category,
-                    borderColor = Color.White.copy(alpha = 0.5f),
-                    selectedBorderColor = Color.White
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Underline indicator
+                Box(
+                    modifier = Modifier
+                        .width(if (selectedCategory == category) 40.dp else 0.dp)
+                        .height(2.dp)
+                        .background(if (selectedCategory == category) Color.Cyan else Color.Transparent)
                 )
+            }
+        }
+    }
+}
+
+// MARK: - Swipe Instructions Indicator (iOS style)
+
+@Composable
+private fun SwipeInstructionsIndicator(
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .background(
+                Color.Black.copy(alpha = 0.5f),
+                RoundedCornerShape(20.dp)
+            )
+            .border(
+                1.dp,
+                Color.White.copy(alpha = 0.2f),
+                RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left = Next
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = Color.White.copy(alpha = 0.8f)
+            )
+            Text(
+                text = "Next",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.8f)
+            )
+        }
+
+        // Divider
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(16.dp)
+                .background(Color.White.copy(alpha = 0.3f))
+        )
+
+        // Right = Back
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = Color.White.copy(alpha = 0.8f)
+            )
+            Text(
+                text = "Back",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.8f)
+            )
+        }
+
+        // Divider
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(16.dp)
+                .background(Color.White.copy(alpha = 0.3f))
+        )
+
+        // Tap = Fullscreen
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.TouchApp,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = Color.White.copy(alpha = 0.8f)
+            )
+            Text(
+                text = "Fullscreen",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.8f)
             )
         }
     }
 }
 
-// MARK: - Content Views
-
-@Composable
-private fun DiscoveryContentView(
-    videos: List<CoreVideoMetadata>,
-    mode: DiscoveryMode,
-    onVideoTapped: (CoreVideoMetadata) -> Unit
-) {
-    when (mode) {
-        DiscoveryMode.GRID -> DiscoveryGridView(videos, onVideoTapped)
-        DiscoveryMode.LIST -> DiscoveryListView(videos, onVideoTapped)
-    }
-}
+// MARK: - Grid View
 
 @Composable
 private fun DiscoveryGridView(
@@ -462,37 +791,17 @@ private fun DiscoveryGridView(
     }
 }
 
-@Composable
-private fun DiscoveryListView(
-    videos: List<CoreVideoMetadata>,
-    onVideoTapped: (CoreVideoMetadata) -> Unit
-) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(1),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(videos.size) { index ->
-            DiscoveryVideoCard(
-                video = videos[index],
-                onTapped = { onVideoTapped(videos[index]) },
-                isListMode = true
-            )
-        }
-    }
-}
+// MARK: - Video Card
 
 @Composable
 private fun DiscoveryVideoCard(
     video: CoreVideoMetadata,
-    onTapped: () -> Unit,
-    isListMode: Boolean = false
+    onTapped: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isListMode) 120.dp else 240.dp)
+            .height(240.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onTapped() }
             .background(Color(0xFF1C1C1E))
@@ -574,12 +883,12 @@ private fun DiscoveryVideoCard(
                         color = Color.White.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = "❄️ ${video.coolCount}",
+                        text = "💬 ${video.replyCount}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = "💬 ${video.replyCount}",
+                        text = "👁 ${video.viewCount}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
@@ -593,13 +902,31 @@ private fun DiscoveryVideoCard(
 
 @Composable
 private fun DiscoveryLoadingView() {
-    Box(
+    Column(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         CircularProgressIndicator(
             color = Color.Cyan,
             modifier = Modifier.size(48.dp)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "Discovering amazing content...",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.8f)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Finding videos from all time periods",
+            fontSize = 14.sp,
+            color = Color.White.copy(alpha = 0.6f)
         )
     }
 }
@@ -609,34 +936,52 @@ private fun DiscoveryErrorView(
     message: String,
     onRetry: () -> Unit
 ) {
-    Box(
+    Column(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = null,
+            modifier = Modifier.size(50.dp),
+            tint = Color.Yellow
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Oops!",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = message,
+            fontSize = 14.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 40.dp)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = onRetry,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Cyan,
+                contentColor = Color.Black
+            ),
+            shape = RoundedCornerShape(25.dp),
+            modifier = Modifier.padding(horizontal = 40.dp)
         ) {
             Text(
-                text = "Discovery Error",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                text = "Try Again",
+                fontWeight = FontWeight.SemiBold
             )
-            Text(
-                text = message,
-                fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center
-            )
-            Button(
-                onClick = onRetry,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Cyan
-                )
-            ) {
-                Text("Retry")
-            }
         }
     }
 }

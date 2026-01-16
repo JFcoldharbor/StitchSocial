@@ -1,8 +1,9 @@
 /*
- * CameraView.kt - GALLERY PICKER INTEGRATION FIXED
+ * CameraView.kt - FIXED CAMERA CLEANUP
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Camera recording interface with complete VideoCoordinator integration
+ * FIXED: Proper camera unbinding in DisposableEffect to remove recording indicator
  * FIXED: Gallery picker now routes through NavigationCoordinator for proper processing
  * UPDATED: Gallery videos go through same parallel processing pipeline as recorded videos
  */
@@ -51,6 +52,7 @@ import com.stitchsocial.club.viewmodels.CameraViewModel
 /**
  * Complete Camera recording interface with VideoCoordinator pipeline integration
  * GALLERY FIX: Gallery button now triggers NavigationCoordinator for proper processing
+ * CAMERA FIX: Proper resource cleanup removes recording indicator from status bar
  */
 @Composable
 fun CameraView(
@@ -391,11 +393,52 @@ fun CameraView(
         }
     }
 
-    // Cleanup on dispose
+    // ✅ FIXED: Proper cleanup on dispose - UNBINDS CAMERA to remove recording indicator
     DisposableEffect(Unit) {
         onDispose {
+            println("📷 CAMERA CLEANUP: DisposableEffect onDispose triggered")
+
+            // 1. Stop any active recording first
+            recording?.let { activeRecording ->
+                println("📷 CAMERA CLEANUP: Stopping active recording...")
+                try {
+                    activeRecording.stop()
+                } catch (e: Exception) {
+                    println("📷 CAMERA CLEANUP: Error stopping recording - ${e.message}")
+                }
+            }
+            recording = null
+
+            // 2. Clean up any temporary file
+            currentVideoFile?.let { file ->
+                if (file.exists()) {
+                    file.delete()
+                    println("📷 CAMERA CLEANUP: Deleted temp file")
+                }
+            }
+            currentVideoFile = null
+
+            // 3. ✅ CRITICAL: Unbind camera to release camera/microphone resources
+            // This is what removes the green recording indicator!
+            cameraProvider?.let { provider ->
+                println("📷 CAMERA CLEANUP: Unbinding all camera use cases...")
+                try {
+                    provider.unbindAll()
+                    println("📷 CAMERA CLEANUP: ✅ Camera unbound successfully - indicator should disappear")
+                } catch (e: Exception) {
+                    println("📷 CAMERA CLEANUP: Error unbinding camera - ${e.message}")
+                }
+            }
+
+            // 4. Clear references
+            preview = null
+            videoCapture = null
+            cameraProvider = null
+
+            // 5. Shutdown executor
             cameraExecutor.shutdown()
-            println("CAMERA: Camera disposed - videos will reload on navigation back")
+
+            println("📷 CAMERA CLEANUP: ✅ Complete - all resources released")
         }
     }
 }

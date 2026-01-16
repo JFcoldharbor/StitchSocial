@@ -1,11 +1,12 @@
 /*
- * SearchService.kt - COMPLETE WITH HASHTAG SUPPORT
+ * SearchService.kt - FIXED: PARENT VIDEOS ONLY IN DISCOVERY
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 4: Core Services - User & Video Search with Hashtag Support
- * Dependencies: Firebase Firestore, BasicUserInfo, CoreVideoMetadata
- * Features: User discovery, video search, hashtag search, trending hashtags
- * BLUEPRINT: SearchService.swift exact port + hashtag extensions
+ *
+ * ✅ FIXED: getRecentVideos now filters conversationDepth == 0 (parents only)
+ * ✅ FIXED: searchVideos now filters conversationDepth == 0 (parents only)
+ * ✅ FIXED: searchByHashtag now filters conversationDepth == 0 (parents only)
  */
 
 package com.stitchsocial.club.services
@@ -28,7 +29,7 @@ import java.util.Date
  */
 class SearchService {
 
-    // Use default database for consistency
+    // Use stitchfin database
     private val db = FirebaseFirestore.getInstance("stitchfin")
     private val auth = FirebaseAuth.getInstance()
 
@@ -42,13 +43,11 @@ class SearchService {
 
     /**
      * Search users - if query empty, show all users for browsing
-     * EXACT iOS PORT: SearchService.swift searchUsers method
      */
     suspend fun searchUsers(
         query: String,
         limit: Int = DEFAULT_LIMIT
     ): List<BasicUserInfo> {
-
         println("🔍 SEARCH: searchUsers called - query: '$query', limit: $limit")
 
         val trimmedQuery = query.trim()
@@ -61,8 +60,7 @@ class SearchService {
     }
 
     /**
-     * Get all users for browsing - SIMPLE QUERY, NO INDEXES
-     * EXACT iOS PORT: SearchService.swift getAllUsers method
+     * Get all users for browsing
      */
     private suspend fun getAllUsers(limit: Int = DEFAULT_LIMIT): List<BasicUserInfo> {
         return try {
@@ -81,13 +79,12 @@ class SearchService {
 
         } catch (e: Exception) {
             println("❌ SEARCH: getAllUsers failed: ${e.message}")
-            emptyList<BasicUserInfo>()
+            emptyList()
         }
     }
 
     /**
-     * Search users by text - comprehensive search
-     * EXACT iOS PORT: SearchService.swift searchUsersByText method
+     * Search users by text
      */
     private suspend fun searchUsersByText(
         query: String,
@@ -99,46 +96,36 @@ class SearchService {
 
             println("🔍 SEARCH: searchUsersByText - query: '$lowercaseQuery'")
 
-            // Search by username (primary)
             val usernameSnapshot = db.collection(USERS_COLLECTION)
                 .whereGreaterThanOrEqualTo("username", lowercaseQuery)
                 .whereLessThan("username", lowercaseQuery + "\uf8ff")
-                .limit((limit * 0.7).toLong()) // 70% for username matches
+                .limit((limit * 0.7).toLong())
                 .get()
                 .await()
 
-            // Search by display name (secondary)
             val displayNameSnapshot = db.collection(USERS_COLLECTION)
                 .whereGreaterThanOrEqualTo("displayName", lowercaseQuery)
                 .whereLessThan("displayName", lowercaseQuery + "\uf8ff")
-                .limit((limit * 0.3).toLong()) // 30% for display name matches
+                .limit((limit * 0.3).toLong())
                 .get()
                 .await()
 
-            // Combine and deduplicate results
             val allDocuments = (usernameSnapshot.documents + displayNameSnapshot.documents)
                 .distinctBy { it.id }
 
             val users = processUserDocuments(allDocuments, currentUserID)
             println("✅ SEARCH: searchUsersByText found ${users.size} users")
 
-            // FIXED: Explicit type declaration and proper list handling
-            val limitedUsers: List<BasicUserInfo> = if (users.size > limit) {
-                users.subList(0, limit)
-            } else {
-                users
-            }
-            limitedUsers
+            if (users.size > limit) users.subList(0, limit) else users
 
         } catch (e: Exception) {
             println("❌ SEARCH: searchUsersByText failed: ${e.message}")
-            emptyList<BasicUserInfo>()
+            emptyList()
         }
     }
 
     /**
-     * Search videos by title - simple search
-     * EXACT iOS PORT: SearchService.swift searchVideos method
+     * Search videos by title - PARENT VIDEOS ONLY
      */
     suspend fun searchVideos(
         query: String,
@@ -147,7 +134,9 @@ class SearchService {
         return try {
             val lowercaseQuery = query.lowercase()
 
+            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
+                .whereEqualTo("conversationDepth", 0)
                 .whereGreaterThanOrEqualTo("title", lowercaseQuery)
                 .whereLessThan("title", lowercaseQuery + "\uf8ff")
                 .limit(limit.toLong())
@@ -155,97 +144,183 @@ class SearchService {
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: searchVideos found ${videos.size} videos")
+            println("✅ SEARCH: searchVideos found ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
             println("❌ SEARCH: searchVideos failed: ${e.message}")
-            emptyList<CoreVideoMetadata>()
+            // Fallback: Query without conversationDepth filter, then filter in code
+            searchVideosFallback(query, limit)
         }
     }
 
     /**
-     * Get recent videos for discovery
-     * EXACT iOS PORT: SearchService.swift getRecentVideos method
+     * Fallback search if composite index doesn't exist
+     */
+    private suspend fun searchVideosFallback(
+        query: String,
+        limit: Int
+    ): List<CoreVideoMetadata> {
+        return try {
+            val lowercaseQuery = query.lowercase()
+
+            val snapshot = db.collection(VIDEOS_COLLECTION)
+                .whereGreaterThanOrEqualTo("title", lowercaseQuery)
+                .whereLessThan("title", lowercaseQuery + "\uf8ff")
+                .limit((limit * 2).toLong()) // Get more to filter
+                .get()
+                .await()
+
+            val videos = processVideoDocuments(snapshot.documents)
+                .filter { it.conversationDepth == 0 } // Filter parents only
+                .take(limit)
+
+            println("✅ SEARCH: searchVideosFallback found ${videos.size} parent videos")
+            videos
+
+        } catch (e: Exception) {
+            println("❌ SEARCH: searchVideosFallback failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Get recent videos for discovery - PARENT VIDEOS ONLY
+     * ✅ FIXED: Now filters conversationDepth == 0
      */
     suspend fun getRecentVideos(limit: Int = 20): List<CoreVideoMetadata> {
         return try {
+            println("🔍 SEARCH: getRecentVideos - loading parent videos only")
+
+            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
+                .whereEqualTo("conversationDepth", 0)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get()
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: getRecentVideos loaded ${videos.size} videos")
+            println("✅ SEARCH: getRecentVideos loaded ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
             println("❌ SEARCH: getRecentVideos failed: ${e.message}")
-            emptyList<CoreVideoMetadata>()
+            // Fallback: Query without filter, then filter in code
+            getRecentVideosFallback(limit)
         }
     }
 
-    // MARK: - NEW HASHTAG SEARCH METHODS
+    /**
+     * Fallback if composite index doesn't exist
+     */
+    private suspend fun getRecentVideosFallback(limit: Int): List<CoreVideoMetadata> {
+        return try {
+            println("🔍 SEARCH: getRecentVideosFallback - using code filter")
+
+            val snapshot = db.collection(VIDEOS_COLLECTION)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit((limit * 3).toLong()) // Get more to filter
+                .get()
+                .await()
+
+            val videos = processVideoDocuments(snapshot.documents)
+                .filter { it.conversationDepth == 0 } // Filter parents only
+                .take(limit)
+
+            println("✅ SEARCH: getRecentVideosFallback loaded ${videos.size} parent videos")
+            videos
+
+        } catch (e: Exception) {
+            println("❌ SEARCH: getRecentVideosFallback failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    // MARK: - Hashtag Search Methods
 
     /**
-     * Search videos by hashtag
-     * @param hashtag Hashtag to search for (with or without #)
-     * @param limit Maximum number of results
-     * @return List of videos containing the hashtag
+     * Search videos by hashtag - PARENT VIDEOS ONLY
      */
     suspend fun searchByHashtag(hashtag: String, limit: Int = DEFAULT_LIMIT): List<CoreVideoMetadata> {
         return try {
             val cleanHashtag = hashtag.removePrefix("#").lowercase()
             println("🏷️ SEARCH: searchByHashtag - hashtag: '$cleanHashtag'")
 
+            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereArrayContains("hashtags", cleanHashtag)
+                .whereEqualTo("conversationDepth", 0)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get()
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: searchByHashtag found ${videos.size} videos for #$cleanHashtag")
+            println("✅ SEARCH: searchByHashtag found ${videos.size} parent videos for #$cleanHashtag")
             videos
 
         } catch (e: Exception) {
             println("❌ SEARCH: searchByHashtag failed: ${e.message}")
-            emptyList<CoreVideoMetadata>()
+            // Fallback
+            searchByHashtagFallback(hashtag, limit)
+        }
+    }
+
+    /**
+     * Fallback hashtag search
+     */
+    private suspend fun searchByHashtagFallback(hashtag: String, limit: Int): List<CoreVideoMetadata> {
+        return try {
+            val cleanHashtag = hashtag.removePrefix("#").lowercase()
+
+            val snapshot = db.collection(VIDEOS_COLLECTION)
+                .whereArrayContains("hashtags", cleanHashtag)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit((limit * 2).toLong())
+                .get()
+                .await()
+
+            val videos = processVideoDocuments(snapshot.documents)
+                .filter { it.conversationDepth == 0 }
+                .take(limit)
+
+            println("✅ SEARCH: searchByHashtagFallback found ${videos.size} parent videos")
+            videos
+
+        } catch (e: Exception) {
+            println("❌ SEARCH: searchByHashtagFallback failed: ${e.message}")
+            emptyList()
         }
     }
 
     /**
      * Get trending hashtags based on recent usage
-     * @param limit Maximum number of hashtags to return
-     * @return List of trending hashtag strings
      */
     suspend fun getTrendingHashtags(limit: Int = 20): List<String> {
         return try {
             println("📈 SEARCH: getTrendingHashtags - loading recent videos")
 
-            // Get recent videos to analyze hashtag frequency
-            val cutoffDate = Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+            val cutoffDate = Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000)
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereGreaterThan("createdAt", Timestamp(cutoffDate))
+                .whereEqualTo("conversationDepth", 0) // Only count from parent videos
                 .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(500) // Analyze last 500 videos
+                .limit(500)
                 .get()
                 .await()
 
-            // Count hashtag frequency
             val hashtagCounts = mutableMapOf<String, Int>()
 
             for (document in snapshot.documents) {
-                val hashtags = document.get("hashtags") as? List<*>
-                hashtags?.forEach { hashtag ->
-                    val cleanHashtag = hashtag.toString().lowercase()
-                    hashtagCounts[cleanHashtag] = hashtagCounts.getOrDefault(cleanHashtag, 0) + 1
+                @Suppress("UNCHECKED_CAST")
+                val hashtags = document.get("hashtags") as? List<String> ?: continue
+                hashtags.forEach { hashtag ->
+                    val clean = hashtag.lowercase()
+                    hashtagCounts[clean] = hashtagCounts.getOrDefault(clean, 0) + 1
                 }
             }
 
-            // Sort by frequency and return top hashtags
             val trending = hashtagCounts.entries
                 .sortedByDescending { it.value }
                 .take(limit)
@@ -256,108 +331,34 @@ class SearchService {
 
         } catch (e: Exception) {
             println("❌ SEARCH: getTrendingHashtags failed: ${e.message}")
-            emptyList<String>()
+            emptyList()
         }
     }
 
-    /**
-     * Get hashtag suggestions based on partial input
-     * @param partialHashtag Partial hashtag text to match
-     * @param limit Maximum suggestions to return
-     * @return List of suggested hashtag strings
-     */
-    suspend fun getHashtagSuggestions(partialHashtag: String, limit: Int = 10): List<String> {
-        return try {
-            val cleanPartial = partialHashtag.removePrefix("#").lowercase()
-            println("💡 SEARCH: getHashtagSuggestions - partial: '$cleanPartial'")
-
-            // Get trending hashtags first
-            val trendingHashtags = getTrendingHashtags(50)
-
-            // Filter trending hashtags that match the partial input
-            val suggestions = trendingHashtags
-                .filter { it.startsWith(cleanPartial) }
-                .take(limit)
-
-            println("✅ SEARCH: getHashtagSuggestions found ${suggestions.size} suggestions")
-            suggestions
-
-        } catch (e: Exception) {
-            println("❌ SEARCH: getHashtagSuggestions failed: ${e.message}")
-            emptyList<String>()
-        }
-    }
+    // MARK: - Document Processing
 
     /**
-     * Search videos by hashtag with trending boost
-     * @param hashtag Hashtag to search for
-     * @param limit Maximum results
-     * @return Videos sorted by relevance and trending score
-     */
-    suspend fun searchByHashtagTrending(hashtag: String, limit: Int = DEFAULT_LIMIT): List<CoreVideoMetadata> {
-        return try {
-            val cleanHashtag = hashtag.removePrefix("#").lowercase()
-            println("🔥 SEARCH: searchByHashtagTrending - hashtag: '$cleanHashtag'")
-
-            val snapshot = db.collection(VIDEOS_COLLECTION)
-                .whereArrayContains("hashtags", cleanHashtag)
-                .orderBy("trendingScore", Query.Direction.DESCENDING)
-                .limit(limit.toLong())
-                .get()
-                .await()
-
-            val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: searchByHashtagTrending found ${videos.size} trending videos for #$cleanHashtag")
-            videos
-
-        } catch (e: Exception) {
-            println("❌ SEARCH: searchByHashtagTrending failed: ${e.message}")
-            emptyList<CoreVideoMetadata>()
-        }
-    }
-
-    // MARK: - Helper Methods (iOS Port)
-
-    /**
-     * Convert user documents to BasicUserInfo objects
-     * EXACT iOS PORT: SearchService.swift processUserDocuments method
+     * Process user documents into BasicUserInfo list
      */
     private fun processUserDocuments(
         documents: List<DocumentSnapshot>,
         currentUserID: String?
     ): List<BasicUserInfo> {
-
-        val users = mutableListOf<BasicUserInfo>()
-
-        for (document in documents) {
-            // Skip current user
-            if (currentUserID != null && document.id == currentUserID) {
-                continue
-            }
-
-            // Use existing BasicUserInfo.fromFirebaseDocument method
-            val user = BasicUserInfo.fromFirebaseDocument(document)
-            if (user != null) {
-                users.add(user)
-            }
-        }
-
-        return users.toList()
+        return documents.mapNotNull { doc ->
+            BasicUserInfo.fromFirebaseDocument(doc)
+        }.filter { it.id != currentUserID }
     }
 
     /**
-     * Convert video documents to CoreVideoMetadata objects with HASHTAG SUPPORT
-     * EXACT iOS PORT: SearchService.swift processVideoDocuments method + hashtags
+     * Process video documents into CoreVideoMetadata list
      */
     private fun processVideoDocuments(documents: List<DocumentSnapshot>): List<CoreVideoMetadata> {
-
         val videos = mutableListOf<CoreVideoMetadata>()
 
         for (document in documents) {
             val data = document.data ?: continue
 
             try {
-                // Parse enum values safely
                 val temperatureString = data["temperature"] as? String ?: "WARM"
                 val temperature = try {
                     Temperature.valueOf(temperatureString.uppercase())
@@ -372,9 +373,9 @@ class SearchService {
                     ContentType.THREAD
                 }
 
-                // Parse hashtags array (NEW)
-                val hashtagsRaw = data["hashtags"] as? List<*>
-                val hashtags = hashtagsRaw?.mapNotNull { it?.toString()?.lowercase() } ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val hashtagsRaw = data["hashtags"] as? List<String>
+                val hashtags = hashtagsRaw?.map { it.lowercase() } ?: emptyList()
 
                 val video = CoreVideoMetadata(
                     id = document.id,
@@ -385,7 +386,7 @@ class SearchService {
                     creatorID = data["creatorID"] as? String ?: "",
                     creatorName = data["creatorName"] as? String ?: "",
                     createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: Date(),
-                    hashtags = hashtags, // NEW: Include parsed hashtags
+                    hashtags = hashtags,
                     threadID = data["threadID"] as? String,
                     replyToVideoID = data["replyToVideoID"] as? String,
                     conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0,
@@ -396,7 +397,7 @@ class SearchService {
                     shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0,
                     lastEngagementAt = (data["lastEngagementAt"] as? Timestamp)?.toDate(),
                     duration = data["duration"] as? Double ?: 0.0,
-                    aspectRatio = data["aspectRatio"] as? Double ?: (9.0/16.0),
+                    aspectRatio = data["aspectRatio"] as? Double ?: (9.0 / 16.0),
                     fileSize = data["fileSize"] as? Long ?: 0L,
                     contentType = contentType,
                     temperature = temperature,
@@ -422,7 +423,6 @@ class SearchService {
 
     /**
      * Test method to verify service is working
-     * EXACT iOS PORT: SearchService.swift testSearchService method
      */
     suspend fun testSearchService() {
         println("🔍 SEARCH: Testing simple user discovery...")
@@ -438,13 +438,10 @@ class SearchService {
 
 // MARK: - Search Results Container
 
-/**
- * Search results container - exact iOS port with hashtag support
- */
 data class SearchResults(
     val users: List<BasicUserInfo> = emptyList(),
     val videos: List<CoreVideoMetadata> = emptyList(),
-    val hashtags: List<String> = emptyList() // NEW: Hashtag results
+    val hashtags: List<String> = emptyList()
 ) {
     val totalResults: Int get() = users.size + videos.size + hashtags.size
     val hasResults: Boolean get() = totalResults > 0

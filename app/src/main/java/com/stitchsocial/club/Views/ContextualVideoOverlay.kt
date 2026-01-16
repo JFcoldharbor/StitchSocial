@@ -6,13 +6,16 @@
  * Dependencies: EngagementViewModel, UserService, AuthService, FollowManager, VideoService
  * Features: Static overlay, special user permissions, context-aware profile navigation
  *
+ * UPDATED: Fixed sizing - non-scaled fonts, responsive padding, size constraints
  * UPDATED: Integrated ShareButton, SwipeForRepliesBanner, TaggedUsersRow from iOS
+ * ✅ ADDED: Automatic view tracking when video is displayed
  */
 
 package com.stitchsocial.club.views
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -29,11 +32,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -46,16 +53,74 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 
+// StateFlow collection
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
 // Foundation imports
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.engagement.HypeRatingCalculator
 import com.stitchsocial.club.FollowManager
 
 // 3D Button imports
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
+
+// ============================================================================
+// MARK: - NON-SCALED TEXT SIZE UTILITIES
+// ============================================================================
+
+/**
+ * Extension to create non-scaled sp values
+ * This prevents text from scaling with system accessibility font settings
+ * Use this for overlay UI elements that must maintain fixed sizes
+ */
+@Composable
+fun Int.fixedSp(): TextUnit {
+    val density = LocalDensity.current
+    return with(density) {
+        // Convert dp to sp, effectively ignoring font scale
+        (this@fixedSp / density.fontScale).sp
+    }
+}
+
+@Composable
+fun Float.fixedSp(): TextUnit {
+    val density = LocalDensity.current
+    return with(density) {
+        (this@fixedSp / density.fontScale).sp
+    }
+}
+
+/**
+ * Object containing all fixed overlay text sizes
+ * Centralized for easy adjustment
+ */
+object OverlaySizes {
+    // Text sizes (will be converted to non-scaled sp)
+    const val LABEL_TINY = 9
+    const val LABEL_SMALL = 10
+    const val LABEL_MEDIUM = 11
+    const val LABEL_REGULAR = 12
+    const val LABEL_LARGE = 13
+    const val TITLE = 14
+
+    // Component sizes (dp - already fixed)
+    val BUTTON_SIZE = 42.dp
+    val BUTTON_SIZE_SMALL = 32.dp
+    val BUTTON_SIZE_LARGE = 52.dp
+    val ICON_SIZE = 18.dp
+    val ICON_SIZE_SMALL = 14.dp
+    val ICON_SIZE_TINY = 10.dp
+    val PROFILE_IMAGE = 24.dp
+    val PROFILE_IMAGE_THREAD = 28.dp
+
+    // Spacing
+    val BOTTOM_PADDING_MIN = 60.dp
+    val BOTTOM_PADDING_MAX = 100.dp
+}
 
 // MARK: - Enums
 
@@ -177,6 +242,29 @@ fun ContextualVideoOverlay(
     val hapticFeedback = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
+    // Get screen configuration for responsive sizing
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenHeight = configuration.screenHeightDp.dp
+
+    // Debug: Log font scale to detect accessibility settings
+    LaunchedEffect(Unit) {
+        Log.d("OVERLAY_SIZE", "Screen: ${configuration.screenWidthDp}x${configuration.screenHeightDp}dp")
+        Log.d("OVERLAY_SIZE", "Density: ${density.density}, FontScale: ${density.fontScale}")
+        if (density.fontScale > 1.0f) {
+            Log.w("OVERLAY_SIZE", "⚠️ Font scaling active (${density.fontScale}x) - using fixed sizes")
+        }
+    }
+
+    // Calculate responsive bottom padding based on screen height
+    val bottomPadding = remember(screenHeight) {
+        when {
+            screenHeight < 600.dp -> OverlaySizes.BOTTOM_PADDING_MIN
+            screenHeight > 800.dp -> OverlaySizes.BOTTOM_PADDING_MAX
+            else -> 80.dp // Medium screens
+        }
+    }
+
     // State
     var isLoadingUserData by remember { mutableStateOf(false) }
     var realCreatorName by remember { mutableStateOf<String?>(null) }
@@ -186,8 +274,67 @@ fun ContextualVideoOverlay(
     var videoEngagement by remember { mutableStateOf<ContextualVideoEngagement?>(null) }
     var videoDescription by remember { mutableStateOf<String?>(null) }
     var showViewersSheet by remember { mutableStateOf(false) }
-    var isFollowing by remember { mutableStateOf(false) }
-    var isFollowLoading by remember { mutableStateOf(false) }
+
+    // Services for view tracking
+    val videoService = remember { VideoServiceImpl() }
+    val userService = remember { UserService(context) }
+    val authService = remember { AuthService() }
+
+    // Track video views - only once per video per user session
+    LaunchedEffect(video.id, currentUserID) {
+        // Only track if we have a current user
+        if (currentUserID != null) {
+            try {
+                // Get user data for viewer record
+                val userData = userService.getUserProfile(currentUserID)
+
+                val viewerData = mapOf(
+                    "displayName" to (userData?.displayName ?: "User"),
+                    "username" to (userData?.username ?: ""),
+                    "profileImageURL" to (userData?.profileImageURL ?: ""),
+                    "tier" to (userData?.tier?.name ?: "ROOKIE")
+                )
+
+                // Record the view in database
+                videoService.recordVideoView(video.id, currentUserID, viewerData)
+
+                // Update local engagement data to reflect the new view
+                videoEngagement?.let { currentEngagement ->
+                    videoEngagement = currentEngagement.copy(
+                        viewCount = currentEngagement.viewCount + 1
+                    )
+                }
+
+                Log.d("VIEW_TRACKING", "✅ Recorded view for video ${video.id} by user $currentUserID")
+            } catch (e: Exception) {
+                Log.e("VIEW_TRACKING", "❌ Failed to record view: ${e.message}")
+            }
+        } else {
+            Log.d("VIEW_TRACKING", "⚠️ No currentUserID - skipping view tracking for video ${video.id}")
+        }
+    }
+
+    // =========================================================================
+    // FOLLOW STATE - Observe from FollowManager StateFlow for app-wide sync
+    // =========================================================================
+
+    // Collect follow states from FollowManager (reactive - updates across app)
+    val followingStates by followManager?.followingStates?.collectAsStateWithLifecycle(
+        initialValue = emptyMap()
+    ) ?: remember { mutableStateOf(emptyMap()) }
+
+    val loadingStates by followManager?.loadingStates?.collectAsStateWithLifecycle(
+        initialValue = emptySet()
+    ) ?: remember { mutableStateOf(emptySet()) }
+
+    // Derive follow state from the observed StateFlow
+    val isFollowing = followingStates[video.creatorID] ?: false
+    val isFollowLoading = loadingStates.contains(video.creatorID)
+
+    // Debug: Log when follow state changes
+    LaunchedEffect(isFollowing) {
+        Log.d("OVERLAY_FOLLOW", "Follow state changed for ${video.creatorID}: $isFollowing")
+    }
 
     // Computed properties
     val displayReplyCount: Int = actualReplyCount ?: video.replyCount
@@ -222,9 +369,6 @@ fun ContextualVideoOverlay(
     val stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector = if (isUserVideo) Icons.Default.AddCircle else Icons.Default.ContentCut
     val stitchButtonLabel: String = if (isUserVideo) "Continue" else "Stitch"
     val stitchButtonRingColor: Color = if (isUserVideo) Color.Green else Color(0xFF9C27B0)
-
-    // UserService for fetching profile data
-    val userService = remember { UserService(context) }
 
     // Load user data - fetch from service if not cached
     LaunchedEffect(video.creatorID) {
@@ -296,11 +440,11 @@ fun ContextualVideoOverlay(
         }
     }
 
-    // Load follow state
+    // Load follow state from server on first appearance
+    // The StateFlow will automatically update when state changes
     LaunchedEffect(video.creatorID) {
-        followManager?.let {
-            isFollowing = it.isFollowing(video.creatorID)
-        }
+        followManager?.loadFollowState(video.creatorID)
+        Log.d("OVERLAY_FOLLOW", "Loading follow state for ${video.creatorID}")
     }
 
     // Initialize engagement data
@@ -352,16 +496,15 @@ fun ContextualVideoOverlay(
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
                 followManager = followManager,
+                bottomPadding = bottomPadding,
                 context = context,
                 hapticFeedback = hapticFeedback,
                 scope = scope,
                 onFollowToggle = {
-                    scope.launch {
-                        isFollowLoading = true
-                        followManager?.toggleFollow(video.creatorID)
-                        isFollowing = followManager?.isFollowing(video.creatorID) ?: false
-                        isFollowLoading = false
-                    }
+                    // FollowManager handles state updates via StateFlow
+                    // No need to manually update local state
+                    followManager?.toggleFollow(video.creatorID)
+                    Log.d("OVERLAY_FOLLOW", "Toggle follow for ${video.creatorID}, current: $isFollowing")
                 },
                 onViewersTap = { showViewersSheet = true },
                 onAction = onAction
@@ -407,6 +550,10 @@ private fun MinimalDiscoveryOverlay(
     context: Context,
     onAction: ((OverlayAction) -> Unit)?
 ) {
+    // Fixed text sizes
+    val nameFontSize = OverlaySizes.LABEL_MEDIUM.fixedSp()
+    val titleFontSize = OverlaySizes.LABEL_LARGE.fixedSp()
+
     Box(modifier = Modifier.fillMaxSize()) {
         // Top: Creator name with temperature dot
         Row(
@@ -431,7 +578,7 @@ private fun MinimalDiscoveryOverlay(
             Text(
                 text = displayCreatorName,
                 color = Color.White,
-                fontSize = 11.sp,
+                fontSize = nameFontSize,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
@@ -447,7 +594,7 @@ private fun MinimalDiscoveryOverlay(
                 Text(
                     text = video.title,
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = titleFontSize,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -509,6 +656,7 @@ private fun FullContextualOverlay(
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
     followManager: FollowManager?,
+    bottomPadding: Dp,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
     scope: kotlinx.coroutines.CoroutineScope,
@@ -546,6 +694,7 @@ private fun FullContextualOverlay(
             currentUserTier = currentUserTier,
             engagementViewModel = engagementViewModel,
             iconManager = iconManager,
+            bottomPadding = bottomPadding,
             context = context,
             hapticFeedback = hapticFeedback,
             scope = scope,
@@ -658,6 +807,7 @@ private fun BottomSection(
     currentUserTier: UserTier,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
+    bottomPadding: Dp,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
     scope: kotlinx.coroutines.CoroutineScope,
@@ -666,10 +816,15 @@ private fun BottomSection(
     onAction: ((OverlayAction) -> Unit)?,
     modifier: Modifier = Modifier
 ) {
+    // Fixed text sizes
+    val titleFontSize = OverlaySizes.TITLE.fixedSp()
+    val descFontSize = OverlaySizes.LABEL_REGULAR.fixedSp()
+    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 100.dp),
+            .padding(bottom = bottomPadding),  // Use responsive padding
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Video Title - with side padding to avoid right column
@@ -677,7 +832,7 @@ private fun BottomSection(
             Text(
                 text = video.title,
                 color = Color.White,
-                fontSize = 14.sp,
+                fontSize = titleFontSize,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -690,7 +845,7 @@ private fun BottomSection(
             Text(
                 text = videoDescription,
                 color = Color.White.copy(alpha = 0.8f),
-                fontSize = 12.sp,
+                fontSize = descFontSize,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 16.dp, end = 70.dp)
@@ -736,7 +891,7 @@ private fun BottomSection(
                     }
                     Text(
                         text = if (isFollowing) "Following" else "Follow",
-                        fontSize = 10.sp,
+                        fontSize = labelFontSize,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isFollowing) Color.White else Color.Black
                     )
@@ -850,9 +1005,10 @@ private fun CreatorPill(
     isThread: Boolean,
     onClick: () -> Unit
 ) {
-    val imageSize: Dp = if (isThread) 28.dp else 24.dp
+    val imageSize: Dp = if (isThread) OverlaySizes.PROFILE_IMAGE_THREAD else OverlaySizes.PROFILE_IMAGE
     val cornerRadius: Dp = if (isThread) 16.dp else 12.dp
-    val fontSize = if (isThread) 13.sp else 11.sp
+    val fontSize = if (isThread) OverlaySizes.LABEL_LARGE.fixedSp() else OverlaySizes.LABEL_MEDIUM.fixedSp()
+    val threadLabelSize = OverlaySizes.LABEL_TINY.fixedSp()
 
     Row(
         modifier = Modifier
@@ -931,7 +1087,7 @@ private fun CreatorPill(
                 if (isThread) {
                     Text(
                         text = "thread creator",
-                        fontSize = 9.sp,
+                        fontSize = threadLabelSize,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.6f)
                     )
@@ -951,8 +1107,9 @@ private fun TaggedUsersRow(
     if (taggedUserIDs.isEmpty()) return
 
     val maxVisible: Int = 3
-    val avatarSize: Dp = 24.dp
+    val avatarSize: Dp = OverlaySizes.PROFILE_IMAGE
     val overlap: Dp = 8.dp
+    val labelFontSize = OverlaySizes.LABEL_TINY.fixedSp()
 
     Row(
         modifier = Modifier
@@ -968,7 +1125,7 @@ private fun TaggedUsersRow(
             imageVector = Icons.Default.People,
             contentDescription = null,
             tint = Color(0xFF9C27B0),
-            modifier = Modifier.size(11.dp)
+            modifier = Modifier.size(OverlaySizes.ICON_SIZE_SMALL)
         )
 
         // Stacked avatars
@@ -998,7 +1155,7 @@ private fun TaggedUsersRow(
         if (taggedUserIDs.size > maxVisible) {
             Text(
                 text = "+${taggedUserIDs.size - maxVisible}",
-                fontSize = 9.sp,
+                fontSize = labelFontSize,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 modifier = Modifier
@@ -1017,6 +1174,8 @@ private fun VideoMetadataRow(
     isUserVideo: Boolean,
     onViewersTap: () -> Unit
 ) {
+    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1033,26 +1192,26 @@ private fun VideoMetadataRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(10.dp))
-                    Text("${formatCount(engagement.viewCount)} views", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
+                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
+                    Text("${formatCount(engagement.viewCount)} views", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(10.dp))
-                    Text("${formatCount(engagement.viewCount)} views", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
+                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
+                    Text("${formatCount(engagement.viewCount)} views", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
                 }
             }
 
-            Text("•", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+            Text("•", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.5f))
 
             // Stitches
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.ContentCut, null, tint = Color.Cyan.copy(alpha = 0.7f), modifier = Modifier.size(10.dp))
-                Text("${formatCount(engagement.replyCount)} stitches", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.Cyan.copy(alpha = 0.9f))
+                Icon(Icons.Default.ContentCut, null, tint = Color.Cyan.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
+                Text("${formatCount(engagement.replyCount)} stitches", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.Cyan.copy(alpha = 0.9f))
             }
         } else {
-            Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(10.dp))
-            Text("Loading...", fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f))
+            Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
+            Text("Loading...", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.9f))
         }
     }
 }
@@ -1076,6 +1235,8 @@ private fun SwipeForRepliesBanner(replyCount: Int) {
     )
 
     val replyText: String = if (replyCount == 1) "reply" else "replies"
+    val countFontSize = OverlaySizes.LABEL_MEDIUM.fixedSp()
+    val hintFontSize = OverlaySizes.LABEL_TINY.fixedSp()
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.scale(pulse)) {
         Row(
@@ -1086,11 +1247,11 @@ private fun SwipeForRepliesBanner(replyCount: Int) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.ContentCut, null, tint = Color.Cyan, modifier = Modifier.size(14.dp))
-            Text("$replyCount $replyText", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Icon(Icons.Default.ArrowForward, null, tint = Color.Cyan.copy(alpha = glowAlpha + 0.3f), modifier = Modifier.size(14.dp).offset(x = arrowOffset.dp))
+            Icon(Icons.Default.ContentCut, null, tint = Color.Cyan, modifier = Modifier.size(OverlaySizes.ICON_SIZE_SMALL))
+            Text("$replyCount $replyText", fontSize = countFontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Icon(Icons.Default.ArrowForward, null, tint = Color.Cyan.copy(alpha = glowAlpha + 0.3f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_SMALL).offset(x = arrowOffset.dp))
         }
-        Text("Swipe →", fontSize = 9.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp))
+        Text("Swipe →", fontSize = hintFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp))
     }
 }
 
@@ -1107,15 +1268,16 @@ private fun ShareButton(
 ) {
     val scope = rememberCoroutineScope()
     var isSharing: Boolean by remember { mutableStateOf(false) }
+    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
 
     val buttonSize: Dp = when (size) {
-        ShareButtonSize.SMALL -> 32.dp
-        ShareButtonSize.MEDIUM -> 42.dp
-        ShareButtonSize.LARGE -> 52.dp
+        ShareButtonSize.SMALL -> OverlaySizes.BUTTON_SIZE_SMALL
+        ShareButtonSize.MEDIUM -> OverlaySizes.BUTTON_SIZE
+        ShareButtonSize.LARGE -> OverlaySizes.BUTTON_SIZE_LARGE
     }
     val iconSize: Dp = when (size) {
-        ShareButtonSize.SMALL -> 14.dp
-        ShareButtonSize.MEDIUM -> 18.dp
+        ShareButtonSize.SMALL -> OverlaySizes.ICON_SIZE_SMALL
+        ShareButtonSize.MEDIUM -> OverlaySizes.ICON_SIZE
         ShareButtonSize.LARGE -> 22.dp
     }
 
@@ -1141,7 +1303,7 @@ private fun ShareButton(
             }
         }
         if (size != ShareButtonSize.SMALL) {
-            Text("Share", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+            Text("Share", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
         }
     }
 }
@@ -1169,19 +1331,21 @@ private fun OverlayActionButton(
     ringColor: Color,
     onClick: () -> Unit
 ) {
+    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
+
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(
             modifier = Modifier
-                .size(42.dp)
+                .size(OverlaySizes.BUTTON_SIZE)
                 .clip(CircleShape)
                 .background(Color.Black.copy(alpha = 0.3f))
                 .border(1.2.dp, ringColor.copy(alpha = 0.4f), CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, label, tint = Color.White, modifier = Modifier.size(18.dp))
+            Icon(icon, label, tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))
         }
-        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+        Text(label, fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
     }
 }
 
@@ -1198,7 +1362,7 @@ private fun MoreOptionsButton(onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Default.MoreVert, "More options", tint = Color.White, modifier = Modifier.size(14.dp))
+        Icon(Icons.Default.MoreVert, "More options", tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE_SMALL))
     }
 }
 
@@ -1215,6 +1379,10 @@ private fun ViewersBottomSheet(
 ) {
     if (!isVisible) return
 
+    val titleFontSize = 18.fixedSp()
+    val subtitleFontSize = OverlaySizes.TITLE.fixedSp()
+    val bodyFontSize = OverlaySizes.LABEL_REGULAR.fixedSp()
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = Color.Black,
@@ -1226,11 +1394,11 @@ private fun ViewersBottomSheet(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Who Viewed", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Who Viewed", fontSize = titleFontSize, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("$viewCount views", fontSize = 14.sp, color = Color.White.copy(alpha = 0.7f))
+            Text("$viewCount views", fontSize = subtitleFontSize, color = Color.White.copy(alpha = 0.7f))
             Spacer(modifier = Modifier.height(24.dp))
-            Text("Viewer list coming soon...", fontSize = 12.sp, color = Color.Gray)
+            Text("Viewer list coming soon...", fontSize = bodyFontSize, color = Color.Gray)
             Spacer(modifier = Modifier.height(32.dp))
         }
     }

@@ -9,7 +9,7 @@
  * FIXED: Waits for AI result to exist before transitioning to ThreadComposer
  */
 
-package com.stitchsocial.club.views
+package com.stitchsocial.club
 
 import android.util.Log
 import androidx.compose.animation.core.*

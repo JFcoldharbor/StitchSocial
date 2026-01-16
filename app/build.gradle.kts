@@ -14,8 +14,8 @@ android {
         applicationId = "com.stitchsocial.club"
         minSdk = 28
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.0.0"
+        versionCode = 16
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -59,6 +59,9 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+
+        // ✅ FIX: Allow experimental Material3 APIs (fixes 9 warnings in ThreadComposer)
+        freeCompilerArgs += "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
     }
 
     buildFeatures {

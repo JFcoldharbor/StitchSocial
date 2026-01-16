@@ -1,5 +1,5 @@
 /*
- * ProfileVideoGrid.kt - WITH DEBUG LOGGING
+ * ProfileVideoGrid.kt - WITH DEBUG LOGGING & DELETION
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 8: Views - Matches Swift ProfileVideoGrid.swift exactly
@@ -9,6 +9,7 @@
  * ✅ UPDATED: Now uses VideoThumbnailView component for proper thumbnail display
  * ✅ FIXED: Replaced LazyVerticalGrid with height-constrained Column
  * ✅ DEBUG: Added logging to diagnose thumbnail issues
+ * ✅ DELETION: Users can delete videos from their own profile only
  */
 
 package com.stitchsocial.club
@@ -148,13 +149,33 @@ private fun VideoGridItem(
     var showContextMenu by remember { mutableStateOf(false) }
     var isDeletingVideo by remember { mutableStateOf(false) }
 
+    // Debug logging
+    LaunchedEffect(isCurrentUserProfile, onVideoDelete) {
+        println("🔍 VIDEO GRID ITEM: ${video.id}")
+        println("   isCurrentUserProfile = $isCurrentUserProfile")
+        println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
+        println("   canDelete = ${isCurrentUserProfile && onVideoDelete != null}")
+    }
+
     Box(
         modifier = modifier
             .combinedClickable(
-                onClick = onVideoTap,
+                onClick = {
+                    println("👆 SHORT TAP on ${video.title}")
+                    onVideoTap()
+                },
                 onLongClick = {
+                    println("👆 LONG PRESS on ${video.title}")
+                    println("   isCurrentUserProfile = $isCurrentUserProfile")
+                    println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
+
                     if (isCurrentUserProfile && onVideoDelete != null) {
+                        println("✅ SHOWING DELETE MENU for ${video.title}")
                         showContextMenu = true
+                    } else {
+                        println("❌ DELETE NOT ALLOWED")
+                        println("   isCurrentUserProfile = $isCurrentUserProfile")
+                        println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
                     }
                 }
             )
@@ -217,7 +238,7 @@ private fun VideoGridItem(
 @Composable
 private fun VideoThumbnailContent(
     video: BasicVideoInfo,
-    onTap: () -> Unit
+    onTap: () -> Unit  // Not used directly - parent Box handles gestures
 ) {
     val context = LocalContext.current
 
@@ -249,7 +270,7 @@ private fun VideoThumbnailContent(
             .fillMaxSize()
             .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF1C1C1E))
-            .clickable(onClick = onTap)
+        // Removed .clickable() - parent Box handles all click/long-press gestures
     ) {
         if (imageUrl != null) {
             SubcomposeAsyncImage(

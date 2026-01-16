@@ -1,5 +1,5 @@
 /*
- * VideoCoordinator.kt - FIXED WITH THREAD HIERARCHY CALCULATION
+ * VideoCoordinator.kt - FIXED WITH THREAD HIERARCHY + USER TAGGING
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 6: Coordination - Video processing with parallel tasks
@@ -9,6 +9,7 @@
  * ✅ FIXED: Proper threadID, replyToVideoID, conversationDepth calculation
  * ✅ FIXED: Fetches parent video before creating child/stepchild
  * ✅ FIXED: Matches Swift ThreadService hierarchy logic exactly
+ * ✅ NEW: taggedUserIDs support for user tagging feature
  */
 
 package com.stitchsocial.club.coordination
@@ -29,6 +30,7 @@ import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AIVideoAnalyzer
 import com.stitchsocial.club.services.VideoAnalysisResult
+import com.stitchsocial.club.AppConfig
 
 // Firebase imports
 import com.google.firebase.firestore.FirebaseFirestore
@@ -41,6 +43,7 @@ import android.net.Uri
 /**
  * VideoCoordinator with complete parallel processing pipeline + proper thread hierarchy
  * ✅ NOW PROPERLY CALCULATES threadID, replyToVideoID, conversationDepth
+ * ✅ NEW: Supports taggedUserIDs for user tagging feature
  */
 class VideoCoordinator(
     private val videoService: VideoServiceImpl,
@@ -209,6 +212,7 @@ class VideoCoordinator(
                 creatorID = auth.currentUser?.uid ?: "anonymous",
                 creatorName = auth.currentUser?.displayName ?: "Anonymous",
                 hashtags = emptyList(),
+                taggedUserIDs = emptyList(), // NEW: Initialize empty
                 createdAt = Date(),
                 threadID = null,
                 replyToVideoID = null,
@@ -280,17 +284,20 @@ class VideoCoordinator(
     /**
      * Complete video creation with user-edited content (called from ThreadComposer)
      * ✅ FIXED: Now properly calculates thread hierarchy based on RecordingContext
+     * ✅ NEW: Supports taggedUserIDs parameter for user tagging
      */
     suspend fun completeVideoCreation(
         userTitle: String,
         userDescription: String,
-        userHashtags: List<String>
+        userHashtags: List<String>,
+        taggedUserIDs: List<String> = emptyList() // NEW: Tagged users parameter
     ): CoreVideoMetadata = withContext(Dispatchers.IO) {
 
         println("🎬 VIDEO COORDINATOR: Completing video creation")
         println("📝 Title: $userTitle")
         println("📄 Description: $userDescription")
         println("🏷️ Hashtags: $userHashtags")
+        println("👥 Tagged Users: ${taggedUserIDs.size} users") // NEW: Log tagged users
 
         val videoPath = _lastProcessedVideoPath.value
             ?: throw IllegalStateException("No video being processed")
@@ -318,11 +325,12 @@ class VideoCoordinator(
                 threadID = hierarchyData.threadID,
                 replyToVideoID = hierarchyData.replyToVideoID,
                 conversationDepth = hierarchyData.conversationDepth,
-                contentType = hierarchyData.contentType
+                contentType = hierarchyData.contentType,
+                taggedUserIDs = taggedUserIDs // NEW: Include tagged users
             )
 
-            // Save to database
-            val finalVideo = createVideoDocument(finalMetadata, userHashtags)
+            // Save to database (now includes taggedUserIDs)
+            val finalVideo = createVideoDocument(finalMetadata, userHashtags, taggedUserIDs)
 
             updateProgress(1.0, "Video creation complete!")
 
@@ -332,6 +340,7 @@ class VideoCoordinator(
             println("🧵 Thread ID: ${finalVideo.threadID}")
             println("↩️ Reply To: ${finalVideo.replyToVideoID}")
             println("📊 Depth: ${finalVideo.conversationDepth}")
+            println("👥 Tagged: ${finalVideo.taggedUserIDs.size} users") // NEW
 
             return@withContext finalVideo
 
@@ -469,6 +478,7 @@ class VideoCoordinator(
                 creatorID = data["creatorID"] as? String ?: "",
                 creatorName = data["creatorName"] as? String ?: "",
                 hashtags = emptyList(),
+                taggedUserIDs = (data["taggedUserIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(), // NEW
                 createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
                 threadID = threadID,
                 replyToVideoID = replyToVideoID,
@@ -534,10 +544,17 @@ class VideoCoordinator(
     private suspend fun analyzeWithAI(videoPath: String): VideoAnalysisResult = withContext(Dispatchers.IO) {
         _parallelPhase.value = "Analyzing with AI..."
         println("🤖 AI: Starting analysis")
+        println("🤖 AI: Video path: $videoPath")
+
+        // Print config status
+        AppConfig.printConfigurationStatus()
 
         return@withContext try {
             // Try to use real AI analyzer if available
-            if (aiAnalyzer.isAIAvailable()) {
+            val isAvailable = aiAnalyzer.isAIAvailable()
+            println("🤖 AI: isAIAvailable = $isAvailable")
+
+            if (isAvailable) {
                 println("🤖 AI: AIVideoAnalyzer is available, attempting analysis")
 
                 // Get the recording context
@@ -565,7 +582,9 @@ class VideoCoordinator(
                 _aiAnalysisProgress.value = 1.0
 
                 if (aiResult != null) {
-                    println("✅ AI: Real analysis complete - ${aiResult.title}")
+                    println("✅ AI: Real analysis complete - title: '${aiResult.title}'")
+                    println("✅ AI: description: '${aiResult.description}'")
+                    println("✅ AI: hashtags: ${aiResult.hashtags}")
                     aiResult  // Return directly - already correct type
                 } else {
                     println("⚠️ AI: Returned null, using fallback")
@@ -583,20 +602,19 @@ class VideoCoordinator(
     }
 
     private suspend fun generateFallbackAI(): VideoAnalysisResult {
-        // Simulate AI processing time
-        for (i in 1..50) {
-            delay(200)
-            _aiAnalysisProgress.value = i / 50.0
-
-            if (i % 10 == 0) {
-                println("🤖 FALLBACK AI: Progress ${(i / 50.0 * 100).toInt()}%")
-            }
+        // Quick progress update (no long delay since we're returning blank)
+        for (i in 1..10) {
+            delay(50)
+            _aiAnalysisProgress.value = i / 10.0
         }
 
+        // Return BLANK fields - user will fill in manually
+        // This matches iOS behavior when AI is not available
+        println("⚠️ FALLBACK: Returning blank fields for manual entry")
         return VideoAnalysisResult(
-            title = "AI Generated Title",
-            description = "AI generated description for this amazing video",
-            hashtags = listOf("ai", "video", "stitch")
+            title = "",  // Blank - user enters manually
+            description = "",  // Blank - user enters manually
+            hashtags = emptyList()  // Empty - user adds manually
         )
     }
 
@@ -628,10 +646,12 @@ class VideoCoordinator(
     /**
      * Create video document in Firestore
      * ✅ FIXED: Now uses pre-calculated hierarchy data
+     * ✅ NEW: Includes taggedUserIDs field
      */
     private suspend fun createVideoDocument(
         metadata: CoreVideoMetadata,
-        hashtags: List<String>
+        hashtags: List<String>,
+        taggedUserIDs: List<String> = emptyList() // NEW: Tagged users parameter
     ): CoreVideoMetadata {
 
         val now = Timestamp.now()
@@ -650,6 +670,7 @@ class VideoCoordinator(
             "creatorID" to creatorID,
             "creatorName" to (currentUser?.displayName ?: "Anonymous"),
             "hashtags" to hashtags,
+            "taggedUserIDs" to taggedUserIDs, // NEW: Include tagged user IDs
             "createdAt" to now,
             "threadID" to metadata.threadID, // Will update for new threads
             "replyToVideoID" to metadata.replyToVideoID,
@@ -676,6 +697,8 @@ class VideoCoordinator(
 
         return try {
             println("💾 DATABASE: Adding document to 'videos' collection...")
+            println("👥 DATABASE: Tagged users: ${taggedUserIDs.size}") // NEW: Log tagged users
+
             val documentRef = db.collection("videos").add(documentData).await()
             val videoId = documentRef.id
 
@@ -689,12 +712,14 @@ class VideoCoordinator(
             println("✅ DATABASE: Document created successfully!")
             println("🆔 DATABASE: New video ID: $videoId")
             println("🧵 DATABASE: Final thread ID: $finalThreadID")
+            println("👥 DATABASE: Tagged users saved: ${taggedUserIDs.size}") // NEW
 
             metadata.copy(
                 id = videoId,
                 creatorID = creatorID,
                 createdAt = now.toDate(),
-                threadID = finalThreadID
+                threadID = finalThreadID,
+                taggedUserIDs = taggedUserIDs // NEW: Include in returned metadata
             )
 
         } catch (e: Exception) {

@@ -1,23 +1,24 @@
 /*
- * HomeFeedView.kt - FIXED ALL COMPILATION ERRORS
+ * HomeFeedView.kt - OPTION 3: Manual Horizontal Gestures
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 8: Views - Home Feed with FOLLOWING CONTENT ONLY
- * ✅ FIXED: All parameter names match actual composable signatures
+ * Structure:
+ * - VerticalPager for thread navigation (works well)
+ * - Manual horizontal drag gestures for child navigation (replaces HorizontalPager)
+ * - Animatable offset for smooth snapping
+ * - Matches iOS gesture approach
  */
 
 package com.stitchsocial.club.views
 
-import com.stitchsocial.club.services.VideoServiceImpl
-import com.stitchsocial.club.services.UserService
-import com.stitchsocial.club.services.AuthService
-import com.stitchsocial.club.coordination.NavigationCoordinator
-import com.stitchsocial.club.coordination.MainAppTab
+import android.content.Intent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,35 +27,49 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
-import android.content.Intent
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import kotlinx.coroutines.launch
 
-// Foundation imports
+// Services
+import com.stitchsocial.club.services.VideoServiceImpl
+import com.stitchsocial.club.services.UserService
+import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.HomeFeedService
+import com.stitchsocial.club.services.FeedViewHistory
+import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.MainAppTab
+
+// Foundation
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
-import com.stitchsocial.club.foundation.ContentType
-import com.stitchsocial.club.foundation.UserTier
 
-// Camera imports
-import com.stitchsocial.club.camera.RecordingContext
+// Camera
 import com.stitchsocial.club.camera.RecordingContextFactory
 
-// ViewModel imports
+// ViewModels
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.FollowManager
+import kotlinx.coroutines.delay
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 /**
- * HomeFeedView with FOLLOWING feed ONLY
+ * HomeFeedView - VerticalPager + Manual Horizontal Gestures
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -64,115 +79,121 @@ fun HomeFeedView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Services
     val videoService = remember { VideoServiceImpl() }
     val userService = remember { UserService(context) }
     val authService = remember { AuthService() }
+
+    LaunchedEffect(Unit) {
+        FeedViewHistory.initialize(context)
+    }
+
+    val feedService = remember {
+        HomeFeedService(
+            videoService = videoService,
+            userService = userService,
+            context = context
+        )
+    }
 
     val engagementViewModel = remember {
         EngagementViewModel(
             authService = authService,
             videoService = videoService,
             userService = userService
-        ).also {
-            it.setCurrentUser(userID)
-        }
+        ).also { it.setCurrentUser(userID) }
     }
     val iconManager = remember { FloatingIconManager() }
     val followManager = remember { FollowManager(context) }
 
-    // Helper to pause all videos
     val pauseAllVideos: () -> Unit = {
         val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
         LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
-        println("📹 PAUSE ALL VIDEOS broadcast sent")
     }
 
-    var threads by remember { mutableStateOf<List<ThreadData>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var followingCount by remember { mutableStateOf(0) }
+    // Feed state
+    var baseThreads by remember { mutableStateOf<List<ThreadData>>(emptyList()) }
+    val loadedChildren = remember { mutableStateMapOf<String, List<CoreVideoMetadata>>() }
 
-    // Creator profile state - when set, shows CreatorProfileView
-    var showingCreatorProfileID by remember { mutableStateOf<String?>(null) }
-
-    val verticalPagerState = rememberPagerState(pageCount = { threads.size })
-    val scope = rememberCoroutineScope()
-
-    // Pause videos when creator profile overlay is shown
-    LaunchedEffect(showingCreatorProfileID) {
-        if (showingCreatorProfileID != null) {
-            pauseAllVideos()
+    val threads by remember(baseThreads, loadedChildren.size) {
+        derivedStateOf {
+            baseThreads.map { thread ->
+                val children = loadedChildren[thread.id]
+                if (children != null && children.isNotEmpty()) {
+                    thread.copy(childVideos = children)
+                } else {
+                    thread
+                }
+            }
         }
     }
 
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var followingCount by remember { mutableStateOf(0) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var showingCreatorProfileID by remember { mutableStateOf<String?>(null) }
+
+    val verticalPagerState = rememberPagerState(pageCount = { threads.size })
+
+    // Pause when overlay shown
+    LaunchedEffect(showingCreatorProfileID) {
+        if (showingCreatorProfileID != null) pauseAllVideos()
+    }
+
+    // Load feed
     LaunchedEffect(userID) {
         try {
             isLoading = true
             errorMessage = null
-
-            println("🏠 HOME FEED: Loading feed for user $userID")
-
-            val following = userService.getFollowing(userID)
-            followingCount = following.size
-            println("👥 HOME FEED: User follows ${following.size} users")
-
-            val feedThreads: List<ThreadData> = if (following.isNotEmpty()) {
-                val followingIDs = following.map { it.id }
-                println("📱 HOME FEED: Loading feed for ${followingIDs.size} followed users")
-
-                // Get parent videos
-                val parentVideos: List<CoreVideoMetadata> = videoService.getFeedVideos(followingIDs, 50)
-                println("📊 HOME FEED: VideoService returned ${parentVideos.size} parent videos")
-
-                // Convert to ThreadData and load children for each
-                parentVideos.map { parent ->
-                    val threadID = parent.threadID ?: parent.id
-                    println("🧵 HOME FEED: Loading children for thread $threadID (parent.id=${parent.id})")
-
-                    // Try primary method (by threadID)
-                    var children = try {
-                        videoService.getThreadChildren(threadID)
-                    } catch (e: Exception) {
-                        println("⚠️ HOME FEED: Failed to load children by threadID: ${e.message}")
-                        emptyList()
-                    }
-
-                    // If no children found, try by replyToVideoID
-                    if (children.isEmpty()) {
-                        println("🔄 HOME FEED: No children by threadID, trying replyToVideoID...")
-                        children = try {
-                            videoService.getThreadChildrenByReplyTo(parent.id)
-                        } catch (e: Exception) {
-                            println("⚠️ HOME FEED: Failed to load children by replyTo: ${e.message}")
-                            emptyList()
-                        }
-                    }
-
-                    println("📊 HOME FEED: Final ${children.size} children for thread $threadID")
-
-                    ThreadData(
-                        id = threadID,
-                        parentVideo = parent,
-                        childVideos = children,
-                        isChildrenLoaded = true,
-                        createdAt = parent.createdAt,
-                        lastEngagementAt = parent.lastEngagementAt ?: parent.createdAt
-                    )
-                }
-            } else {
-                println("📭 HOME FEED: No following - empty feed")
-                emptyList()
-            }
-
-            println("✅ HOME FEED: Loaded ${feedThreads.size} threads with children")
-            threads = feedThreads
-
+            val feedThreads = feedService.loadFeed(userID, 40)
+            followingCount = feedService.getFollowingCount()
+            feedService.saveCurrentFeed(feedThreads)
+            baseThreads = feedThreads
+            println("✅ HOME FEED: Loaded ${feedThreads.size} threads")
         } catch (e: Exception) {
             println("🚨 HOME FEED: Error - ${e.message}")
-            e.printStackTrace()
             errorMessage = e.message
         } finally {
             isLoading = false
+        }
+    }
+
+    // Lazy load children
+    LaunchedEffect(verticalPagerState.currentPage) {
+        val currentThread = baseThreads.getOrNull(verticalPagerState.currentPage)
+        if (currentThread != null) {
+            if (!loadedChildren.containsKey(currentThread.id) && currentThread.parentVideo.replyCount > 0) {
+                println("🔄 LAZY LOAD: Loading children for ${currentThread.id}")
+                try {
+                    val children = feedService.loadThreadChildren(currentThread.id)
+                    if (children.isNotEmpty()) {
+                        loadedChildren[currentThread.id] = children
+                        println("✅ LAZY LOAD: ${children.size} children loaded")
+                    }
+                } catch (e: Exception) {
+                    println("❌ LAZY LOAD ERROR: ${e.message}")
+                }
+            }
+            delay(3000)
+            feedService.markVideoSeen(currentThread.parentVideo.id)
+        }
+        feedService.saveCurrentPosition(verticalPagerState.currentPage, 0, currentThread?.id)
+    }
+
+    // Load more
+    LaunchedEffect(verticalPagerState.currentPage) {
+        if (feedService.shouldLoadMore(verticalPagerState.currentPage) && !isLoadingMore && threads.isNotEmpty()) {
+            isLoadingMore = true
+            try {
+                val moreThreads = feedService.loadMoreContent(userID)
+                if (moreThreads.size > baseThreads.size) {
+                    baseThreads = baseThreads + moreThreads.drop(baseThreads.size)
+                }
+            } catch (_: Exception) {}
+            isLoadingMore = false
         }
     }
 
@@ -183,37 +204,35 @@ fun HomeFeedView(
     ) {
         when {
             isLoading -> LoadingView()
-
-            errorMessage != null -> ErrorView(
-                error = errorMessage!!,
-                onRetry = {
-                    scope.launch {
-                        isLoading = true
-                        errorMessage = null
+            errorMessage != null -> ErrorView(errorMessage!!) {
+                scope.launch {
+                    isLoading = true
+                    errorMessage = null
+                    try {
+                        feedService.clearFeed()
+                        loadedChildren.clear()
+                        baseThreads = feedService.loadFeed(userID, 40)
+                    } catch (e: Exception) {
+                        errorMessage = e.message
                     }
+                    isLoading = false
                 }
-            )
-
-            threads.isEmpty() -> EmptyFeedView(
-                isFollowingAnyone = followingCount > 0,
-                onDiscoverClick = {
-                    navigationCoordinator?.navigateToTab(MainAppTab.DISCOVERY)
-                }
-            )
-
+            }
+            threads.isEmpty() -> EmptyFeedView(followingCount > 0) {
+                navigationCoordinator?.navigateToTab(MainAppTab.DISCOVERY)
+            }
             else -> {
-                // Check if any overlay is showing - pause videos when true
                 val isOverlayShowing = showingCreatorProfileID != null
 
                 VerticalPager(
                     state = verticalPagerState,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    key = { threads.getOrNull(it)?.id ?: "page_$it" }
                 ) { page ->
                     val thread = threads[page]
-                    // Video should only be active if it's the current page AND no overlay is showing
                     val isActive = page == verticalPagerState.currentPage && !isOverlayShowing
 
-                    ThreadContainer(
+                    ManualHorizontalThreadContainer(
                         thread = thread,
                         isActive = isActive,
                         userID = userID,
@@ -221,56 +240,56 @@ fun HomeFeedView(
                         iconManager = iconManager,
                         followManager = followManager,
                         navigationCoordinator = navigationCoordinator,
-                        onCreatorProfileTap = { creatorID ->
-                            pauseAllVideos()
-                            showingCreatorProfileID = creatorID
-                        },
+                        onCreatorProfileTap = { pauseAllVideos(); showingCreatorProfileID = it },
                         onStitchTap = { video ->
                             pauseAllVideos()
-                            // Use NavigationCoordinator modal system for proper flow
-                            val isOwnVideo = video.creatorID == userID
-                            val recordingContext = if (isOwnVideo) {
+                            val isOwn = video.creatorID == userID
+                            val ctx = if (isOwn) {
                                 RecordingContextFactory.createContinueThread(
-                                    threadId = video.threadID ?: video.id,
-                                    creatorName = video.creatorName,
-                                    title = video.title
+                                    video.threadID ?: video.id, video.creatorName, video.title
                                 )
                             } else {
                                 RecordingContextFactory.createStitchToThread(
-                                    threadId = video.threadID ?: video.id,
-                                    creatorName = video.creatorName,
-                                    title = video.title
+                                    video.threadID ?: video.id, video.creatorName, video.title
                                 )
                             }
-                            navigationCoordinator?.showRecordingModal(recordingContext, video)
+                            navigationCoordinator?.showRecordingModal(ctx, video)
                         }
+                    )
+                }
+
+                if (isLoadingMore) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 16.dp)
+                            .size(24.dp),
+                        strokeWidth = 2.dp
                     )
                 }
             }
         }
 
-        // Creator Profile Full Screen Overlay
-        showingCreatorProfileID?.let { profileUserID ->
+        // Creator Profile Overlay
+        showingCreatorProfileID?.let { profileID ->
             CreatorProfileView(
-                userID = profileUserID,
+                userID = profileID,
                 currentUserID = userID,
                 navigationCoordinator = navigationCoordinator,
                 onDismiss = { showingCreatorProfileID = null },
-                onVideoTap = { video ->
-                    // TODO: Handle video tap from profile
-                    println("🎬 Tapped video: ${video.id}")
-                }
+                onVideoTap = { }
             )
         }
-
-        // NOTE: CameraView is now handled by ModalOverlay in MainActivity
-        // The navigationCoordinator.showRecordingModal() call above triggers it
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+// =============================================================================
+// MARK: - Manual Horizontal Thread Container
+// =============================================================================
+
 @Composable
-private fun ThreadContainer(
+private fun ManualHorizontalThreadContainer(
     thread: ThreadData,
     isActive: Boolean,
     userID: String,
@@ -278,126 +297,240 @@ private fun ThreadContainer(
     iconManager: FloatingIconManager,
     followManager: FollowManager,
     navigationCoordinator: NavigationCoordinator?,
-    onCreatorProfileTap: (String) -> Unit = {},
-    onStitchTap: (CoreVideoMetadata) -> Unit = {}
+    onCreatorProfileTap: (String) -> Unit,
+    onStitchTap: (CoreVideoMetadata) -> Unit
 ) {
-    val allVideos = remember(thread) {
+    val scope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+
+    // All videos in thread
+    val allVideos = remember(thread.id, thread.childVideos) {
         listOf(thread.parentVideo) + thread.childVideos
     }
-    val hasChildren = thread.childVideos.isNotEmpty()
-    val parentVideo = thread.parentVideo  // Store reference to parent for stitch display
+    val videoCount = allVideos.size
 
-    val horizontalPagerState = rememberPagerState(pageCount = { allVideos.size })
-    val currentVideoIndex = horizontalPagerState.currentPage
-    val currentVideo = allVideos.getOrNull(currentVideoIndex) ?: thread.parentVideo
-    val isOnParent = currentVideoIndex == 0
+    // Current horizontal index
+    var currentIndex by remember { mutableStateOf(0) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = horizontalPagerState,
-            modifier = Modifier.fillMaxSize()
-        ) { videoIndex ->
-            val video = allVideos[videoIndex]
-            val isVideoActive = isActive && videoIndex == currentVideoIndex
-            val isChildVideo = videoIndex > 0  // Not the parent
+    // Horizontal offset for animation
+    val offsetX = remember { Animatable(0f) }
 
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Video player
-                VideoPlayerComposable(
-                    video = video,
-                    isActive = isVideoActive,
-                    modifier = Modifier.fillMaxSize()
-                )
+    // Drag state
+    var isDragging by remember { mutableStateOf(false) }
 
-                // Contextual overlay - pass parent as threadVideo for children
-                ContextualVideoOverlay(
-                    video = video,
-                    overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
-                    currentUserID = userID,
-                    threadVideo = if (isChildVideo) parentVideo else null,  // ✅ Pass parent for stitch display
-                    engagementViewModel = engagementViewModel,
-                    iconManager = iconManager,
-                    followManager = followManager,
-                    navigationCoordinator = navigationCoordinator,
-                    onAction = { action ->
-                        when (action) {
-                            is OverlayAction.NavigateToProfile -> {
-                                println("👤 Navigate to profile: ${action.userID}")
-                                // Show CreatorProfileView via callback
-                                onCreatorProfileTap(action.userID)
+    // Reset index when thread changes
+    LaunchedEffect(thread.id) {
+        currentIndex = 0
+        offsetX.snapTo(0f)
+    }
+
+    // Current video based on index
+    val currentVideo = allVideos.getOrNull(currentIndex) ?: thread.parentVideo
+    val isOnParent = currentIndex == 0
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(videoCount, thread.id) {
+                if (videoCount <= 1) return@pointerInput // No gesture needed for single video
+
+                val velocityTracker = VelocityTracker()
+
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        isDragging = true
+                        velocityTracker.resetTracking()
+                    },
+                    onDragEnd = {
+                        isDragging = false
+
+                        val velocity = velocityTracker.calculateVelocity().x
+                        val currentOffset = offsetX.value
+
+                        // Lower thresholds for easier swipe
+                        val threshold = screenWidthPx * 0.2f  // 20% of screen
+                        val velocityThreshold = 300f  // Lower velocity needed
+
+                        scope.launch {
+                            val targetIndex = when {
+                                // Swipe left (next) - negative offset or velocity
+                                currentOffset < -threshold || velocity < -velocityThreshold -> {
+                                    (currentIndex + 1).coerceAtMost(videoCount - 1)
+                                }
+                                // Swipe right (prev) - positive offset or velocity
+                                currentOffset > threshold || velocity > velocityThreshold -> {
+                                    (currentIndex - 1).coerceAtLeast(0)
+                                }
+                                // Snap back
+                                else -> currentIndex
                             }
-                            is OverlayAction.Engagement -> {
-                                println("⚡ Engagement: ${action.type}")
-                            }
-                            is OverlayAction.NavigateToThread -> {
-                                println("🧵 Navigate to thread view")
-                            }
-                            is OverlayAction.StitchRecording -> {
-                                println("🎬 STITCH RECORDING - Opening camera for video ${video.id}")
-                                onStitchTap(video)
-                            }
-                            else -> {}
+
+                            currentIndex = targetIndex
+
+                            // Smoother spring animation
+                            offsetX.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                )
+                            )
+
+                            println("📱 SWIPE: Index now $currentIndex / ${videoCount - 1}")
+                        }
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                        scope.launch {
+                            offsetX.animateTo(
+                                0f,
+                                spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                )
+                            )
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        velocityTracker.addPosition(
+                            change.uptimeMillis,
+                            change.position
+                        )
+
+                        // Smoother drag with softer edge resistance
+                        val resistance = when {
+                            currentIndex == 0 && offsetX.value + dragAmount > 0 -> 0.4f
+                            currentIndex == videoCount - 1 && offsetX.value + dragAmount < 0 -> 0.4f
+                            else -> 1f
+                        }
+
+                        scope.launch {
+                            offsetX.snapTo(offsetX.value + dragAmount * resistance)
                         }
                     }
                 )
             }
+    ) {
+        // Video layer with offset
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = offsetX.value
+                }
+        ) {
+            // Current video - KEY on video ID to force reload when changing
+            key(currentVideo.id) {
+                VideoPlayerComposable(
+                    video = currentVideo,
+                    isActive = isActive && !isDragging,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Overlay
+            ContextualVideoOverlay(
+                video = currentVideo,
+                overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
+                currentUserID = userID,
+                threadVideo = if (!isOnParent) thread.parentVideo else null,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                navigationCoordinator = navigationCoordinator,
+                onAction = { action ->
+                    when (action) {
+                        is OverlayAction.NavigateToProfile -> onCreatorProfileTap(action.userID)
+                        is OverlayAction.StitchRecording -> onStitchTap(currentVideo)
+                        else -> {}
+                    }
+                }
+            )
         }
 
-        // Navigation dots (only if multiple videos)
-        if (allVideos.size > 1) {
+        // Peek of next/prev video during drag - USE THUMBNAILS (not video players to avoid conflicts)
+        if (isDragging && videoCount > 1) {
+            val dragOffset = offsetX.value
+
+            // Next video peek (dragging left, offset negative)
+            if (dragOffset < 0 && currentIndex < videoCount - 1) {
+                val nextVideo = allVideos[currentIndex + 1]
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = screenWidthPx + dragOffset
+                        }
+                        .background(Color.Black)
+                ) {
+                    // Thumbnail preview instead of full video player
+                    VideoThumbnailPeek(
+                        video = nextVideo,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            // Prev video peek (dragging right, offset positive)
+            if (dragOffset > 0 && currentIndex > 0) {
+                val prevVideo = allVideos[currentIndex - 1]
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = -screenWidthPx + dragOffset
+                        }
+                        .background(Color.Black)
+                ) {
+                    // Thumbnail preview instead of full video player
+                    VideoThumbnailPeek(
+                        video = prevVideo,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+
+        // Navigation dots only (overlay handles other indicators)
+        if (videoCount > 1) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 120.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                allVideos.forEachIndexed { index, _ ->
+                repeat(videoCount) { index ->
                     Box(
                         modifier = Modifier
-                            .size(if (index == currentVideoIndex) 10.dp else 8.dp)
+                            .size(if (index == currentIndex) 10.dp else 8.dp)
                             .background(
-                                color = if (index == currentVideoIndex) Color.White
+                                if (index == currentIndex) Color.White
                                 else Color.White.copy(alpha = 0.5f),
-                                shape = CircleShape
+                                CircleShape
                             )
                     )
                 }
             }
         }
-
-        // Back arrow when viewing children
-        if (!isOnParent) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(8.dp)
-            ) {
-                Icon(
-                    Icons.Default.ChevronLeft,
-                    contentDescription = "Back to parent",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
     }
 }
+
+// =============================================================================
+// MARK: - Helper Views
+// =============================================================================
 
 @Composable
 private fun LoadingView() {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
+        modifier = Modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Color.White, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(16.dp))
             Text("Loading feed...", color = Color.White, fontSize = 16.sp)
         }
     }
@@ -406,19 +539,19 @@ private fun LoadingView() {
 @Composable
 private fun ErrorView(error: String, onRetry: () -> Unit) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
+        modifier = Modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.padding(32.dp)
         ) {
             Icon(Icons.Default.Error, "Error", tint = Color.Red, modifier = Modifier.size(64.dp))
+            Spacer(Modifier.height(16.dp))
             Text("Failed to load feed", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
             Text(error, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
             Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {
                 Text("Retry", color = Color.Black)
             }
@@ -429,35 +562,77 @@ private fun ErrorView(error: String, onRetry: () -> Unit) {
 @Composable
 private fun EmptyFeedView(isFollowingAnyone: Boolean, onDiscoverClick: () -> Unit) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
+        modifier = Modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp),
             modifier = Modifier.padding(32.dp)
         ) {
             Icon(Icons.Default.VideoLibrary, "No videos", tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(80.dp))
+            Spacer(Modifier.height(24.dp))
             Text(
-                text = if (isFollowingAnyone) "No videos from followed users yet" else "Follow users to see their videos here",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                if (isFollowingAnyone) "No videos from followed users yet"
+                else "Follow users to see their videos here",
+                color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center
             )
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = if (isFollowingAnyone) "The people you follow haven't posted yet" else "Start by discovering creators",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
+                if (isFollowingAnyone) "The people you follow haven't posted yet"
+                else "Start by discovering creators",
+                color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, textAlign = TextAlign.Center
             )
+            Spacer(Modifier.height(24.dp))
             Button(onClick = onDiscoverClick, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {
                 Icon(Icons.Default.Explore, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Discover Videos", color = Color.Black)
             }
+        }
+    }
+}
+
+// =============================================================================
+// MARK: - Video Thumbnail Peek (for drag preview - no ExoPlayer)
+// =============================================================================
+
+@Composable
+private fun VideoThumbnailPeek(
+    video: CoreVideoMetadata,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        // Thumbnail image
+        AsyncImage(
+            model = video.thumbnailURL,
+            contentDescription = video.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+
+        // Subtle loading overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.3f))
+        )
+
+        // Play icon hint
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.8f),
+                modifier = Modifier.size(40.dp)
+            )
         }
     }
 }

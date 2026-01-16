@@ -7,6 +7,7 @@ import kotlin.random.Random
  * Complete video metadata for Stitch Social
  * Layer 1: Foundation - Pure Kotlin data class
  * ✅ FIXED: Factory methods now generate realistic view counts
+ * ✅ NEW: Added taggedUserIDs for user tagging feature
  */
 data class CoreVideoMetadata(
     // Core identity
@@ -18,6 +19,7 @@ data class CoreVideoMetadata(
     val creatorID: String,
     val creatorName: String,
     val hashtags: List<String> = emptyList(),
+    val taggedUserIDs: List<String> = emptyList(),  // NEW: Tagged users
     val createdAt: Date,
 
     // Thread hierarchy
@@ -59,6 +61,10 @@ data class CoreVideoMetadata(
     val isChild: Boolean get() = conversationDepth == 1
     val isStepchild: Boolean get() = conversationDepth == 2
     val canHaveReplies: Boolean get() = conversationDepth < 2
+
+    // NEW: Tagged users computed properties
+    val hasTaggedUsers: Boolean get() = taggedUserIDs.isNotEmpty()
+    val taggedUserCount: Int get() = taggedUserIDs.size
 
     val maxRepliesAllowed: Int
         get() = when (conversationDepth) {
@@ -171,6 +177,11 @@ data class CoreVideoMetadata(
         return cleanHashtags.contains(cleanInput)
     }
 
+    // NEW: Check if a user is tagged
+    fun isUserTagged(userID: String): Boolean {
+        return taggedUserIDs.contains(userID)
+    }
+
     companion object {
         /**
          * Create new thread with realistic view count
@@ -187,7 +198,8 @@ data class CoreVideoMetadata(
             aspectRatio: Double = 9.0/16.0,
             fileSize: Long,
             qualityScore: Int = 75,
-            hashtags: List<String> = emptyList()
+            hashtags: List<String> = emptyList(),
+            taggedUserIDs: List<String> = emptyList()  // NEW
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -198,11 +210,12 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
+                taggedUserIDs = taggedUserIDs,  // NEW
                 createdAt = now,
                 threadID = null,
                 replyToVideoID = null,
                 conversationDepth = 0,
-                viewCount = Random.nextInt(500, 10001),  // ✅ FIXED
+                viewCount = Random.nextInt(500, 10001),
                 hypeCount = 0,
                 coolCount = 0,
                 replyCount = 0,
@@ -240,7 +253,8 @@ data class CoreVideoMetadata(
             aspectRatio: Double = 9.0/16.0,
             fileSize: Long,
             qualityScore: Int = 75,
-            hashtags: List<String> = emptyList()
+            hashtags: List<String> = emptyList(),
+            taggedUserIDs: List<String> = emptyList()  // NEW
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -251,11 +265,12 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
+                taggedUserIDs = taggedUserIDs,  // NEW
                 createdAt = now,
                 threadID = parentThreadID,
                 replyToVideoID = parentThreadID,
                 conversationDepth = 1,
-                viewCount = Random.nextInt(200, 5001),  // ✅ FIXED
+                viewCount = Random.nextInt(200, 5001),
                 hypeCount = 0,
                 coolCount = 0,
                 replyCount = 0,
@@ -294,7 +309,8 @@ data class CoreVideoMetadata(
             aspectRatio: Double = 9.0/16.0,
             fileSize: Long,
             qualityScore: Int = 75,
-            hashtags: List<String> = emptyList()
+            hashtags: List<String> = emptyList(),
+            taggedUserIDs: List<String> = emptyList()  // NEW
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -305,11 +321,12 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
+                taggedUserIDs = taggedUserIDs,  // NEW
                 createdAt = now,
                 threadID = parentThreadID,
                 replyToVideoID = parentChildID,
                 conversationDepth = 2,
-                viewCount = Random.nextInt(100, 2001),  // ✅ FIXED
+                viewCount = Random.nextInt(100, 2001),
                 hypeCount = 0,
                 coolCount = 0,
                 replyCount = 0,
@@ -340,7 +357,8 @@ data class CoreVideoMetadata(
             creatorID: String = "test_user_123",
             isThread: Boolean = true,
             engagement: Int = 50,
-            hashtags: List<String> = listOf("test", "video", "stitch")
+            hashtags: List<String> = listOf("test", "video", "stitch"),
+            taggedUserIDs: List<String> = emptyList()  // NEW
         ): CoreVideoMetadata {
             return if (isThread) {
                 newThread(
@@ -353,7 +371,8 @@ data class CoreVideoMetadata(
                     duration = 30.0,
                     fileSize = 5 * 1024 * 1024,
                     qualityScore = 80,
-                    hashtags = hashtags
+                    hashtags = hashtags,
+                    taggedUserIDs = taggedUserIDs
                 ).copy(
                     hypeCount = engagement,
                     viewCount = engagement * 5,
@@ -371,7 +390,8 @@ data class CoreVideoMetadata(
                     duration = 25.0,
                     fileSize = 4 * 1024 * 1024,
                     qualityScore = 75,
-                    hashtags = hashtags
+                    hashtags = hashtags,
+                    taggedUserIDs = taggedUserIDs
                 ).copy(
                     hypeCount = engagement,
                     viewCount = engagement * 3,
