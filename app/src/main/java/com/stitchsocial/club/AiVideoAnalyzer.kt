@@ -400,6 +400,7 @@ class AIVideoAnalyzer {
             is RecordingContext.StitchToThread -> "stitching to an existing thread by ${recordingContext.threadInfo.creatorName}"
             is RecordingContext.ReplyToVideo -> "replying to a video by ${recordingContext.videoInfo.creatorName}"
             is RecordingContext.ContinueThread -> "continuing a thread by ${recordingContext.threadInfo.creatorName}"
+            is RecordingContext.SpinOffFrom -> "creating a spin-off responding to ${recordingContext.videoInfo.creatorName}'s video"
         }
 
         return """
@@ -420,6 +421,7 @@ class AIVideoAnalyzer {
             is RecordingContext.StitchToThread -> "This is a stitch to ${recordingContext.threadInfo.creatorName}'s thread: ${recordingContext.threadInfo.title}"
             is RecordingContext.ReplyToVideo -> "This is a reply to ${recordingContext.videoInfo.creatorName}'s video: ${recordingContext.videoInfo.title}"
             is RecordingContext.ContinueThread -> "This is continuing ${recordingContext.threadInfo.creatorName}'s thread: ${recordingContext.threadInfo.title}"
+            is RecordingContext.SpinOffFrom -> "This is a spin-off responding to ${recordingContext.videoInfo.creatorName}'s video: ${recordingContext.videoInfo.title}"
         }
 
         return """

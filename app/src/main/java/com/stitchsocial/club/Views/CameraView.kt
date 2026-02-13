@@ -37,6 +37,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
@@ -87,6 +98,7 @@ fun CameraView(
     // Camera flip state
     var cameraSelector by remember { mutableStateOf(CameraSelector.DEFAULT_BACK_CAMERA) }
     var isUsingFrontCamera by remember { mutableStateOf(false) }
+    var isTorchOn by remember { mutableStateOf(false) }
 
     // Store the current recording file for cleanup and processing
     var currentVideoFile by remember { mutableStateOf<File?>(null) }
@@ -340,40 +352,34 @@ fun CameraView(
 
             // ===== CAMERA OVERLAY UI =====
 
-            // Top controls
+            // Top controls (matches iOS — X left, flip+flash right)
             CameraTopControls(
                 recordingContext = recordingContext,
                 parentVideo = parentVideo,
                 userTier = userTier,
+                isRecording = isRecording,
                 onCancel = cancelRecording,
+                onFlipCamera = flipCamera,
+                onToggleTorch = { isTorchOn = !isTorchOn },
+                isTorchOn = isTorchOn,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
                     .align(Alignment.TopCenter)
             )
 
-            // Recording indicator with tier-based progress
-            if (isRecording) {
-                RecordingIndicator(
-                    duration = recordingDuration,
-                    maxDuration = if (isUnlimitedRecording) 0 else maxRecordingDuration.toInt(),
-                    progress = recordingProgress,
-                    isUnlimited = isUnlimitedRecording,
-                    userTier = userTier,
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .align(Alignment.TopStart)
-                )
-            }
-
-            // Bottom controls - FIXED: Gallery uses NavigationCoordinator
+            // Bottom controls (matches iOS — gallery | cinematic button | spacer)
             CameraBottomControls(
                 isRecording = isRecording,
+                recordingDuration = recordingDuration,
+                maxDuration = if (isUnlimitedRecording) 0 else maxRecordingDuration.toInt(),
+                isUnlimited = isUnlimitedRecording,
+                progress = recordingProgress,
+                hasSegments = isRecording,
                 onStartRecording = startRecording,
                 onStopRecording = stopRecording,
                 onCancel = cancelRecording,
-                onFlipCamera = flipCamera,
-                onOpenGallery = handleGalleryRequest,  // FIXED: Routes through NavigationCoordinator
+                onOpenGallery = handleGalleryRequest,
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
@@ -495,227 +501,288 @@ private fun CameraTopControls(
     recordingContext: RecordingContext,
     parentVideo: CoreVideoMetadata?,
     userTier: UserTier,
+    isRecording: Boolean,
     onCancel: () -> Unit,
+    onFlipCamera: () -> Unit,
+    onToggleTorch: () -> Unit,
+    isTorchOn: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
+        // Exit button (left) — matches iOS
         IconButton(
             onClick = onCancel,
+            enabled = !isRecording,
             modifier = Modifier
-                .size(48.dp)
+                .size(40.dp)
                 .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(Color.White.copy(alpha = 0.15f))
         ) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Cancel",
                 tint = Color.White,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
 
-        RecordingContextInfo(
-            recordingContext = recordingContext,
-            parentVideo = parentVideo,
-            userTier = userTier
-        )
+        Spacer(modifier = Modifier.weight(1f))
 
-        IconButton(
-            onClick = {
-                println("CAMERA: Settings clicked")
-            },
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
+        // Right side: Stacked flip + flashlight (matches iOS)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "Settings",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecordingContextInfo(
-    recordingContext: RecordingContext,
-    parentVideo: CoreVideoMetadata?,
-    userTier: UserTier,
-    modifier: Modifier = Modifier
-) {
-    val (contextText, contextColor) = when (recordingContext) {
-        RecordingContext.NewThread -> "New Thread" to Color.White
-        else -> "Reply" to Color.Cyan
-    }
-
-    Column(
-        modifier = modifier
-            .background(
-                Color.Black.copy(alpha = 0.7f),
-                RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = contextText,
-            color = contextColor,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Text(
-            text = when (userTier) {
-                UserTier.FOUNDER, UserTier.CO_FOUNDER -> "Unlimited"
-                UserTier.PARTNER, UserTier.LEGENDARY, UserTier.TOP_CREATOR -> "2min limit"
-                else -> "30s limit"
-            },
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 10.sp
-        )
-
-        if (parentVideo != null) {
-            Text(
-                text = "to @${parentVideo.creatorName}",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecordingIndicator(
-    duration: Int,
-    maxDuration: Int,
-    progress: Float,
-    isUnlimited: Boolean,
-    userTier: UserTier,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .background(
-                Color.Red.copy(alpha = 0.8f),
-                RoundedCornerShape(16.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(
+            // Flip camera
+            IconButton(
+                onClick = onFlipCamera,
+                enabled = !isRecording,
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
-            )
+                    .background(Color.White.copy(alpha = 0.15f))
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.FlipCameraAndroid,
+                    contentDescription = "Flip Camera",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
 
-            Text(
-                text = "REC ${String.format("%02d:%02d", duration / 60, duration % 60)}",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        if (!isUnlimited && maxDuration > 0) {
-            LinearProgressIndicator(
-                progress = progress,
+            // Flashlight
+            IconButton(
+                onClick = onToggleTorch,
+                enabled = !isRecording,
                 modifier = Modifier
-                    .width(80.dp)
-                    .height(2.dp),
-                color = if (progress > 0.8f) Color.Yellow else Color.White,
-                trackColor = Color.White.copy(alpha = 0.3f)
-            )
-
-            val remaining = maxDuration - duration
-            Text(
-                text = if (remaining > 0) "${remaining}s left" else "Time up!",
-                color = if (remaining <= 5) Color.Yellow else Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp
-            )
-        } else if (isUnlimited) {
-            Text(
-                text = "Unlimited",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp
-            )
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
+            ) {
+                Icon(
+                    imageVector = if (isTorchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                    contentDescription = "Flashlight",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
+
+// RecordingContextInfo removed — context info now shown inline or via badge if needed
+
+// RecordingIndicator removed — duration display now in CameraBottomControls (matches iOS)
 
 @Composable
 private fun CameraBottomControls(
     isRecording: Boolean,
+    recordingDuration: Int,
+    maxDuration: Int,
+    isUnlimited: Boolean,
+    progress: Float,
+    hasSegments: Boolean,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     onCancel: () -> Unit,
-    onFlipCamera: () -> Unit,
     onOpenGallery: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.padding(32.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        modifier = modifier.padding(bottom = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // GALLERY BUTTON - Routes through NavigationCoordinator
-        IconButton(
-            onClick = onOpenGallery,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
-        ) {
-            Icon(
-                imageVector = Icons.Filled.PhotoLibrary,
-                contentDescription = "Select Video from Gallery",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
+        // Duration display (matches iOS durationDisplay)
+        if (isRecording || hasSegments) {
+            val durationText = String.format("%d:%02d", recordingDuration / 60, recordingDuration % 60)
+            val limitText = if (isUnlimited) "∞" else String.format("%d:%02d", maxDuration / 60, maxDuration % 60)
+            val durationProgress = if (!isUnlimited && maxDuration > 0) recordingDuration.toFloat() / maxDuration.toFloat() else 0f
+
+            Text(
+                text = "$durationText / $limitText",
+                color = when {
+                    durationProgress >= 0.9f -> Color.Red
+                    durationProgress >= 0.8f -> Color.Yellow
+                    else -> Color.White
+                },
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
         }
 
-        // RECORD BUTTON
-        IconButton(
-            onClick = if (isRecording) onStopRecording else onStartRecording,
+        // Main controls row — gallery | record | spacer (matches iOS)
+        Row(
             modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(if (isRecording) Color.Red else Color.White)
+                .fillMaxWidth()
+                .padding(horizontal = 40.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
-                contentDescription = if (isRecording) "Stop Recording" else "Start Recording",
-                tint = if (isRecording) Color.White else Color.Red,
-                modifier = Modifier.size(if (isRecording) 32.dp else 48.dp)
+            // LEFT: Gallery button (matches iOS PhotosPicker)
+            IconButton(
+                onClick = onOpenGallery,
+                enabled = !isRecording,
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PhotoLibrary,
+                    contentDescription = "Gallery",
+                    tint = Color.White.copy(alpha = if (isRecording) 0.3f else 1f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // CENTER: Cinematic Recording Button (matches iOS CinematicRecordingButton)
+            CinematicRecordButton(
+                isRecording = isRecording,
+                progress = progress,
+                isDisabled = !isUnlimited && progress >= 1f,
+                onPress = if (isRecording) onStopRecording else onStartRecording
+            )
+
+            // RIGHT: Empty spacer to balance (matches iOS)
+            Box(modifier = Modifier.size(50.dp))
+        }
+    }
+}
+
+/**
+ * Cinematic Recording Button — matches iOS CinematicRecordingButton.swift
+ * Progress ring around a gradient circle with state-based center icon
+ */
+@Composable
+private fun CinematicRecordButton(
+    isRecording: Boolean,
+    progress: Float,
+    isDisabled: Boolean,
+    onPress: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val buttonSize = 80.dp
+    val ringWidth = 6.dp
+    val totalSize = buttonSize + 12.dp
+
+    // Progress color (matches iOS progressColor)
+    val progressColor = when {
+        progress >= 0.9f -> Color.Red
+        progress >= 0.8f -> Color.Yellow
+        else -> Color.White
+    }
+
+    // Gradient colors (matches iOS StitchColors)
+    val primaryOrange = Color(0xFFFF6B35)
+    val secondaryOrange = Color(0xFFFFA500)
+    val recordingRed = Color(0xFFFF3B30)
+
+    val scale by animateFloatAsState(
+        targetValue = if (isRecording) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+        label = "scale"
+    )
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(totalSize)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+    ) {
+        // Outer ring track
+        Canvas(modifier = Modifier.size(totalSize)) {
+            drawArc(
+                color = Color.White.copy(alpha = 0.2f),
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
             )
         }
 
-        // FLIP CAMERA BUTTON
-        IconButton(
-            onClick = onFlipCamera,
+        // Progress ring
+        if (progress > 0f) {
+            Canvas(modifier = Modifier.size(totalSize)) {
+                drawArc(
+                    color = progressColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress,
+                    useCenter = false,
+                    style = Stroke(width = ringWidth.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        // Main button circle with gradient
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(48.dp)
+                .size(buttonSize)
                 .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(
+                    Brush.linearGradient(
+                        colors = if (isRecording) {
+                            listOf(recordingRed.copy(alpha = 0.8f), recordingRed.copy(alpha = 0.6f))
+                        } else {
+                            listOf(primaryOrange.copy(alpha = 0.7f), secondaryOrange)
+                        }
+                    )
+                )
+                .then(
+                    if (!isDisabled) {
+                        Modifier.pointerInput(isRecording) {
+                            detectTapGestures(onPress = { onPress() })
+                        }
+                    } else Modifier
+                )
         ) {
-            Icon(
-                imageVector = Icons.Filled.FlipCameraAndroid,
-                contentDescription = "Flip Camera",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
+            // Center icon — matches iOS states
+            if (isRecording) {
+                // Recording: white rounded square (matches iOS RoundedRectangle)
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White)
+                )
+            } else if (isDisabled) {
+                // Tier limit reached
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Limit reached",
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(28.dp)
+                )
+            } else {
+                // Idle: record circle (matches iOS nested circles)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color.Transparent)
+                        .then(
+                            Modifier.drawBehind {
+                                drawCircle(Color.White, style = Stroke(width = 3.dp.toPx()))
+                            }
+                        )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(recordingRed.copy(alpha = 0.8f))
+                    )
+                }
+            }
         }
     }
 }

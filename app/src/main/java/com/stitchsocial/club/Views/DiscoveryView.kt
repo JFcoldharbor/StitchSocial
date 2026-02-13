@@ -2,12 +2,12 @@
  * DiscoveryView.kt - COMPLETE iOS PORT WITH SWIPE CARDS
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * âœ… ADDED: Swipe mode with DiscoverySwipeCards (matches iOS)
- * âœ… ADDED: Shuffle button for content randomization
- * âœ… ADDED: Swipe instructions indicator
- * âœ… ADDED: Category icons matching iOS
- * âœ… ADDED: Deep randomization with creator diversity
- * âœ… FIXED: Mode toggle cycles through Swipe/Grid/List
+ * Ã¢Å“â€¦ ADDED: Swipe mode with DiscoverySwipeCards (matches iOS)
+ * Ã¢Å“â€¦ ADDED: Shuffle button for content randomization
+ * Ã¢Å“â€¦ ADDED: Swipe instructions indicator
+ * Ã¢Å“â€¦ ADDED: Category icons matching iOS
+ * Ã¢Å“â€¦ ADDED: Deep randomization with creator diversity
+ * Ã¢Å“â€¦ FIXED: Mode toggle cycles through Swipe/Grid/List
  */
 
 package com.stitchsocial.club.views
@@ -18,6 +18,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
@@ -35,9 +37,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,15 +69,23 @@ import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.SearchService
+import com.stitchsocial.club.services.HashtagService
+import com.stitchsocial.club.services.TrendingHashtag
+import com.stitchsocial.club.services.VelocityTier
 
 // Coordination imports
 import com.stitchsocial.club.coordination.EngagementCoordinator
+import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.ModalState
+import com.stitchsocial.club.camera.RecordingContextFactory
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 
 // Search and Follow imports
 import com.stitchsocial.club.SearchView
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.ShareButton
+import com.stitchsocial.club.ShareButtonSize
 
 // MARK: - Discovery Category (with icons matching iOS)
 
@@ -104,7 +119,8 @@ enum class DiscoveryMode(
 
 class DiscoveryViewModel(
     private val videoService: VideoServiceImpl,
-    private val searchService: SearchService
+    private val searchService: SearchService,
+    private val hashtagService: HashtagService = HashtagService()
 ) : ViewModel() {
 
     private val _isLoading = MutableStateFlow(false)
@@ -121,6 +137,19 @@ class DiscoveryViewModel(
 
     private val _currentCategory = MutableStateFlow(DiscoveryCategory.ALL)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
+
+    // MARK: - Hashtag State (matches iOS DiscoveryViewModel)
+    private val _trendingHashtags = MutableStateFlow<List<TrendingHashtag>>(emptyList())
+    val trendingHashtags: StateFlow<List<TrendingHashtag>> = _trendingHashtags.asStateFlow()
+
+    private val _isLoadingHashtags = MutableStateFlow(false)
+    val isLoadingHashtags: StateFlow<Boolean> = _isLoadingHashtags.asStateFlow()
+
+    private val _selectedHashtag = MutableStateFlow<TrendingHashtag?>(null)
+    val selectedHashtag: StateFlow<TrendingHashtag?> = _selectedHashtag.asStateFlow()
+
+    private val _hashtagVideos = MutableStateFlow<List<CoreVideoMetadata>>(emptyList())
+    val hashtagVideos: StateFlow<List<CoreVideoMetadata>> = _hashtagVideos.asStateFlow()
 
     init {
         loadInitialContent()
@@ -217,7 +246,41 @@ class DiscoveryViewModel(
     fun randomizeContent() {
         _videos.value = _videos.value.shuffled()
         applyFilterAndShuffle()
-        println("ðŸŽ² DISCOVERY: Content randomized - ${_filteredVideos.value.size} videos reshuffled")
+        println("DISCOVERY: Content randomized - ${_filteredVideos.value.size} videos reshuffled")
+    }
+
+    // MARK: - Hashtag Methods (matches iOS DiscoveryViewModel)
+
+    fun loadTrendingHashtags() {
+        viewModelScope.launch {
+            _isLoadingHashtags.value = true
+            val trending = hashtagService.loadTrendingHashtags(10)
+            _trendingHashtags.value = trending
+            _isLoadingHashtags.value = false
+        }
+    }
+
+    fun selectHashtag(hashtag: TrendingHashtag) {
+        viewModelScope.launch {
+            _selectedHashtag.value = hashtag
+            _isLoading.value = true
+
+            try {
+                val result = hashtagService.getVideosForHashtag(hashtag.tag, 40)
+                _hashtagVideos.value = result.videos
+                _filteredVideos.value = result.videos
+            } catch (e: Exception) {
+                println("DISCOVERY: Failed to load hashtag videos - ${e.message}")
+            }
+
+            _isLoading.value = false
+        }
+    }
+
+    fun clearHashtagFilter() {
+        _selectedHashtag.value = null
+        _hashtagVideos.value = emptyList()
+        applyFilterAndShuffle()
     }
 
     // MARK: - Category Filtering
@@ -239,7 +302,7 @@ class DiscoveryViewModel(
 
         _filteredVideos.value = diversifyShuffle(filtered)
 
-        println("ðŸ“Š DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos")
+        println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos")
     }
 
     // MARK: - Filtering and Shuffling
@@ -302,9 +365,13 @@ fun DiscoveryView(
     onNavigateToVideo: (CoreVideoMetadata) -> Unit = {},
     onNavigateToProfile: (String) -> Unit = {},
     onNavigateToSearch: () -> Unit = {},
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
+    navigationCoordinator: NavigationCoordinator? = null,
+    isAnnouncementShowing: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // Services
     val authService = remember { AuthService() }
@@ -337,6 +404,12 @@ fun DiscoveryView(
     val errorMessage by viewModel.errorMessage.collectAsState()
     val currentCategory by viewModel.currentCategory.collectAsState()
 
+    // Hashtag state
+    val trendingHashtags by viewModel.trendingHashtags.collectAsState()
+    val isLoadingHashtags by viewModel.isLoadingHashtags.collectAsState()
+    val selectedHashtag by viewModel.selectedHashtag.collectAsState()
+    val hashtagVideos by viewModel.hashtagVideos.collectAsState()
+
     // Discovery Mode - default to SWIPE like iOS
     var discoveryMode by remember { mutableStateOf(DiscoveryMode.SWIPE) }
     var selectedCategory by remember { mutableStateOf(DiscoveryCategory.ALL) }
@@ -344,9 +417,11 @@ fun DiscoveryView(
     // Swipe cards state
     var currentSwipeIndex by remember { mutableStateOf(0) }
 
-    // Fullscreen video state
+    // Fullscreen video state with horizontal navigation
     var showVideoPlayer by remember { mutableStateOf(false) }
     var currentPlayingVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+    var allVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
+    var currentVideoIndex by remember { mutableStateOf(0) }
 
     // Search sheet state
     var showSearchSheet by remember { mutableStateOf(false) }
@@ -362,6 +437,11 @@ fun DiscoveryView(
         }
     }
 
+    // Load trending hashtags on first composition
+    LaunchedEffect(Unit) {
+        viewModel.loadTrendingHashtags()
+    }
+
     // Lifecycle observer to pause ALL videos when app goes to background
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -369,7 +449,7 @@ fun DiscoveryView(
             when (event) {
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     println("DISCOVERY: App backgrounded - sending pause broadcast")
-                    val intent = Intent("com.stitchsocial.PAUSE_ALL_VIDEOS")
+                    val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
                     LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
                 }
                 else -> {}
@@ -380,6 +460,15 @@ fun DiscoveryView(
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Pause videos when announcement is showing
+    LaunchedEffect(isAnnouncementShowing) {
+        if (isAnnouncementShowing) {
+            println("🔇 DISCOVERY: Announcement showing - pausing all videos")
+            val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
+            LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
         }
     }
 
@@ -431,6 +520,30 @@ fun DiscoveryView(
                     }
                 )
 
+                // Trending Hashtags (show when Trending category selected)
+                if (selectedCategory == DiscoveryCategory.TRENDING) {
+                    TrendingHashtagsSection(
+                        hashtags = trendingHashtags,
+                        isLoading = isLoadingHashtags,
+                        onHashtagTapped = { hashtag ->
+                            viewModel.selectHashtag(hashtag)
+                            currentSwipeIndex = 0
+                        }
+                    )
+                }
+
+                // Active hashtag filter bar
+                if (selectedHashtag != null) {
+                    HashtagFilterBar(
+                        hashtag = selectedHashtag!!,
+                        videoCount = hashtagVideos.size,
+                        onClear = {
+                            viewModel.clearHashtagFilter()
+                            currentSwipeIndex = 0
+                        }
+                    )
+                }
+
                 // Content Area
                 val currentErrorMessage = errorMessage
                 when {
@@ -457,8 +570,31 @@ fun DiscoveryView(
                                         onVideoTap = { video ->
                                             println("DISCOVERY: Video tapped - ${video.title}")
                                             currentPlayingVideo = video
-                                            showVideoPlayer = true
+
+                                            // Fetch thread data (parent + children)
+                                            scope.launch {
+                                                try {
+                                                    if (video.threadID != null) {
+                                                        val (parent, children) = videoService.getThreadData(video.threadID)
+                                                        allVideos = if (parent != null) {
+                                                            listOf(parent) + children  // Like HomeFeedView
+                                                        } else {
+                                                            listOf(video)
+                                                        }
+                                                    } else {
+                                                        allVideos = listOf(video)
+                                                    }
+                                                    currentVideoIndex = 0  // Start at parent
+                                                    showVideoPlayer = true
+                                                } catch (e: Exception) {
+                                                    println("DISCOVERY: Error fetching thread - ${e.message}")
+                                                    allVideos = listOf(video)
+                                                    currentVideoIndex = 0
+                                                    showVideoPlayer = true
+                                                }
+                                            }
                                         },
+                                        isAnnouncementShowing = isAnnouncementShowing,
                                         modifier = Modifier.fillMaxSize()
                                     )
 
@@ -476,7 +612,29 @@ fun DiscoveryView(
                                     onVideoTapped = { video ->
                                         println("DISCOVERY: Video tapped - ${video.title}")
                                         currentPlayingVideo = video
-                                        showVideoPlayer = true
+
+                                        // Fetch thread data (parent + children)
+                                        scope.launch {
+                                            try {
+                                                if (video.threadID != null) {
+                                                    val (parent, children) = videoService.getThreadData(video.threadID)
+                                                    allVideos = if (parent != null) {
+                                                        listOf(parent) + children  // Like HomeFeedView
+                                                    } else {
+                                                        listOf(video)
+                                                    }
+                                                } else {
+                                                    allVideos = listOf(video)
+                                                }
+                                                currentVideoIndex = 0  // Start at parent
+                                                showVideoPlayer = true
+                                            } catch (e: Exception) {
+                                                println("DISCOVERY: Error fetching thread - ${e.message}")
+                                                allVideos = listOf(video)
+                                                currentVideoIndex = 0
+                                                showVideoPlayer = true
+                                            }
+                                        }
                                     }
                                 )
                             }
@@ -486,24 +644,274 @@ fun DiscoveryView(
             }
         }
 
-        // Fullscreen Video Player
-        if (showVideoPlayer && currentPlayingVideo != null) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                VideoPlayer(
-                    video = currentPlayingVideo!!,
-                    currentUserID = currentUserID,
-                    currentUserTier = currentUserTier ?: UserTier.ROOKIE,
-                    engagementViewModel = engagementViewModel,
-                    iconManager = iconManager,
-                    onClose = {
-                        showVideoPlayer = false
-                        currentPlayingVideo = null
-                    },
-                    onNavigateToProfile = { creatorID ->
-                        showVideoPlayer = false
-                        onNavigateToProfile(creatorID)
+        // Fullscreen Video Player with Horizontal Swipe (like HomeFeedView)
+        if (showVideoPlayer && allVideos.isNotEmpty()) {
+            val scope = rememberCoroutineScope()
+            val configuration = LocalConfiguration.current
+            val density = LocalDensity.current
+            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+
+            val videoCount = allVideos.size
+            val offsetX = remember { Animatable(0f) }
+            var isDragging by remember { mutableStateOf(false) }
+
+            // Reset when video changes
+            LaunchedEffect(currentPlayingVideo?.id) {
+                currentVideoIndex = 0
+                offsetX.snapTo(0f)
+            }
+
+            val currentVideo = allVideos.getOrNull(currentVideoIndex) ?: allVideos[0]
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(100f)
+                    .background(Color.Black)
+                    .pointerInput(videoCount) {
+                        if (videoCount <= 1) return@pointerInput  // No swipe for single video
+
+                        val velocityTracker = VelocityTracker()
+
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                                velocityTracker.resetTracking()
+                            },
+                            onDragEnd = {
+                                isDragging = false
+
+                                val velocity = velocityTracker.calculateVelocity().x
+                                val currentOffset = offsetX.value
+
+                                val threshold = screenWidthPx * 0.2f  // 20% of screen
+                                val velocityThreshold = 300f
+
+                                scope.launch {
+                                    val targetIndex = when {
+                                        // Swipe left (next) - negative offset or velocity
+                                        currentOffset < -threshold || velocity < -velocityThreshold -> {
+                                            (currentVideoIndex + 1).coerceAtMost(videoCount - 1)
+                                        }
+                                        // Swipe right (prev) - positive offset or velocity
+                                        currentOffset > threshold || velocity > velocityThreshold -> {
+                                            (currentVideoIndex - 1).coerceAtLeast(0)
+                                        }
+                                        // Snap back
+                                        else -> currentVideoIndex
+                                    }
+
+                                    currentVideoIndex = targetIndex
+
+                                    offsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessLow
+                                        )
+                                    )
+
+                                    println("DISCOVERY SWIPE: Index now $currentVideoIndex / ${videoCount - 1}")
+                                }
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        0f,
+                                        spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessLow
+                                        )
+                                    )
+                                }
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                velocityTracker.addPosition(
+                                    change.uptimeMillis,
+                                    change.position
+                                )
+
+                                // Edge resistance
+                                val resistance = when {
+                                    currentVideoIndex == 0 && offsetX.value + dragAmount > 0 -> 0.4f
+                                    currentVideoIndex == videoCount - 1 && offsetX.value + dragAmount < 0 -> 0.4f
+                                    else -> 1f
+                                }
+
+                                scope.launch {
+                                    offsetX.snapTo(offsetX.value + dragAmount * resistance)
+                                }
+                            }
+                        )
                     }
-                )
+            ) {
+                // Video layer with horizontal offset
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = offsetX.value
+                        }
+                ) {
+                    key(currentVideo.id) {
+                        VideoPlayerComposable(
+                            video = currentVideo,
+                            isActive = !isAnnouncementShowing && !isDragging,
+                            modifier = Modifier.fillMaxSize(),
+                            onSwipeUp = {
+                                showVideoPlayer = false
+                                currentPlayingVideo = null
+                                allVideos = emptyList()
+                                currentVideoIndex = 0
+                            }
+                        )
+                    }
+                }
+
+                // Contextual overlay with bottom padding for tab bar area - FULL OVERLAY
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 18.dp)  // Just a bit lower
+                ) {
+                    ContextualVideoOverlay(
+                        video = currentVideo,
+                        overlayContext = OverlayContext.HOME_FEED,  // Full overlay with all buttons
+                        currentUserID = currentUserID,
+                        currentUserTier = currentUserTier ?: UserTier.ROOKIE,
+                        engagementViewModel = engagementViewModel,
+                        iconManager = iconManager,
+                        followManager = followManager,
+                        isVisible = true && !isDragging,
+                        onAction = { action ->
+                            when (action) {
+                                is OverlayAction.NavigateToProfile -> {
+                                    showVideoPlayer = false
+                                    onNavigateToProfile(action.userID)
+                                }
+                                is OverlayAction.NavigateToThread -> {
+                                    // Navigate to thread via parent callback
+                                    val threadID = currentVideo.threadID ?: currentVideo.id
+                                    onShowThreadView(threadID, currentVideo.id)
+                                    println("DISCOVERY: Thread button tapped - navigating to $threadID")
+                                }
+                                is OverlayAction.StitchRecording -> {
+                                    val isOwn = currentVideo.creatorID == currentUserID
+                                    val ctx = if (isOwn) {
+                                        RecordingContextFactory.createContinueThread(
+                                            currentVideo.threadID ?: currentVideo.id,
+                                            currentVideo.creatorName,
+                                            currentVideo.title
+                                        )
+                                    } else {
+                                        RecordingContextFactory.createStitchToThread(
+                                            currentVideo.threadID ?: currentVideo.id,
+                                            currentVideo.creatorName,
+                                            currentVideo.title
+                                        )
+                                    }
+                                    navigationCoordinator?.showModal(
+                                        ModalState.RECORDING,
+                                        mapOf(
+                                            "context" to ctx,
+                                            "parentVideo" to currentVideo
+                                        )
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                    )
+                }
+
+                // Share button at top-right
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .zIndex(10f)
+                ) {
+                    ShareButton(
+                        video = currentVideo,
+                        creatorUsername = currentVideo.creatorName,
+                        size = ShareButtonSize.MEDIUM
+                    )
+                }
+
+                // Navigation indicators (like HomeFeedView)
+                if (videoCount > 1) {
+                    // Next video preview (right edge)
+                    if (currentVideoIndex < videoCount - 1) {
+                        val nextVideo = allVideos[currentVideoIndex + 1]
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 8.dp)
+                                .size(60.dp, 80.dp)
+                                .graphicsLayer {
+                                    translationX = offsetX.value
+                                    alpha = 0.9f  // More visible
+                                }
+                        ) {
+                            AsyncImage(
+                                model = nextVideo.thumbnailURL,
+                                contentDescription = "Next",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                        }
+                    }
+
+                    // Previous video preview (left edge)
+                    if (currentVideoIndex > 0) {
+                        val prevVideo = allVideos[currentVideoIndex - 1]
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .padding(start = 8.dp)
+                                .size(60.dp, 80.dp)
+                                .graphicsLayer {
+                                    translationX = offsetX.value
+                                    alpha = 0.9f  // More visible
+                                }
+                        ) {
+                            AsyncImage(
+                                model = prevVideo.thumbnailURL,
+                                contentDescription = "Previous",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                        }
+                    }
+
+                    // Progress indicator
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 60.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        repeat(videoCount.coerceAtMost(10)) { index ->
+                            Box(
+                                modifier = Modifier
+                                    .size(if (index == currentVideoIndex) 8.dp else 6.dp)
+                                    .background(
+                                        color = if (index == currentVideoIndex)
+                                            Color.White
+                                        else
+                                            Color.White.copy(alpha = 0.4f),
+                                        shape = CircleShape
+                                    )
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -878,17 +1286,17 @@ private fun DiscoveryVideoCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "🔥 ${video.hypeCount}",
+                        text = "ðŸ”¥ ${video.hypeCount}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = "💬 ${video.replyCount}",
+                        text = "ðŸ’¬ ${video.replyCount}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
                     Text(
-                        text = "👁 ${video.viewCount}",
+                        text = "ðŸ‘ ${video.viewCount}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
@@ -983,5 +1391,145 @@ private fun DiscoveryErrorView(
                 fontWeight = FontWeight.SemiBold
             )
         }
+    }
+}
+
+// MARK: - Trending Hashtags Section (matches iOS trendingHashtagsSection)
+
+@Composable
+private fun TrendingHashtagsSection(
+    hashtags: List<TrendingHashtag>,
+    isLoading: Boolean,
+    onHashtagTapped: (TrendingHashtag) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.3f))
+            .padding(vertical = 8.dp)
+    ) {
+        if (isLoading) {
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = Color(0xFFFF69B4),
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp
+                )
+                Text(
+                    text = "Loading trends...",
+                    fontSize = 13.sp,
+                    color = Color.Gray
+                )
+            }
+        } else if (hashtags.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                hashtags.forEach { hashtag ->
+                    DiscoveryHashtagChip(
+                        hashtag = hashtag,
+                        isSelected = false,
+                        onTap = { onHashtagTapped(hashtag) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Hashtag Filter Bar (matches iOS hashtagFilterBar)
+
+@Composable
+private fun HashtagFilterBar(
+    hashtag: TrendingHashtag,
+    videoCount: Int,
+    onClear: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFF69B4).copy(alpha = 0.15f))
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(text = hashtag.velocityTier.emoji, fontSize = 14.sp)
+            Text(
+                text = "Viewing ${hashtag.displayTag}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White
+            )
+            Text(
+                text = "• $videoCount videos",
+                fontSize = 13.sp,
+                color = Color.Gray
+            )
+        }
+
+        IconButton(
+            onClick = onClear,
+            modifier = Modifier.size(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Clear filter",
+                tint = Color.Gray,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+// MARK: - Discovery Hashtag Chip (matches iOS DiscoveryHashtagChip)
+
+@Composable
+private fun DiscoveryHashtagChip(
+    hashtag: TrendingHashtag,
+    isSelected: Boolean,
+    onTap: () -> Unit
+) {
+    val background = if (isSelected) {
+        Brush.horizontalGradient(listOf(Color(0xFFFF69B4), Color(0xFFFF69B4)))
+    } else {
+        Brush.verticalGradient(
+            listOf(Color.White.copy(alpha = 0.15f), Color.White.copy(alpha = 0.05f))
+        )
+    }
+    val borderColor = if (isSelected) Color(0xFFFF69B4) else Color.White.copy(alpha = 0.2f)
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable { onTap() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = hashtag.velocityTier.emoji, fontSize = 12.sp)
+        Text(
+            text = hashtag.displayTag,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isSelected) Color.Black else Color.White
+        )
+        Text(
+            text = "${hashtag.videoCount}",
+            fontSize = 11.sp,
+            color = if (isSelected) Color.Black.copy(alpha = 0.7f) else Color.Gray
+        )
     }
 }

@@ -50,8 +50,6 @@ import com.stitchsocial.club.foundation.Temperature
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.sqrt
-import kotlin.math.pow
 
 /**
  * Discovery swipe cards - EXACT Swift port
@@ -63,6 +61,10 @@ fun DiscoverySwipeCards(
     currentIndex: Int,
     onIndexChange: (Int) -> Unit,
     onVideoTap: (CoreVideoMetadata) -> Unit,
+    onNavigateToProfile: (String) -> Unit = {},
+    onNavigateToThread: (String) -> Unit = {},
+    isAnnouncementShowing: Boolean = false,
+    isFullscreenActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (videos.isEmpty()) {
@@ -85,34 +87,19 @@ fun DiscoverySwipeCards(
 
     // State with Animatable for smooth transitions
     val dragOffsetX = remember { androidx.compose.animation.core.Animatable(0f) }
-    val dragOffsetY = remember { androidx.compose.animation.core.Animatable(0f) }
     val dragRotation = remember { androidx.compose.animation.core.Animatable(0f) }
     var isSwipeInProgress by remember { mutableStateOf(false) }
     val loopCounts = remember { mutableStateMapOf<String, Int>() }
 
-    // Get current offset as Offset object
-    val currentDragOffset by remember {
-        derivedStateOf { Offset(dragOffsetX.value, dragOffsetY.value) }
-    }
-
     // Configuration
     val swipeThreshold = with(density) { 80.dp.toPx() }
     val targetLoops = 2
-    val dragMultiplier = 1.2f  // Makes swipe feel lighter/more responsive
+    val dragMultiplier = 1.2f
 
     // Reset drag offset when index changes with spring animation
     LaunchedEffect(currentIndex) {
         launch {
             dragOffsetX.animateTo(
-                0f,
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                )
-            )
-        }
-        launch {
-            dragOffsetY.animateTo(
                 0f,
                 animationSpec = androidx.compose.animation.core.spring(
                     dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
@@ -138,7 +125,6 @@ fun DiscoverySwipeCards(
         }
         scope.launch {
             dragOffsetX.snapTo(0f)
-            dragOffsetY.snapTo(0f)
             dragRotation.snapTo(0f)
         }
     }
@@ -149,7 +135,6 @@ fun DiscoverySwipeCards(
         }
         scope.launch {
             dragOffsetX.snapTo(0f)
-            dragOffsetY.snapTo(0f)
             dragRotation.snapTo(0f)
         }
     }
@@ -179,36 +164,40 @@ fun DiscoverySwipeCards(
             .fillMaxSize()
             .padding(horizontal = 48.dp, vertical = 80.dp)  // Smaller cards
     ) {
-        // Background card 3 (deepest)
+        // Background card 3 (deepest) — iOS: scale 0.90, yOffset 20
         if (currentIndex + 2 < videos.size) {
             key(videos[currentIndex + 2].id) {
                 CardLayer(
                     video = videos[currentIndex + 2],
                     isTopCard = false,
-                    scale = 0.86f,
-                    yOffset = 28f,
+                    scale = 0.90f,
+                    yOffset = 20f,
                     zIndex = 1f,
-                    alpha = 0.4f,
+                    alpha = 0.5f,
                     dragOffset = Offset.Zero,
                     dragRotation = 0f,
-                    onVideoLoop = { }
+                    onVideoLoop = { },
+                    isAnnouncementShowing = isAnnouncementShowing,
+                    isFullscreenActive = isFullscreenActive
                 )
             }
         }
 
-        // Background card 2 (middle)
+        // Background card 2 (middle) — iOS: scale 0.95, yOffset 10
         if (currentIndex + 1 < videos.size) {
             key(videos[currentIndex + 1].id) {
                 CardLayer(
                     video = videos[currentIndex + 1],
                     isTopCard = false,
-                    scale = 0.92f,
-                    yOffset = 14f,
+                    scale = 0.95f,
+                    yOffset = 10f,
                     zIndex = 2f,
-                    alpha = 0.5f,
+                    alpha = 1.0f,
                     dragOffset = Offset.Zero,
                     dragRotation = 0f,
-                    onVideoLoop = { }
+                    onVideoLoop = { },
+                    isAnnouncementShowing = isAnnouncementShowing,
+                    isFullscreenActive = isFullscreenActive
                 )
             }
         }
@@ -224,7 +213,6 @@ fun DiscoverySwipeCards(
                         .zIndex(3f)
                         .graphicsLayer {
                             translationX = dragOffsetX.value
-                            translationY = dragOffsetY.value
                             rotationZ = dragRotation.value
                             scaleX = 1.0f
                             scaleY = 1.0f
@@ -241,122 +229,63 @@ fun DiscoverySwipeCards(
                                 }
                             )
                         }
-                        // DRAG GESTURE - Lighter feel with multiplier
+                        // DRAG GESTURE - X-axis only (matches iOS)
                         .pointerInput(currentIndex) {
                             detectDragGestures(
                                 onDrag = { change, dragAmount ->
                                     if (!isSwipeInProgress) {
                                         change.consume()
                                         scope.launch {
-                                            // Apply drag multiplier for lighter feel
+                                            // X-axis only — iOS constrains to width
                                             dragOffsetX.snapTo(dragOffsetX.value + dragAmount.x * dragMultiplier)
-                                            dragOffsetY.snapTo(dragOffsetY.value + dragAmount.y * dragMultiplier)
-                                            // Smoother rotation calculation
-                                            val targetRotation = (dragOffsetX.value / 30f).coerceIn(-12f, 12f)
+                                            // Y stays at 0 (iOS: height: 0)
+                                            val targetRotation = (dragOffsetX.value / 20f).coerceIn(-15f, 15f)
                                             dragRotation.snapTo(targetRotation)
                                         }
                                     }
                                 },
                                 onDragEnd = {
                                     val translationX = dragOffsetX.value
-                                    val translationY = dragOffsetY.value
-                                    val distance = sqrt(
-                                        translationX.pow(2) + translationY.pow(2)
-                                    )
 
-                                    val isHorizontalSwipe = abs(translationX) > abs(translationY)
+                                    // Horizontal swipe navigation (matches iOS threshold + velocity check)
+                                    if (abs(translationX) > swipeThreshold) {
+                                        isSwipeInProgress = true
 
-                                    if (isHorizontalSwipe) {
-                                        // HORIZONTAL SWIPE = Navigation
-                                        if (abs(translationX) > swipeThreshold) {
-                                            isSwipeInProgress = true
-
-                                            if (translationX > 0) {
-                                                // SWIPE RIGHT = Previous
-                                                scope.launch {
-                                                    previousCard()
-                                                    delay(200)
-                                                    isSwipeInProgress = false
-                                                }
-                                            } else {
-                                                // SWIPE LEFT = Next
-                                                scope.launch {
-                                                    nextCard()
-                                                    delay(200)
-                                                    isSwipeInProgress = false
-                                                }
+                                        if (translationX > 0) {
+                                            // SWIPE RIGHT = Previous
+                                            scope.launch {
+                                                previousCard()
+                                                delay(200)
+                                                isSwipeInProgress = false
                                             }
                                         } else {
-                                            // Spring back to center
-                                            scope.launch {
-                                                launch {
-                                                    dragOffsetX.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
-                                                    )
-                                                }
-                                                launch {
-                                                    dragOffsetY.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
-                                                    )
-                                                }
-                                                launch {
-                                                    dragRotation.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        // VERTICAL SWIPE = Next
-                                        if (distance > swipeThreshold) {
-                                            isSwipeInProgress = true
+                                            // SWIPE LEFT = Next
                                             scope.launch {
                                                 nextCard()
                                                 delay(200)
                                                 isSwipeInProgress = false
                                             }
-                                        } else {
-                                            // Spring back to center
-                                            scope.launch {
-                                                launch {
-                                                    dragOffsetX.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
+                                        }
+                                    } else {
+                                        // Spring back to center
+                                        scope.launch {
+                                            launch {
+                                                dragOffsetX.animateTo(
+                                                    0f,
+                                                    animationSpec = androidx.compose.animation.core.spring(
+                                                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                                        stiffness = androidx.compose.animation.core.Spring.StiffnessLow
                                                     )
-                                                }
-                                                launch {
-                                                    dragOffsetY.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
+                                                )
+                                            }
+                                            launch {
+                                                dragRotation.animateTo(
+                                                    0f,
+                                                    animationSpec = androidx.compose.animation.core.spring(
+                                                        dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                                        stiffness = androidx.compose.animation.core.Spring.StiffnessLow
                                                     )
-                                                }
-                                                launch {
-                                                    dragRotation.animateTo(
-                                                        0f,
-                                                        animationSpec = androidx.compose.animation.core.spring(
-                                                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                                                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-                                                        )
-                                                    )
-                                                }
+                                                )
                                             }
                                         }
                                     }
@@ -372,7 +301,9 @@ fun DiscoverySwipeCards(
                         zIndex = 3f,
                         dragOffset = Offset.Zero,
                         dragRotation = 0f,
-                        onVideoLoop = handleVideoLoop
+                        onVideoLoop = handleVideoLoop,
+                        isAnnouncementShowing = isAnnouncementShowing,
+                        isFullscreenActive = isFullscreenActive
                     )
                 }
             }
@@ -412,7 +343,9 @@ private fun CardLayer(
     alpha: Float = if (isTopCard) 1.0f else 0.6f,
     dragOffset: Offset,
     dragRotation: Float,
-    onVideoLoop: (String) -> Unit
+    onVideoLoop: (String) -> Unit,
+    isAnnouncementShowing: Boolean,
+    isFullscreenActive: Boolean = false
 ) {
     key(video.id) {
         Box(
@@ -430,8 +363,9 @@ private fun CardLayer(
         ) {
             DiscoveryCard(
                 video = video,
-                shouldAutoPlay = isTopCard,
-                onVideoLoop = onVideoLoop
+                shouldAutoPlay = isTopCard && !isFullscreenActive,
+                onVideoLoop = onVideoLoop,
+                isAnnouncementShowing = isAnnouncementShowing || isFullscreenActive
             )
         }
     }
@@ -444,7 +378,8 @@ private fun CardLayer(
 fun DiscoveryCard(
     video: CoreVideoMetadata,
     shouldAutoPlay: Boolean,
-    onVideoLoop: (String) -> Unit
+    onVideoLoop: (String) -> Unit,
+    isAnnouncementShowing: Boolean,
 ) {
     // Force layout recalculation after composition
     var layoutTrigger by remember { mutableStateOf(0) }
@@ -461,13 +396,14 @@ fun DiscoveryCard(
             .clip(RoundedCornerShape(20.dp))
             .background(Color.Black)  // Black background to hide any gaps
     ) {
+        // CRITICAL: Completely prevent video rendering when announcement showing
         // Video content or thumbnail - fills completely
-        if (shouldAutoPlay) {
+        if (shouldAutoPlay && !isAnnouncementShowing) {
             // Play video - key includes layoutTrigger to force remount after layout
             key(video.id, "video-player", layoutTrigger) {
                 VideoPlayerComposable(
                     video = video,
-                    isActive = true,
+                    isActive = true,  // Always active when rendering (controlled by shouldAutoPlay check)
                     onEngagement = { },
                     onVideoClick = { },
                     modifier = Modifier
@@ -485,97 +421,129 @@ fun DiscoveryCard(
             )
         }
 
-        // Gradient overlay at bottom for text readability
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.8f)
-                        )
-                    )
-                )
-        )
-
-        // Temperature badge at top
-        if (video.temperature != Temperature.COOL) {
+        // Reply count badge — top-right (matches iOS)
+        if (video.replyCount > 0 && shouldAutoPlay) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(Alignment.TopEnd)
                     .padding(12.dp)
                     .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.Cyan.copy(alpha = 0.7f),
+                                Color(0xFF3366FF).copy(alpha = 0.5f)
+                            )
+                        ),
+                        RoundedCornerShape(6.dp)
                     )
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
-                Text(
-                    text = video.temperature.emoji,
-                    fontSize = 14.sp
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "💬", fontSize = 10.sp)
+                    Text(
+                        text = "${video.replyCount}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                }
             }
         }
 
-        // Video info at bottom
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomStart)
-                .padding(16.dp)
-        ) {
-            // Title
-            Text(
-                text = video.title,
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        // Bottom overlay — only on active/top card (matches iOS cardOverlay)
+        if (shouldAutoPlay) {
+            // Gradient overlay at bottom
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.8f)
+                            )
+                        )
+                    )
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Creator
-            Text(
-                text = "@${video.creatorName}",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Stats row
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            // Video info at bottom
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomStart)
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Hype count
-                Text(
-                    text = "🔥 ${formatCount(video.hypeCount)}",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                // Creator pill (matches iOS CreatorPill with temperature colors)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = temperatureColors(video.temperature)
+                            )
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "🎬", fontSize = 12.sp)
+                    Text(
+                        text = video.creatorName.ifEmpty { "Creator" },
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                // Reply count
-                Text(
-                    text = "💬 ${formatCount(video.replyCount)}",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                // Title
+                if (video.title.isNotEmpty()) {
+                    Text(
+                        text = video.title,
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                // View count
-                Text(
-                    text = "👁 ${formatCount(video.viewCount)}",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                // Stats row (matches iOS: hype, views, duration)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (video.hypeCount > 0) {
+                        Text(
+                            text = "🔥 ${formatCount(video.hypeCount)}",
+                            color = Color(0xFFFF9500),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (video.viewCount > 0) {
+                        Text(
+                            text = "👁 ${formatCount(video.viewCount)}",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Text(
+                        text = "⏱ ${formatDuration(video.duration)}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
@@ -590,4 +558,28 @@ private fun formatCount(count: Int): String {
         count >= 1_000 -> String.format("%.1fK", count / 1_000.0)
         else -> count.toString()
     }
+}
+
+/**
+ * Temperature-based gradient colors (matches iOS temperatureColors)
+ */
+private fun temperatureColors(temperature: Temperature): List<Color> {
+    return when (temperature) {
+        Temperature.BLAZING -> listOf(Color(0xFFFF3B30), Color(0xFFFF9500))
+        Temperature.HOT -> listOf(Color(0xFFFF9500), Color(0xFFFFCC00))
+        Temperature.WARM -> listOf(Color(0xFFFFCC00), Color(0xFF34C759))
+        Temperature.COOL -> listOf(Color(0xFF00D9F2), Color(0xFF3366FF))
+        Temperature.COLD -> listOf(Color(0xFF3366FF), Color(0xFF9966F2))
+        Temperature.FROZEN -> listOf(Color(0xFF9966F2), Color(0xFFAF52DE))
+    }
+}
+
+/**
+ * Format duration in seconds to MM:SS
+ */
+private fun formatDuration(durationSeconds: Double): String {
+    val totalSeconds = durationSeconds.toInt()
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "${minutes}:${String.format("%02d", seconds)}"
 }

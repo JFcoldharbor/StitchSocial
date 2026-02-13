@@ -3,7 +3,7 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * ✅ Uses HorizontalPager for child navigation (like ThreadContainer)
- * ✅ Pauses video when CreatorProfileView is shown
+ * ✅ Pauses video when ProfileView is shown
  * ✅ Swipe up gesture to exit fullscreen
  * ✅ Navigation dots for thread position
  * ✅ Loads children on-demand
@@ -57,11 +57,13 @@ import com.stitchsocial.club.services.UserService
 // Engagement imports
 import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.ModalState
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 
 // Follow Manager
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.camera.RecordingContextFactory
 
 // MARK: - Main VideoPlayer Composable
 
@@ -76,12 +78,12 @@ fun VideoPlayer(
     engagementViewModel: EngagementViewModel,
     iconManager: FloatingIconManager? = null,
     followManager: FollowManager? = null,
+    navigationCoordinator: NavigationCoordinator? = null,
     modifier: Modifier = Modifier,
     onClose: () -> Unit = {},
     onNavigateToProfile: (String) -> Unit = {},
     onEngagement: (InteractionType) -> Unit = {},
-    onShare: () -> Unit = {},
-    onStitchRecording: () -> Unit = {}
+    onShare: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -145,6 +147,7 @@ fun VideoPlayer(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .fillMaxWidth() // Explicit full width - prevents edge bleed-through
             .background(Color.Black)
             .graphicsLayer {
                 translationY = offsetY.value
@@ -246,7 +249,31 @@ fun VideoPlayer(
                                     interactionType?.let { onEngagement(it) }
                                 }
                                 is OverlayAction.Share -> onShare()
-                                is OverlayAction.StitchRecording -> onStitchRecording()
+                                is OverlayAction.StitchRecording -> {
+                                    println("🎬 VIDEOPLAYER: StitchRecording action")
+                                    val isOwn = video.creatorID == currentUserID
+                                    val ctx = if (isOwn) {
+                                        RecordingContextFactory.createContinueThread(
+                                            video.threadID ?: video.id,
+                                            video.creatorName,
+                                            video.title
+                                        )
+                                    } else {
+                                        RecordingContextFactory.createStitchToThread(
+                                            video.threadID ?: video.id,
+                                            video.creatorName,
+                                            video.title
+                                        )
+                                    }
+                                    println("🎬 VIDEOPLAYER: Context created, showing modal")
+                                    navigationCoordinator?.showModal(
+                                        ModalState.RECORDING,
+                                        mapOf(
+                                            "context" to ctx,
+                                            "parentVideo" to video
+                                        )
+                                    )
+                                }
                                 is OverlayAction.Follow -> println("➕ Follow user: ${pagerVideo.creatorID}")
                                 is OverlayAction.Unfollow -> println("➖ Unfollow user: ${pagerVideo.creatorID}")
                                 is OverlayAction.NavigateToThread -> println("🧵 Navigate to thread: ${pagerVideo.threadID}")
@@ -293,7 +320,31 @@ fun VideoPlayer(
                                 interactionType?.let { onEngagement(it) }
                             }
                             is OverlayAction.Share -> onShare()
-                            is OverlayAction.StitchRecording -> onStitchRecording()
+                            is OverlayAction.StitchRecording -> {
+                                println("🎬 VIDEOPLAYER: StitchRecording action")
+                                val isOwn = video.creatorID == currentUserID
+                                val ctx = if (isOwn) {
+                                    RecordingContextFactory.createContinueThread(
+                                        video.threadID ?: video.id,
+                                        video.creatorName,
+                                        video.title
+                                    )
+                                } else {
+                                    RecordingContextFactory.createStitchToThread(
+                                        video.threadID ?: video.id,
+                                        video.creatorName,
+                                        video.title
+                                    )
+                                }
+                                println("🎬 VIDEOPLAYER: Context created, showing modal")
+                                navigationCoordinator?.showModal(
+                                    ModalState.RECORDING,
+                                    mapOf(
+                                        "context" to ctx,
+                                        "parentVideo" to video
+                                    )
+                                )
+                            }
                             is OverlayAction.Follow -> println("➕ Follow user: ${video.creatorID}")
                             is OverlayAction.Unfollow -> println("➖ Unfollow user: ${video.creatorID}")
                             is OverlayAction.NavigateToThread -> println("🧵 Navigate to thread: ${video.threadID}")
@@ -396,15 +447,11 @@ fun VideoPlayer(
 
     // ✅ Creator Profile Overlay - video is PAUSED while this is showing
     showingCreatorProfileID?.let { profileUserID ->
-        CreatorProfileView(
+        ProfileView(
             userID = profileUserID,
-            currentUserID = currentUserID,
+            viewingUserID = currentUserID,
             navigationCoordinator = null,
             onDismiss = { showingCreatorProfileID = null },
-            onVideoTap = { tappedVideo ->
-                println("🎬 VideoPlayer: Tapped video from profile: ${tappedVideo.id}")
-                showingCreatorProfileID = null
-            }
         )
     }
 }

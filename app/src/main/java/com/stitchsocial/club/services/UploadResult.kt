@@ -95,7 +95,22 @@ class UploadCoordinator(
                     isDeleted = false
                 )
 
-                // Step 5: Return success result
+                // Step 5: Trigger hype rating regen for posting (matches iOS)
+                val isInApp = true // In-app recording context
+                when (recordingContext) {
+                    is RecordingContext.NewThread ->
+                        HypeRatingService.shared.didPostOriginalContent(isInApp = isInApp)
+                    is RecordingContext.StitchToThread ->
+                        HypeRatingService.shared.didStitchContent()
+                    is RecordingContext.ReplyToVideo ->
+                        HypeRatingService.shared.didReplyToContent()
+                    is RecordingContext.ContinueThread ->
+                        HypeRatingService.shared.didStitchContent()
+                    is RecordingContext.SpinOffFrom ->
+                        HypeRatingService.shared.didPostOriginalContent(isInApp = isInApp)
+                }
+
+                // Step 6: Return success result
                 VideoUploadResult(
                     success = true,
                     videoMetadata = videoMetadata,
@@ -133,6 +148,7 @@ class UploadCoordinator(
             is RecordingContext.StitchToThread -> recordingContext.threadId
             is RecordingContext.ReplyToVideo -> null
             is RecordingContext.ContinueThread -> recordingContext.threadId
+            is RecordingContext.SpinOffFrom -> null // Spin-offs are new threads
         }
     }
 
@@ -140,7 +156,10 @@ class UploadCoordinator(
     private fun determineReplyToVideoID(recordingContext: RecordingContext): String? {
         return when (recordingContext) {
             is RecordingContext.ReplyToVideo -> recordingContext.videoId
-            else -> null
+            is RecordingContext.NewThread -> null
+            is RecordingContext.StitchToThread -> null
+            is RecordingContext.ContinueThread -> null
+            is RecordingContext.SpinOffFrom -> null // Spin-offs don't reply to specific videos
         }
     }
 
@@ -148,7 +167,10 @@ class UploadCoordinator(
     private fun determineConversationDepth(recordingContext: RecordingContext): Int {
         return when (recordingContext) {
             is RecordingContext.NewThread -> 0
-            else -> 1
+            is RecordingContext.StitchToThread -> 1
+            is RecordingContext.ReplyToVideo -> 1 // Will be adjusted in VideoCoordinator
+            is RecordingContext.ContinueThread -> 1
+            is RecordingContext.SpinOffFrom -> 0 // Spin-offs are new threads at depth 0
         }
     }
 
@@ -156,7 +178,10 @@ class UploadCoordinator(
     private fun determineContentType(recordingContext: RecordingContext): ContentType {
         return when (recordingContext) {
             is RecordingContext.NewThread -> ContentType.THREAD
-            else -> ContentType.CHILD
+            is RecordingContext.StitchToThread -> ContentType.CHILD
+            is RecordingContext.ReplyToVideo -> ContentType.CHILD
+            is RecordingContext.ContinueThread -> ContentType.CHILD
+            is RecordingContext.SpinOffFrom -> ContentType.THREAD // Spin-offs are new threads
         }
     }
 }

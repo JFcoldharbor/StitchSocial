@@ -5,11 +5,11 @@
  * Layer 7: ViewModels - Notification State Management
  * Dependencies: UserService, EngagementCoordinator, NavigationCoordinator, NotificationService, AuthService
  *
- * ✅ COMPLETE: Real Firebase notification loading
- * ✅ COMPLETE: Real-time listener integration
- * ✅ COMPLETE: Proper AuthService user ID retrieval
- * ✅ COMPLETE: Mark as read functionality
- * ✅ FIXED: Navigation events for profile and video navigation
+ * âœ… COMPLETE: Real Firebase notification loading
+ * âœ… COMPLETE: Real-time listener integration
+ * âœ… COMPLETE: Proper AuthService user ID retrieval
+ * âœ… COMPLETE: Mark as read functionality
+ * âœ… FIXED: Navigation events for profile and video navigation
  */
 
 package com.stitchsocial.club.viewmodels
@@ -29,6 +29,7 @@ import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.tasks.await
 import java.util.*
 
 /**
@@ -89,10 +90,15 @@ class NotificationViewModel(
     )
     val navigationEvent: SharedFlow<NotificationNavigationEvent> = _navigationEvent.asSharedFlow()
 
+    // MARK: - Profile Image Cache
+
+    private val _profileImages = MutableStateFlow<Map<String, String>>(emptyMap())
+    val profileImages: StateFlow<Map<String, String>> = _profileImages.asStateFlow()
+
     // MARK: - Initialization
 
     init {
-        Log.d(TAG, "🔔 NOTIFICATION VM: Initializing with NotificationService integration")
+        Log.d(TAG, "ðŸ”” NOTIFICATION VM: Initializing with NotificationService integration")
 
         // Load initial notifications
         viewModelScope.launch {
@@ -110,16 +116,16 @@ class NotificationViewModel(
     private suspend fun loadNotifications() {
         try {
             _isLoading.value = true
-            Log.d(TAG, "🔔 NOTIFICATION VM: Loading notifications from Firebase...")
+            Log.d(TAG, "ðŸ”” NOTIFICATION VM: Loading notifications from Firebase...")
 
             val currentUserID = getCurrentUserId()
             if (currentUserID.isEmpty()) {
-                Log.w(TAG, "⚠️ NOTIFICATION VM: No user ID available")
+                Log.w(TAG, "âš ï¸ NOTIFICATION VM: No user ID available")
                 _isLoading.value = false
                 return
             }
 
-            Log.d(TAG, "🔔 NOTIFICATION VM: Loading for user: $currentUserID")
+            Log.d(TAG, "ðŸ”” NOTIFICATION VM: Loading for user: $currentUserID")
 
             // Load notifications from NotificationService
             val result = notificationService.loadNotifications(
@@ -127,7 +133,7 @@ class NotificationViewModel(
                 limit = 50
             )
 
-            Log.d(TAG, "🔔 NOTIFICATION VM: Received ${result.notifications.size} notifications from service")
+            Log.d(TAG, "ðŸ”” NOTIFICATION VM: Received ${result.notifications.size} notifications from service")
 
             // Convert to NotificationItems
             val notificationItems = result.notifications.map { firebaseNotification ->
@@ -142,10 +148,13 @@ class NotificationViewModel(
 
             Log.d(TAG, "✅ NOTIFICATION VM: Loaded ${notificationItems.size} notifications (${_unreadCount.value} unread)")
 
+            // Fetch profile images for all senders
+            fetchProfileImages(notificationItems)
+
         } catch (error: Exception) {
             val stitchError = error as? StitchError ?: StitchError.NetworkError(error.message ?: "Unknown error")
             _lastError.value = stitchError
-            Log.e(TAG, "❌ NOTIFICATION VM: Failed to load notifications", error)
+            Log.e(TAG, "âŒ NOTIFICATION VM: Failed to load notifications", error)
         } finally {
             _isLoading.value = false
         }
@@ -157,16 +166,16 @@ class NotificationViewModel(
     private fun startRealtimeListener() {
         val currentUserID = getCurrentUserId()
         if (currentUserID.isEmpty()) {
-            Log.w(TAG, "⚠️ NOTIFICATION VM: Cannot start listener - no user ID")
+            Log.w(TAG, "âš ï¸ NOTIFICATION VM: Cannot start listener - no user ID")
             return
         }
 
-        Log.d(TAG, "📡 NOTIFICATION VM: Starting real-time listener for user: $currentUserID")
+        Log.d(TAG, "ðŸ“¡ NOTIFICATION VM: Starting real-time listener for user: $currentUserID")
 
         notificationService.startListening(
             userID = currentUserID,
             onNotificationsUpdated = { firebaseNotifications ->
-                Log.d(TAG, "🔄 NOTIFICATION VM: Real-time update - ${firebaseNotifications.size} notifications")
+                Log.d(TAG, "ðŸ”„ NOTIFICATION VM: Real-time update - ${firebaseNotifications.size} notifications")
 
                 val notificationItems = firebaseNotifications.map { convertToNotificationItem(it) }
                 _notifications.value = notificationItems
@@ -215,6 +224,47 @@ class NotificationViewModel(
         }
     }
 
+    /**
+     * Fetch profile images for notification senders
+     */
+    private fun fetchProfileImages(notifications: List<NotificationItem>) {
+        val cached = _profileImages.value
+        val senderIds = notifications.mapNotNull { notification ->
+            (notification.actionData["senderID"] as? String)?.takeIf { it.isNotEmpty() }
+        }.distinct().filter { !cached.containsKey(it) }
+
+        if (senderIds.isEmpty()) return
+
+        viewModelScope.launch {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance(
+                com.google.firebase.FirebaseApp.getInstance(), "stitchfin"
+            )
+            val imageMap = _profileImages.value.toMutableMap()
+
+            // Fetch in batches of 10 (Firestore whereIn limit)
+            for (batch in senderIds.chunked(10)) {
+                try {
+                    val snapshot = db.collection("users")
+                        .whereIn(com.google.firebase.firestore.FieldPath.documentId(), batch)
+                        .get()
+                        .await()
+
+                    for (doc in snapshot.documents) {
+                        val imageUrl = doc.getString("profileImageURL")
+                        if (!imageUrl.isNullOrEmpty()) {
+                            imageMap[doc.id] = imageUrl
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to fetch profile images: ${e.message}")
+                }
+            }
+
+            _profileImages.value = imageMap
+            Log.d(TAG, "Fetched ${imageMap.size} profile images")
+        }
+    }
+
     // MARK: - Notification Actions
 
     /**
@@ -222,8 +272,12 @@ class NotificationViewModel(
      */
     fun onNotificationTapped(notification: NotificationItem) {
         viewModelScope.launch {
-            Log.d(TAG, "📱 Notification tapped: ${notification.title}")
-            Log.d(TAG, "📱 Action data: ${notification.actionData}")
+            Log.d(TAG, "NOTIF_DEBUG tapped: ${notification.title}")
+            Log.d(TAG, "NOTIF_DEBUG type: ${notification.type}")
+            Log.d(TAG, "NOTIF_DEBUG actionData keys: ${notification.actionData.keys}")
+            notification.actionData.forEach { (key, value) ->
+                Log.d(TAG, "NOTIF_DEBUG   $key = $value")
+            }
 
             // Mark as read
             markAsRead(notification.id)
@@ -240,7 +294,7 @@ class NotificationViewModel(
                         ?: notification.actionData["threadId"] as? String
 
                     if (videoId != null) {
-                        Log.d(TAG, "📱 Navigating to video: $videoId (thread: $threadId)")
+                        Log.d(TAG, "ðŸ“± Navigating to video: $videoId (thread: $threadId)")
                         _navigationEvent.emit(
                             NotificationNavigationEvent.NavigateToVideo(
                                 videoId = videoId,
@@ -248,7 +302,7 @@ class NotificationViewModel(
                             )
                         )
                     } else {
-                        Log.w(TAG, "⚠️ No videoID in notification payload: ${notification.actionData}")
+                        Log.w(TAG, "âš ï¸ No videoID in notification payload: ${notification.actionData}")
                     }
                 }
 
@@ -260,12 +314,12 @@ class NotificationViewModel(
                         ?: notification.actionData["senderId"] as? String
 
                     if (userId != null) {
-                        Log.d(TAG, "📱 Navigating to profile: $userId")
+                        Log.d(TAG, "ðŸ“± Navigating to profile: $userId")
                         _navigationEvent.emit(
                             NotificationNavigationEvent.NavigateToProfile(userId)
                         )
                     } else {
-                        Log.w(TAG, "⚠️ No userId in notification payload: ${notification.actionData}")
+                        Log.w(TAG, "âš ï¸ No userId in notification payload: ${notification.actionData}")
                     }
                 }
 
@@ -274,7 +328,7 @@ class NotificationViewModel(
                     val videoId = notification.actionData["videoID"] as? String
                         ?: notification.actionData["videoId"] as? String
 
-                    Log.d(TAG, "🎯 Celebrating milestone: $milestone")
+                    Log.d(TAG, "ðŸŽ¯ Celebrating milestone: $milestone")
 
                     // Navigate to video if available
                     if (videoId != null) {
@@ -298,7 +352,7 @@ class NotificationViewModel(
                 }
 
                 else -> {
-                    Log.d(TAG, "📱 Notification type: ${notification.type} - no specific navigation")
+                    Log.d(TAG, "ðŸ“± Notification type: ${notification.type} - no specific navigation")
                 }
             }
         }
@@ -309,7 +363,7 @@ class NotificationViewModel(
      */
     fun navigateToProfile(userId: String) {
         viewModelScope.launch {
-            Log.d(TAG, "📱 Direct navigation to profile: $userId")
+            Log.d(TAG, "ðŸ“± Direct navigation to profile: $userId")
             _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(userId))
         }
     }
@@ -319,7 +373,7 @@ class NotificationViewModel(
      */
     fun navigateToVideo(videoId: String, threadId: String? = null) {
         viewModelScope.launch {
-            Log.d(TAG, "📱 Direct navigation to video: $videoId")
+            Log.d(TAG, "ðŸ“± Direct navigation to video: $videoId")
             _navigationEvent.emit(
                 NotificationNavigationEvent.NavigateToVideo(
                     videoId = videoId,
@@ -337,7 +391,7 @@ class NotificationViewModel(
             val currentUserID = getCurrentUserId()
             if (currentUserID.isEmpty()) return
 
-            Log.d(TAG, "✅ Marking notification as read: $notificationId")
+            Log.d(TAG, "âœ… Marking notification as read: $notificationId")
 
             // Update Firebase
             notificationService.markAsRead(currentUserID, notificationId)
@@ -358,7 +412,7 @@ class NotificationViewModel(
             applyFilter(_selectedFilter.value)
 
         } catch (error: Exception) {
-            Log.e(TAG, "❌ Failed to mark as read", error)
+            Log.e(TAG, "âŒ Failed to mark as read", error)
         }
     }
 
@@ -371,7 +425,7 @@ class NotificationViewModel(
                 val currentUserID = getCurrentUserId()
                 if (currentUserID.isEmpty()) return@launch
 
-                Log.d(TAG, "✅ Marking all notifications as read")
+                Log.d(TAG, "âœ… Marking all notifications as read")
 
                 // Update Firebase
                 notificationService.markAllAsRead(currentUserID)
@@ -387,10 +441,10 @@ class NotificationViewModel(
                 // Reapply filter
                 applyFilter(_selectedFilter.value)
 
-                Log.d(TAG, "✅ All notifications marked as read")
+                Log.d(TAG, "âœ… All notifications marked as read")
 
             } catch (error: Exception) {
-                Log.e(TAG, "❌ Failed to mark all as read", error)
+                Log.e(TAG, "âŒ Failed to mark all as read", error)
             }
         }
     }
@@ -401,7 +455,7 @@ class NotificationViewModel(
     fun setFilter(filter: NotificationFilter) {
         _selectedFilter.value = filter
         applyFilter(filter)
-        Log.d(TAG, "🔍 Filter set to ${filter.displayName}")
+        Log.d(TAG, "ðŸ” Filter set to ${filter.displayName}")
     }
 
     /**
@@ -436,7 +490,7 @@ class NotificationViewModel(
         }
 
         _filteredNotifications.value = filtered
-        Log.d(TAG, "🔍 Filtered to ${filtered.size} notifications")
+        Log.d(TAG, "ðŸ” Filtered to ${filtered.size} notifications")
     }
 
     /**
@@ -456,7 +510,7 @@ class NotificationViewModel(
     private fun getCurrentUserId(): String {
         val userId = authService.currentUser.value?.uid ?: ""
         if (userId.isEmpty()) {
-            Log.w(TAG, "⚠️ No authenticated user found")
+            Log.w(TAG, "âš ï¸ No authenticated user found")
         }
         return userId
     }
@@ -466,7 +520,7 @@ class NotificationViewModel(
     override fun onCleared() {
         super.onCleared()
         notificationService.stopListening()
-        Log.d(TAG, "🧹 NOTIFICATION VM: Cleaned up resources")
+        Log.d(TAG, "ðŸ§¹ NOTIFICATION VM: Cleaned up resources")
     }
 }
 
@@ -510,14 +564,14 @@ enum class NotificationType {
 
     val emoji: String
         get() = when (this) {
-            HYPE_RECEIVED -> "🔥"
-            REPLY_RECEIVED -> "💬"
-            SHARE_RECEIVED -> "📤"
-            NEW_FOLLOWER -> "👤"
-            FOLLOWING_VIDEO -> "🎬"
-            TAP_MILESTONE -> "🎯"
-            TIER_UPGRADED -> "⬆️"
-            SYSTEM_UPDATE -> "ℹ️"
+            HYPE_RECEIVED -> "ðŸ”¥"
+            REPLY_RECEIVED -> "ðŸ’¬"
+            SHARE_RECEIVED -> "ðŸ“¤"
+            NEW_FOLLOWER -> "ðŸ‘¤"
+            FOLLOWING_VIDEO -> "ðŸŽ¬"
+            TAP_MILESTONE -> "ðŸŽ¯"
+            TIER_UPGRADED -> "â¬†ï¸"
+            SYSTEM_UPDATE -> "â„¹ï¸"
         }
 }
 

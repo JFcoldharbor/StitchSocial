@@ -22,6 +22,7 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,7 +61,8 @@ fun VideoPlayerComposable(
     isActive: Boolean,
     modifier: Modifier = Modifier,
     onEngagement: ((InteractionType) -> Unit)? = null,
-    onVideoClick: (() -> Unit)? = null
+    onVideoClick: (() -> Unit)? = null,
+    onSwipeUp: (() -> Unit)? = null  // Callback for swipe up to exit
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
@@ -199,10 +202,44 @@ fun VideoPlayerComposable(
         }
     }
 
+    val scope = rememberCoroutineScope()
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .then(
+                // Add swipe up gesture if callback provided
+                if (onSwipeUp != null) {
+                    Modifier.pointerInput(Unit) {
+                        val velocityTracker = VelocityTracker()
+
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                velocityTracker.resetTracking()
+                            },
+                            onDragEnd = {
+                                val velocity = velocityTracker.calculateVelocity().y
+
+                                // Swipe up to exit (negative velocity)
+                                if (velocity < -500f) {
+                                    onSwipeUp()
+                                }
+                            },
+                            onDragCancel = {},
+                            onVerticalDrag = { change, _ ->
+                                change.consume()
+                                velocityTracker.addPosition(
+                                    change.uptimeMillis,
+                                    change.position
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
     ) {
         when {
             isError -> {
@@ -227,7 +264,7 @@ fun VideoPlayerComposable(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
 
-                            // iPhone video fix - ZOOM fills entire screen
+                            // ZOOM mode fills screen by cropping, not stretching (no distortion)
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                             setKeepContentOnPlayerReset(true)
 

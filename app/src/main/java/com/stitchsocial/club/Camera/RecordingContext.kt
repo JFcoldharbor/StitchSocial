@@ -19,6 +19,8 @@ sealed class RecordingContext {
     data class StitchToThread(val threadId: String, val threadInfo: ThreadInfo) : RecordingContext()
     data class ReplyToVideo(val videoId: String, val videoInfo: VideoInfo) : RecordingContext()
     data class ContinueThread(val threadId: String, val threadInfo: ThreadInfo) : RecordingContext()
+    // NEW: Spin-off from depth 2 video
+    data class SpinOffFrom(val videoId: String, val threadId: String, val videoInfo: VideoInfo) : RecordingContext()
 }
 
 // MARK: - Context Info Data Classes
@@ -45,6 +47,7 @@ fun RecordingContext.getTitle(): String {
         is RecordingContext.StitchToThread -> "Create Stitch"
         is RecordingContext.ReplyToVideo -> "Create Reply"
         is RecordingContext.ContinueThread -> "Continue Thread"
+        is RecordingContext.SpinOffFrom -> "Create Spin-off"
     }
 }
 
@@ -54,6 +57,7 @@ fun RecordingContext.getSubtitle(): String {
         is RecordingContext.StitchToThread -> "Stitching to ${this.threadInfo.creatorName}'s thread"
         is RecordingContext.ReplyToVideo -> "Replying to ${this.videoInfo.creatorName}"
         is RecordingContext.ContinueThread -> "Continuing ${this.threadInfo.creatorName}'s thread"
+        is RecordingContext.SpinOffFrom -> "Responding to ${this.videoInfo.creatorName}"
     }
 }
 
@@ -63,6 +67,7 @@ fun RecordingContext.getButtonText(): String {
         is RecordingContext.StitchToThread -> "Create Stitch"
         is RecordingContext.ReplyToVideo -> "Create Reply"
         is RecordingContext.ContinueThread -> "Continue Thread"
+        is RecordingContext.SpinOffFrom -> "Create Spin-off"
     }
 }
 
@@ -72,6 +77,7 @@ fun RecordingContext.getBadgeText(): String {
         is RecordingContext.StitchToThread -> "Stitch"
         is RecordingContext.ReplyToVideo -> "Reply"
         is RecordingContext.ContinueThread -> "Continue"
+        is RecordingContext.SpinOffFrom -> "Spin-off"
     }
 }
 
@@ -81,6 +87,7 @@ fun RecordingContext.getTitlePlaceholder(): String {
         is RecordingContext.StitchToThread -> "What's your stitch about?"
         is RecordingContext.ReplyToVideo -> "What's your reply?"
         is RecordingContext.ContinueThread -> "Continue the conversation..."
+        is RecordingContext.SpinOffFrom -> "What's your take on this?"
     }
 }
 
@@ -90,6 +97,7 @@ fun RecordingContext.getDescriptionPlaceholder(): String {
         is RecordingContext.StitchToThread -> "Add context to your stitch..."
         is RecordingContext.ReplyToVideo -> "Explain your response..."
         is RecordingContext.ContinueThread -> "Add to the conversation..."
+        is RecordingContext.SpinOffFrom -> "Share your perspective..."
     }
 }
 
@@ -99,6 +107,7 @@ fun RecordingContext.getContextHashtags(): List<String> {
         is RecordingContext.StitchToThread -> listOf("stitch", "thread")
         is RecordingContext.ReplyToVideo -> listOf("reply")
         is RecordingContext.ContinueThread -> listOf("thread", "continue")
+        is RecordingContext.SpinOffFrom -> listOf("spinoff", "thread")
     }
 }
 
@@ -108,6 +117,7 @@ fun RecordingContext.getContextColor(): Color {
         is RecordingContext.StitchToThread -> Color(0xFFFFA500)  // Orange
         is RecordingContext.ReplyToVideo -> Color(0xFF007AFF)    // Blue
         is RecordingContext.ContinueThread -> Color(0xFF34C759) // Green
+        is RecordingContext.SpinOffFrom -> Color(0xFFFF9500)     // Amber/Orange
     }
 }
 
@@ -148,5 +158,14 @@ object RecordingContextFactory {
             stitchCount = 1
         )
         return RecordingContext.ContinueThread(threadId, threadInfo)
+    }
+
+    fun createSpinOffFrom(videoId: String, threadId: String, creatorName: String, title: String): RecordingContext {
+        val videoInfo = VideoInfo(
+            title = title,
+            creatorName = creatorName,
+            creatorId = "creator_$videoId"
+        )
+        return RecordingContext.SpinOffFrom(videoId, threadId, videoInfo)
     }
 }

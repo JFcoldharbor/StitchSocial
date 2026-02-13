@@ -785,10 +785,43 @@ class UserService(private val context: Context) {
     }
 
     /**
-     * Award clout to a user
+     * Award clout to a user and check for tier advancement
      */
     suspend fun awardClout(userID: String, amount: Int): Boolean {
-        return updateEngagementStats(userID = userID, cloutChange = amount)
+        val result = updateEngagementStats(userID = userID, cloutChange = amount)
+        if (result) {
+            checkAndAdvanceTier(userID)
+        }
+        return result
+    }
+
+    /**
+     * Check if user qualifies for a higher tier and update if so
+     */
+    private suspend fun checkAndAdvanceTier(userID: String) {
+        try {
+            val userDoc = db.collection("users").document(userID).get().await()
+            val currentClout = (userDoc.getLong("clout") ?: 0).toInt()
+            val currentTierRaw = userDoc.getString("tier") ?: "rookie"
+            val currentTier = UserTier.fromRawValue(currentTierRaw) ?: UserTier.ROOKIE
+
+            // Don't change founder/co-founder tiers
+            if (currentTier.isFounderTier) return
+
+            val correctTier = UserTier.tierForClout(currentClout)
+            if (correctTier != currentTier && correctTier.level > currentTier.level) {
+                db.collection("users").document(userID).update(
+                    mapOf(
+                        "tier" to correctTier.rawValue,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                invalidateUserCache(userID)
+                println("USER SERVICE: Tier advanced for $userID: ${currentTier.displayName} -> ${correctTier.displayName} (clout: $currentClout)")
+            }
+        } catch (e: Exception) {
+            println("USER SERVICE: Tier check failed (non-fatal): ${e.message}")
+        }
     }
 
     /**

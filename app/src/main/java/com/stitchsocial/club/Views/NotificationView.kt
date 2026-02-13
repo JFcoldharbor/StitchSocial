@@ -18,7 +18,6 @@
 
 package com.stitchsocial.club.views
 
-import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -38,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -46,16 +44,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -70,7 +64,6 @@ import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.DiscoveryService
-import com.stitchsocial.club.services.AuthService
 
 // ViewModels
 import com.stitchsocial.club.viewmodels.NotificationViewModel
@@ -95,6 +88,8 @@ import com.google.firebase.firestore.Query
 @Composable
 fun NotificationViewComplete(
     navigationCoordinator: NavigationCoordinator,
+    onShowThreadView: (String, String?) -> Unit = { _, _ -> },
+    onNavigateToProfile: (String) -> Unit = { },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -123,37 +118,29 @@ fun NotificationViewComplete(
     val unreadCount by viewModel.unreadCount.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
+    val profileImages by viewModel.profileImages.collectAsState()
 
     // Discovery state
     var recentUsers by remember { mutableStateOf<List<RecentUser>>(emptyList()) }
     var leaderboardVideos by remember { mutableStateOf<List<LeaderboardVideo>>(emptyList()) }
     var isLoadingDiscovery by remember { mutableStateOf(false) }
-    var currentAvatarIndex by remember { mutableStateOf(0) }
 
-    // Navigation state
-    var selectedUserID by remember { mutableStateOf<String?>(null) }
-    var showingProfile by remember { mutableStateOf(false) }
-    var selectedVideoID by remember { mutableStateOf<String?>(null) }
-    var selectedThreadID by remember { mutableStateOf<String?>(null) }
-    var showingVideoThread by remember { mutableStateOf(false) }
+    // Navigation state (JustJoined and TopVideos dialogs only)
+    var showingJustJoinedView by remember { mutableStateOf(false) }
+    var showingTopVideosView by remember { mutableStateOf(false) }
 
     // Observe navigation events from ViewModel
     LaunchedEffect(viewModel) {
         viewModel.navigationEvent.collect { event ->
             when (event) {
                 is NotificationNavigationEvent.NavigateToProfile -> {
-                    selectedUserID = event.userId
-                    showingProfile = true
+                    onNavigateToProfile(event.userId)
                 }
                 is NotificationNavigationEvent.NavigateToVideo -> {
-                    selectedVideoID = event.videoId
-                    selectedThreadID = event.threadId
-                    showingVideoThread = true
+                    onShowThreadView(event.threadId ?: event.videoId, event.videoId)
                 }
                 is NotificationNavigationEvent.NavigateToThread -> {
-                    selectedThreadID = event.threadId
-                    selectedVideoID = event.threadId
-                    showingVideoThread = true
+                    onShowThreadView(event.threadId, null)
                 }
                 NotificationNavigationEvent.None -> { /* Do nothing */ }
             }
@@ -180,22 +167,6 @@ fun NotificationViewComplete(
         }.distinct()
         if (senderIDs.isNotEmpty()) {
             followManager.loadFollowStates(senderIDs)
-        }
-    }
-
-    // Auto-scroll timer with cleanup
-    DisposableEffect(recentUsers) {
-        val job = scope.launch {
-            while (true) {
-                delay(3000)
-                if (recentUsers.isNotEmpty()) {
-                    currentAvatarIndex = (currentAvatarIndex + 1) % recentUsers.size
-                }
-            }
-        }
-
-        onDispose {
-            job.cancel()
         }
     }
 
@@ -228,23 +199,216 @@ fun NotificationViewComplete(
                 )
             }
 
-            // Discovery section - Side by side layout
+            // Discovery: Just Joined avatars (tap opens full view)
             item {
-                DiscoverySideBySide(
-                    recentUsers = recentUsers,
-                    leaderboardVideos = leaderboardVideos,
-                    currentAvatarIndex = currentAvatarIndex,
-                    isLoading = isLoadingDiscovery,
-                    onUserTapped = { userId ->
-                        selectedUserID = userId
-                        showingProfile = true
-                    },
-                    onVideoTapped = { videoId ->
-                        selectedVideoID = videoId
-                        selectedThreadID = videoId
-                        showingVideoThread = true
+                Box(modifier = Modifier.clickable { showingJustJoinedView = true }) {
+                    // Inline JustJoinedSection
+                    Column(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Just Joined",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        if (recentUsers.isEmpty()) {
+                            Text(
+                                "No new users in the last 24 hours",
+                                fontSize = 14.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
+                            )
+                        } else {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(recentUsers, key = { it.id }) { user ->
+                                    // Avatar with verified badge
+                                    Box(contentAlignment = Alignment.BottomEnd) {
+                                        val imageUrl = user.profileImageURL
+                                        if (!imageUrl.isNullOrEmpty()) {
+                                            AsyncImage(
+                                                model = imageUrl,
+                                                contentDescription = user.username,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.Gray.copy(alpha = 0.3f))
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.Gray.copy(alpha = 0.3f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    user.username.take(1).uppercase(),
+                                                    fontSize = 24.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+                                        if (user.isVerified) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .offset(x = 2.dp, y = 2.dp)
+                                                    .size(16.dp)
+                                                    .background(Color.Black, CircleShape)
+                                                    .padding(1.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Verified,
+                                                    contentDescription = "Verified",
+                                                    tint = Color.Blue,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Text(
+                                "Tap to view all new users",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                        }
                     }
-                )
+                }
+            }
+
+            // Discovery: Hype Leaderboard (ranked cards)
+            item {
+                Column(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clickable { showingTopVideosView = true },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "\uD83D\uDD25 Hype Leaderboard",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "See All",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Cyan
+                            )
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color.Cyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    if (leaderboardVideos.isEmpty()) {
+                        Text(
+                            "No videos with hype yet",
+                            fontSize = 14.sp,
+                            color = Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            leaderboardVideos.take(5).forEachIndexed { index, video ->
+                                val rank = index + 1
+                                val rankColor = when (rank) {
+                                    1 -> Color.Yellow
+                                    2 -> Color.Gray
+                                    3 -> Color(0xFFCD7F32)
+                                    else -> Color.White.copy(alpha = 0.3f)
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            onShowThreadView(video.id, video.id)
+                                        }
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Rank badge
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .background(rankColor, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("$rank", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    // Thumbnail
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF2C2C2E)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val imgUrl = video.thumbnailURL
+                                        if (!imgUrl.isNullOrEmpty()) {
+                                            SubcomposeAsyncImage(
+                                                model = ImageRequest.Builder(context).data(imgUrl).crossfade(true).build(),
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                when (painter.state) {
+                                                    is AsyncImagePainter.State.Loading -> CircularProgressIndicator(color = Color.Cyan, strokeWidth = 1.dp, modifier = Modifier.size(12.dp))
+                                                    is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                                    is AsyncImagePainter.State.Success -> androidx.compose.foundation.Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                                    else -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        } else {
+                                            Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    // Video info
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(video.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(video.creatorName, fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    // Hype count
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${video.hypeCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        Spacer(Modifier.width(2.dp))
+                                        Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(11.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Activity header
@@ -296,12 +460,12 @@ fun NotificationViewComplete(
                         NotificationRow(
                             notification = notification,
                             followManager = followManager,
+                            profileImages = profileImages,
                             onTap = {
                                 viewModel.onNotificationTapped(notification)
                             },
                             onProfileTap = { senderID ->
-                                selectedUserID = senderID
-                                showingProfile = true
+                                onNavigateToProfile(senderID)
                             }
                         )
                     }
@@ -315,1074 +479,205 @@ fun NotificationViewComplete(
         }
     }
 
-    // Profile Modal - ENHANCED
-    if (showingProfile && selectedUserID != null) {
-        EnhancedProfileModal(
-            userId = selectedUserID!!,
-            followManager = followManager,
-            onDismiss = {
-                showingProfile = false
-                selectedUserID = null
-            },
-            onVideoTap = { videoId ->
-                // Navigate to video from profile
-                showingProfile = false
-                selectedUserID = null
-                selectedVideoID = videoId
-                selectedThreadID = videoId
-                showingVideoThread = true
-            }
-        )
-    }
-
-    // Video/Thread Modal - ENHANCED
-    if (showingVideoThread && (selectedVideoID != null || selectedThreadID != null)) {
-        EnhancedVideoModal(
-            videoId = selectedVideoID,
-            threadId = selectedThreadID ?: selectedVideoID,
-            onDismiss = {
-                showingVideoThread = false
-                selectedVideoID = null
-                selectedThreadID = null
-            },
-            onCreatorTap = { creatorId ->
-                // Navigate to creator profile from video
-                showingVideoThread = false
-                selectedVideoID = null
-                selectedThreadID = null
-                selectedUserID = creatorId
-                showingProfile = true
-            }
-        )
-    }
-}
-
-// ============================================================================
-// MARK: - ENHANCED PROFILE MODAL
-// ============================================================================
-
-/**
- * Enhanced profile modal with follow button, stats, and video grid
- */
-@Composable
-private fun EnhancedProfileModal(
-    userId: String,
-    followManager: FollowManager,
-    onDismiss: () -> Unit,
-    onVideoTap: (String) -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
+    // Just Joined Full Screen View
+    if (showingJustJoinedView) {
+        Dialog(
+            onDismissRequest = { showingJustJoinedView = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            EnhancedProfileContent(
-                userId = userId,
+            JustJoinedView(
                 followManager = followManager,
-                onDismiss = onDismiss,
-                onVideoTap = onVideoTap
+                onDismiss = { showingJustJoinedView = false },
+                onUserTap = { userId: String ->
+                    showingJustJoinedView = false
+                    onNavigateToProfile(userId)
+                }
             )
         }
     }
-}
 
-@Composable
-private fun EnhancedProfileContent(
-    userId: String,
-    followManager: FollowManager,
-    onDismiss: () -> Unit,
-    onVideoTap: (String) -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val userService = remember { UserService(context) }
-
-    var user by remember { mutableStateOf<BasicUserInfo?>(null) }
-    var userVideos by remember { mutableStateOf<List<VideoGridItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var isLoadingVideos by remember { mutableStateOf(false) }
-
-    // Follow state
-    val followingStates by followManager.followingStates.collectAsState()
-    val loadingStates by followManager.loadingStates.collectAsState()
-    val isFollowing = followingStates[userId] ?: false
-    val isLoadingFollow = loadingStates.contains(userId)
-
-    // Check if this is current user's profile
-    val authService = remember { AuthService() }
-    val currentUserId = authService.currentUser.value?.uid ?: ""
-    val isOwnProfile = userId == currentUserId
-
-    // Load user profile
-    LaunchedEffect(userId) {
-        isLoading = true
-        try {
-            user = userService.getUserProfile(userId)
-            // Load follow state
-            followManager.loadFollowStates(listOf(userId))
-        } catch (e: Exception) {
-            println("❌ Failed to load user: ${e.message}")
-        }
-        isLoading = false
-
-        // Load user videos
-        isLoadingVideos = true
-        try {
-            val db = FirebaseFirestore.getInstance("stitchfin")
-            val videoDocs = db.collection("videos")
-                .whereEqualTo("creatorID", userId)
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(12)
-                .get()
-                .await()
-
-            userVideos = videoDocs.documents.mapNotNull { doc ->
-                VideoGridItem(
-                    id = doc.id,
-                    thumbnailUrl = doc.getString("thumbnailURL"),
-                    title = doc.getString("title") ?: "",
-                    hypeCount = doc.getLong("hypeCount")?.toInt() ?: 0
-                )
-            }
-        } catch (e: Exception) {
-            println("❌ Failed to load user videos: ${e.message}")
-        }
-        isLoadingVideos = false
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .statusBarsPadding()
-    ) {
-        // Close button row
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+    // Top Videos Full Screen View
+    if (showingTopVideosView) {
+        Dialog(
+            onDismissRequest = { showingTopVideosView = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.CenterStart)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
+            // Inline TopVideosView
+            val tvScope = rememberCoroutineScope()
+            var tvVideos by remember { mutableStateOf<List<LeaderboardVideo>>(emptyList()) }
+            var tvLoading by remember { mutableStateOf(true) }
+            var tvError by remember { mutableStateOf<String?>(null) }
 
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 100.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = Color(0xFF00BCD4))
-            }
-        } else if (user != null) {
-            // Profile header
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Profile image
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(user!!.profileImageURL?.ifEmpty { null })
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = user!!.username,
-                    modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E)),
-                    contentScale = ContentScale.Crop
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Display name
-                Text(
-                    text = user!!.displayName,
-                    color = Color.White,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                // Username
-                Text(
-                    text = "@${user!!.username}",
-                    color = Color.Gray,
-                    fontSize = 16.sp
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Tier badge
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF00BCD4).copy(alpha = 0.2f)
-                ) {
-                    Text(
-                        text = user!!.tier.displayName,
-                        color = Color(0xFF00BCD4),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Stats row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    StatColumn(count = user!!.followerCount, label = "Followers")
-                    StatColumn(count = user!!.followingCount, label = "Following")
-                    StatColumn(count = user!!.clout, label = "Clout")
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Follow button (only show if not own profile)
-                if (!isOwnProfile) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                followManager.toggleFollow(userId)
-                            }
-                        },
-                        enabled = !isLoadingFollow,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isFollowing) Color(0xFF3C3C3E) else Color(0xFF00BCD4)
-                        ),
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        if (isLoadingFollow) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (isFollowing) Icons.Default.Check else Icons.Default.PersonAdd,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text(
-                                    text = if (isFollowing) "Following" else "Follow",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Bio
-                if (!user!!.bio.isNullOrEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = user!!.bio!!,
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                }
+            LaunchedEffect(Unit) {
+                tvLoading = true; tvError = null
+                try {
+                    val db = FirebaseFirestore.getInstance("stitchfin")
+                    val cutoff = com.google.firebase.Timestamp(java.util.Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L))
+                    val snapshot = db.collection("videos")
+                        .whereGreaterThan("createdAt", cutoff)
+                        .orderBy("createdAt", Query.Direction.DESCENDING)
+                        .limit(50)
+                        .get()
+                        .await()
+                    tvVideos = snapshot.documents
+                        .mapNotNull { doc -> LeaderboardVideo.fromFirestore(doc.id, doc.data ?: return@mapNotNull null) }
+                        .sortedByDescending { it.hypeCount }
+                } catch (e: Exception) { tvError = e.message }
+                tvLoading = false
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Videos section header
-            Text(
-                text = "Videos",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-            )
-
-            // Video grid
-            if (isLoadingVideos) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Color(0xFF00BCD4))
-                }
-            } else if (userVideos.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VideoLibrary,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No videos yet",
-                            color = Color.Gray,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            } else {
-                // Video grid (3 columns)
-                val rows = userVideos.chunked(3)
-                rows.forEach { rowVideos ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        rowVideos.forEach { video ->
-                            VideoGridTile(
-                                video = video,
-                                modifier = Modifier.weight(1f),
-                                onClick = { onVideoTap(video.id) }
-                            )
-                        }
-                        // Fill empty slots
-                        repeat(3 - rowVideos.size) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 100.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "User not found",
-                    color = Color.Gray,
-                    fontSize = 16.sp
-                )
-            }
-        }
-    }
-}
-
-// ============================================================================
-// MARK: - ENHANCED VIDEO MODAL
-// ============================================================================
-
-/**
- * Enhanced video modal with actual video player
- */
-@Composable
-private fun EnhancedVideoModal(
-    videoId: String?,
-    threadId: String?,
-    onDismiss: () -> Unit,
-    onCreatorTap: (String) -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false
-        )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-        ) {
-            EnhancedVideoContent(
-                videoId = videoId,
-                threadId = threadId,
-                onDismiss = onDismiss,
-                onCreatorTap = onCreatorTap
-            )
-        }
-    }
-}
-
-@Composable
-private fun EnhancedVideoContent(
-    videoId: String?,
-    threadId: String?,
-    onDismiss: () -> Unit,
-    onCreatorTap: (String) -> Unit
-) {
-    val context = LocalContext.current
-
-    // Video data state
-    var videoUrl by remember { mutableStateOf<String?>(null) }
-    var videoTitle by remember { mutableStateOf<String?>(null) }
-    var creatorId by remember { mutableStateOf<String?>(null) }
-    var creatorName by remember { mutableStateOf<String?>(null) }
-    var creatorImageUrl by remember { mutableStateOf<String?>(null) }
-    var hypeCount by remember { mutableStateOf(0) }
-    var coolCount by remember { mutableStateOf(0) }
-    var isLoading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf<String?>(null) }
-
-    // Load video data
-    LaunchedEffect(videoId) {
-        isLoading = true
-        loadError = null
-        try {
-            if (videoId != null) {
-                val db = FirebaseFirestore.getInstance("stitchfin")
-                val videoDoc = db.collection("videos").document(videoId).get().await()
-                if (videoDoc.exists()) {
-                    videoUrl = videoDoc.getString("videoURL")
-                    videoTitle = videoDoc.getString("title")
-                    creatorId = videoDoc.getString("creatorID")
-                    creatorName = videoDoc.getString("creatorName")
-                    creatorImageUrl = videoDoc.getString("creatorProfileImageURL")
-                    hypeCount = videoDoc.getLong("hypeCount")?.toInt() ?: 0
-                    coolCount = videoDoc.getLong("coolCount")?.toInt() ?: 0
-
-                    if (videoUrl.isNullOrEmpty()) {
-                        loadError = "Video URL not available"
-                    }
-                } else {
-                    loadError = "Video not found"
-                }
-            }
-        } catch (e: Exception) {
-            println("❌ Failed to load video: ${e.message}")
-            loadError = "Failed to load video"
-        }
-        isLoading = false
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = Color(0xFF00BCD4))
-            }
-        } else if (loadError != null || videoUrl.isNullOrEmpty()) {
-            // Error state
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ErrorOutline,
-                    contentDescription = null,
-                    tint = Color.Gray,
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = loadError ?: "Video unavailable",
-                    color = Color.Gray,
-                    fontSize = 16.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            // Video player
-            VideoPlayerView(
-                videoUrl = videoUrl!!,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // Overlay UI
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Top bar with close button
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
+                    .background(Color.Black)
                     .statusBarsPadding()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                // Title
-                if (!videoTitle.isNullOrEmpty()) {
+                // Top bar
+                Box(modifier = Modifier.fillMaxWidth().height(56.dp)) {
                     Text(
-                        text = videoTitle!!,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 16.dp)
+                        "\uD83D\uDD25 Top Videos",
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                        modifier = Modifier.align(Alignment.Center)
                     )
+                    TextButton(
+                        onClick = { showingTopVideosView = false },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
+                    ) { Text("Done", color = Color(0xFF9C27B0), fontWeight = FontWeight.SemiBold) }
                 }
+                Text(
+                    "Most hyped videos from the last 7 days",
+                    fontSize = 13.sp, color = Color.Gray,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
 
-                Spacer(modifier = Modifier.size(48.dp)) // Balance
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Bottom info bar
-            if (!isLoading && loadError == null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
-                            )
-                        )
-                        .padding(16.dp)
-                        .navigationBarsPadding(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Creator info (clickable)
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable {
-                                creatorId?.let { onCreatorTap(it) }
-                            },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(creatorImageUrl?.ifEmpty { null })
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Creator",
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2C2C2E)),
-                            contentScale = ContentScale.Crop
-                        )
-
-                        Column {
-                            Text(
-                                text = "@${creatorName ?: "unknown"}",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Tap to view profile",
-                                color = Color.Gray,
-                                fontSize = 12.sp
-                            )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when {
+                        tvLoading && tvVideos.isEmpty() -> {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                CircularProgressIndicator(color = Color(0xFF9C27B0))
+                                Text("Loading top videos...", fontSize = 14.sp, color = Color.Gray)
+                            }
+                        }
+                        tvError != null -> {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Icon(Icons.Default.Warning, null, tint = Color(0xFFFF9800), modifier = Modifier.size(50.dp))
+                                Text(tvError!!, fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                                TextButton(onClick = {
+                                    tvScope.launch {
+                                        tvLoading = true; tvError = null
+                                        try {
+                                            val db = FirebaseFirestore.getInstance("stitchfin")
+                                            val cutoff = com.google.firebase.Timestamp(java.util.Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L))
+                                            val snapshot = db.collection("videos")
+                                                .whereGreaterThan("createdAt", cutoff)
+                                                .orderBy("createdAt", Query.Direction.DESCENDING)
+                                                .limit(50).get().await()
+                                            tvVideos = snapshot.documents
+                                                .mapNotNull { doc -> LeaderboardVideo.fromFirestore(doc.id, doc.data ?: return@mapNotNull null) }
+                                                .sortedByDescending { it.hypeCount }
+                                        } catch (e: Exception) { tvError = e.message }
+                                        tvLoading = false
+                                    }
+                                }) { Text("Retry", color = Color(0xFF9C27B0)) }
+                            }
+                        }
+                        tvVideos.isEmpty() -> {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Icon(Icons.Default.Whatshot, null, tint = Color.Gray, modifier = Modifier.size(50.dp))
+                                Text("No trending videos yet", fontSize = 16.sp, color = Color.Gray)
+                            }
+                        }
+                        else -> {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                contentPadding = PaddingValues(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(tvVideos.size, key = { tvVideos[it].id }) { idx ->
+                                    val video = tvVideos[idx]
+                                    val rank = idx + 1
+                                    val rankColor = when (rank) {
+                                        1 -> Color.Yellow; 2 -> Color.Gray; 3 -> Color(0xFFFF9800)
+                                        else -> Color(0xFF9C27B0)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+                                            .clickable {
+                                                showingTopVideosView = false
+                                                onShowThreadView(video.id, video.id)
+                                            }
+                                            .padding(8.dp)
+                                    ) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(200.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF2C2C2E)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val gridImgUrl = video.thumbnailURL
+                                                if (!gridImgUrl.isNullOrEmpty()) {
+                                                    SubcomposeAsyncImage(
+                                                        model = ImageRequest.Builder(context).data(gridImgUrl).crossfade(true).build(),
+                                                        contentDescription = null,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        when (painter.state) {
+                                                            is AsyncImagePainter.State.Loading -> CircularProgressIndicator(color = Color.Cyan, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                                                            is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                            is AsyncImagePainter.State.Success -> androidx.compose.foundation.Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                                            else -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                        }
+                                                    }
+                                                } else {
+                                                    Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                }
+                                            }
+                                            Text(video.creatorName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
+                                                Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(10.dp))
+                                                Text(formatCount(video.hypeCount), fontSize = 12.sp, color = Color.Gray)
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(video.temperatureEmoji, fontSize = 12.sp)
+                                            }
+                                        }
+                                        // Rank badge
+                                        Box(
+                                            modifier = Modifier.padding(8.dp).size(32.dp).background(rankColor, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) { Text("#$rank", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                                    }
+                                }
+                            }
                         }
                     }
-
-                    // Engagement stats
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "🔥",
-                                fontSize = 20.sp
-                            )
-                            Text(
-                                text = formatCount(hypeCount),
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "❄️",
-                                fontSize = 20.sp
-                            )
-                            Text(
-                                text = formatCount(coolCount),
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
                 }
             }
         }
-    }
-}
-
-/**
- * Video player using ExoPlayer
- */
-@Composable
-private fun VideoPlayerView(
-    videoUrl: String,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            repeatMode = Player.REPEAT_MODE_ONE
-            playWhenReady = true
-        }
-    }
-
-    // Set video source
-    LaunchedEffect(videoUrl) {
-        val mediaItem = MediaItem.fromUri(Uri.parse(videoUrl))
-        exoPlayer.setMediaItem(mediaItem)
-        exoPlayer.prepare()
-    }
-
-    // Cleanup
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
-        }
-    }
-
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = true
-                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-            }
-        },
-        modifier = modifier
-    )
-}
-
-// ============================================================================
-// MARK: - HELPER COMPOSABLES
-// ============================================================================
-
-data class VideoGridItem(
-    val id: String,
-    val thumbnailUrl: String?,
-    val title: String,
-    val hypeCount: Int
-)
-
-@Composable
-private fun VideoGridTile(
-    video: VideoGridItem,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .aspectRatio(9f / 16f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF2C2C2E))
-            .clickable(onClick = onClick)
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(video.thumbnailUrl?.ifEmpty { null })
-                .crossfade(true)
-                .build(),
-            contentDescription = video.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-
-        // Hype count overlay
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(4.dp)
-                .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(text = "🔥", fontSize = 10.sp)
-                Text(
-                    text = formatCount(video.hypeCount),
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatColumn(
-    count: Int,
-    label: String
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = formatCount(count),
-            color = Color.White,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = label,
-            color = Color.Gray,
-            fontSize = 12.sp
-        )
     }
 }
 
 // ============================================================================
-// MARK: - DISCOVERY SECTION
+// MARK: - NOTIFICATION COMPONENTS
 // ============================================================================
-
-/**
- * Side-by-side discovery layout: Just Joined | Top Videos
- */
-@Composable
-private fun DiscoverySideBySide(
-    recentUsers: List<RecentUser>,
-    leaderboardVideos: List<LeaderboardVideo>,
-    currentAvatarIndex: Int,
-    isLoading: Boolean,
-    onUserTapped: (String) -> Unit,
-    onVideoTapped: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Just Joined section
-        Column(
-            modifier = Modifier.weight(1f)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Just Joined",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF00FF00).copy(alpha = 0.2f)
-                ) {
-                    Text(
-                        text = "New",
-                        color = Color(0xFF00FF00),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF00BCD4),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            } else if (recentUsers.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No new users yet",
-                        color = Color.Gray,
-                        fontSize = 12.sp
-                    )
-                }
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.height(200.dp)
-                ) {
-                    recentUsers.take(3).forEachIndexed { index, user ->
-                        val isHighlighted = index == (currentAvatarIndex % maxOf(recentUsers.size, 1))
-                        UserRow(
-                            user = user,
-                            isHighlighted = isHighlighted,
-                            onClick = { onUserTapped(user.id) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Top Videos section
-        Column(
-            modifier = Modifier.weight(1f)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Top Videos",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    text = "7d",
-                    color = Color.Gray,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF00BCD4),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            } else if (leaderboardVideos.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No videos yet",
-                        color = Color.Gray,
-                        fontSize = 12.sp
-                    )
-                }
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.height(200.dp)
-                ) {
-                    leaderboardVideos.take(3).forEachIndexed { index, video ->
-                        VideoRow(
-                            video = video,
-                            rank = index + 1,
-                            onClick = { onVideoTapped(video.id) }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * User row for Just Joined section
- */
-@Composable
-private fun UserRow(
-    user: RecentUser,
-    isHighlighted: Boolean,
-    onClick: () -> Unit
-) {
-    val scale = if (isHighlighted) 1.0f else 0.95f
-    val alpha = if (isHighlighted) 1.0f else 0.6f
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            },
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(user.profileImageURL?.ifEmpty { null })
-                    .crossfade(true)
-                    .build(),
-                contentDescription = user.username,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2C2C2E)),
-                contentScale = ContentScale.Crop
-            )
-
-            if (isHighlighted) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .border(2.dp, Color(0xFF00BCD4), CircleShape)
-                )
-            }
-        }
-
-        Column {
-            Text(
-                text = user.username,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Joined ${user.formatJoinedDate()}",
-                color = Color.Gray,
-                fontSize = 10.sp
-            )
-        }
-    }
-}
-
-/**
- * Video row for Top Videos section
- */
-@Composable
-private fun VideoRow(
-    video: LeaderboardVideo,
-    rank: Int,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Rank badge
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .background(getRankColor(rank), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = rank.toString(),
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = video.title,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "@${video.creatorName}",
-                color = Color.Gray,
-                fontSize = 10.sp
-            )
-        }
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = video.temperatureEmoji,
-                fontSize = 14.sp
-            )
-            Text(
-                text = video.hypeCount.toString(),
-                color = Color(0xFFFF6B6B),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
 
 // ============================================================================
 // MARK: - NOTIFICATION COMPONENTS
@@ -1395,6 +690,7 @@ private fun VideoRow(
 private fun NotificationRow(
     notification: NotificationItem,
     followManager: FollowManager,
+    profileImages: Map<String, String> = emptyMap(),
     onTap: () -> Unit,
     onProfileTap: (String) -> Unit
 ) {
@@ -1421,24 +717,44 @@ private fun NotificationRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Profile picture - clickable
-            val profileImageUrl = (notification.actionData["profileImageURL"] as? String) ?: ""
+            val profileImageUrl = profileImages[userId]
+                ?: (notification.actionData["profileImageURL"] as? String)?.takeIf { it.isNotEmpty() }
             Box(
                 modifier = Modifier.clickable {
                     if (userId.isNotEmpty()) onProfileTap(userId)
-                }
+                },
+                contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(profileImageUrl.ifEmpty { null })
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF3C3C3E)),
-                    contentScale = ContentScale.Crop
-                )
+                if (profileImageUrl != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(profileImageUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3C3C3E)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    // Letter fallback
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF6C5CE7)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = (notification.title.firstOrNull()?.uppercase() ?: "?"),
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
 
             // Content
@@ -1721,15 +1037,6 @@ private fun EmptyStateView(
 // ============================================================================
 // MARK: - HELPER FUNCTIONS
 // ============================================================================
-
-private fun getRankColor(rank: Int): Color {
-    return when (rank) {
-        1 -> Color(0xFFFFD700) // Gold
-        2 -> Color(0xFFC0C0C0) // Silver
-        3 -> Color(0xFFCD7F32) // Bronze
-        else -> Color(0xFF8E44AD)
-    }
-}
 
 private fun getNotificationColor(type: NotificationType): Color {
     return when (type) {

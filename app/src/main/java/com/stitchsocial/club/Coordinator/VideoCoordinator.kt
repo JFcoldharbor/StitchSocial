@@ -39,6 +39,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.tasks.await
 import android.net.Uri
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import java.io.ByteArrayOutputStream
 
 /**
  * VideoCoordinator with complete parallel processing pipeline + proper thread hierarchy
@@ -311,7 +314,26 @@ class VideoCoordinator(
 
             // Upload video to Firebase Storage
             val videoURL = uploadVideoToFirebase(videoPath)
-            updateProgress(0.3, "Video uploaded, calculating thread hierarchy...")
+            updateProgress(0.3, "Video uploaded, generating thumbnail...")
+
+            // Generate and upload thumbnail (matches iOS Step 3 + Step 5)
+            val thumbnailURL = try {
+                val thumbnailData = generateThumbnail(videoPath)
+                if (thumbnailData != null) {
+                    val tempVideoId = "vid_${System.currentTimeMillis()}"
+                    val url = uploadThumbnailToStorage(thumbnailData, tempVideoId)
+                    println("THUMBNAIL: Generated and uploaded successfully")
+                    url
+                } else {
+                    println("THUMBNAIL: Generation returned null, skipping")
+                    ""
+                }
+            } catch (e: Exception) {
+                println("THUMBNAIL: Failed - ${e.message} (continuing without thumbnail)")
+                ""
+            }
+
+            updateProgress(0.5, "Calculating thread hierarchy...")
 
             // ✅ CRITICAL FIX: Calculate thread hierarchy based on context
             val hierarchyData = calculateThreadHierarchy(recordingContext)
@@ -322,6 +344,7 @@ class VideoCoordinator(
                 title = userTitle.takeIf { it.isNotBlank() } ?: metadata.title,
                 description = userDescription,
                 videoURL = videoURL,
+                thumbnailURL = thumbnailURL,
                 threadID = hierarchyData.threadID,
                 replyToVideoID = hierarchyData.replyToVideoID,
                 conversationDepth = hierarchyData.conversationDepth,
@@ -436,6 +459,17 @@ class VideoCoordinator(
                     replyToVideoID = null,
                     conversationDepth = 1,
                     contentType = ContentType.CHILD
+                )
+            }
+
+            // SPIN-OFF: New thread responding to another video (depth = 0)
+            is com.stitchsocial.club.camera.RecordingContext.SpinOffFrom -> {
+                println("🧵 HIERARCHY: Spin-off from video ${context.videoId}")
+                ThreadHierarchyData(
+                    threadID = null, // Will be set to video ID after creation
+                    replyToVideoID = null,
+                    conversationDepth = 0,
+                    contentType = ContentType.THREAD
                 )
             }
         }
@@ -616,6 +650,86 @@ class VideoCoordinator(
             description = "",  // Blank - user enters manually
             hashtags = emptyList()  // Empty - user adds manually
         )
+    }
+
+    // MARK: - Thumbnail Generation (matches iOS VideoUploadService)
+
+    /**
+     * Generate thumbnail from video file using MediaMetadataRetriever
+     * Equivalent to iOS AVAssetImageGenerator.copyCGImage(at: 0.5s)
+     */
+    private suspend fun generateThumbnail(videoPath: String): ByteArray? = withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(videoPath)
+
+            // Extract frame at 0.5 seconds (matches iOS: CMTime(seconds: 0.5))
+            val bitmap = retriever.getFrameAtTime(
+                500_000, // 0.5 seconds in microseconds
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            ) ?: return@withContext null
+
+            // Scale down if needed (target max 1080x1920 like iOS)
+            val scaledBitmap = scaleBitmap(bitmap, 1080, 1920)
+
+            // Compress to JPEG (quality 90 matches iOS compressionQuality: 0.9)
+            val outputStream = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+
+            if (scaledBitmap != bitmap) scaledBitmap.recycle()
+            bitmap.recycle()
+
+            val data = outputStream.toByteArray()
+            println("THUMBNAIL: Generated ${data.size} bytes from $videoPath")
+            data
+
+        } catch (e: Exception) {
+            println("THUMBNAIL: Generation failed - ${e.message}")
+            null
+        } finally {
+            retriever.release()
+        }
+    }
+
+    /**
+     * Scale bitmap to fit within max dimensions while preserving aspect ratio
+     */
+    private fun scaleBitmap(bitmap: Bitmap, maxWidth: Int, maxHeight: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+
+        if (width <= maxWidth && height <= maxHeight) return bitmap
+
+        val ratio = minOf(maxWidth.toFloat() / width, maxHeight.toFloat() / height)
+        val newWidth = (width * ratio).toInt()
+        val newHeight = (height * ratio).toInt()
+
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    }
+
+    /**
+     * Upload thumbnail JPEG to Firebase Storage
+     * Path: thumbnails/{videoID}.jpg (matches iOS)
+     */
+    private suspend fun uploadThumbnailToStorage(
+        thumbnailData: ByteArray,
+        videoID: String
+    ): String = withContext(Dispatchers.IO) {
+        val storageRef = storage.reference.child("thumbnails/$videoID.jpg")
+
+        val metadata = com.google.firebase.storage.StorageMetadata.Builder()
+            .setContentType("image/jpeg")
+            .build()
+
+        try {
+            storageRef.putBytes(thumbnailData, metadata).await()
+            val downloadUrl = storageRef.downloadUrl.await()
+            println("THUMBNAIL: Uploaded to ${downloadUrl}")
+            downloadUrl.toString()
+        } catch (e: Exception) {
+            println("THUMBNAIL: Upload failed - ${e.message}")
+            throw e
+        }
     }
 
     // MARK: - Firebase Operations

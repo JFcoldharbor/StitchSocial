@@ -4,9 +4,9 @@
  *
  * Layer 4: Core Services - User & Video Search with Hashtag Support
  *
- * ✅ FIXED: getRecentVideos now filters conversationDepth == 0 (parents only)
- * ✅ FIXED: searchVideos now filters conversationDepth == 0 (parents only)
- * ✅ FIXED: searchByHashtag now filters conversationDepth == 0 (parents only)
+ * âœ… FIXED: getRecentVideos now filters conversationDepth == 0 (parents only)
+ * âœ… FIXED: searchVideos now filters conversationDepth == 0 (parents only)
+ * âœ… FIXED: searchByHashtag now filters conversationDepth == 0 (parents only)
  */
 
 package com.stitchsocial.club.services
@@ -48,7 +48,7 @@ class SearchService {
         query: String,
         limit: Int = DEFAULT_LIMIT
     ): List<BasicUserInfo> {
-        println("🔍 SEARCH: searchUsers called - query: '$query', limit: $limit")
+        println("ðŸ” SEARCH: searchUsers called - query: '$query', limit: $limit")
 
         val trimmedQuery = query.trim()
 
@@ -65,7 +65,7 @@ class SearchService {
     private suspend fun getAllUsers(limit: Int = DEFAULT_LIMIT): List<BasicUserInfo> {
         return try {
             val currentUserID = auth.currentUser?.uid
-            println("🔍 SEARCH: getAllUsers - currentUserID: $currentUserID")
+            println("ðŸ” SEARCH: getAllUsers - currentUserID: $currentUserID")
 
             val snapshot = db.collection(USERS_COLLECTION)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -74,17 +74,18 @@ class SearchService {
                 .await()
 
             val users = processUserDocuments(snapshot.documents, currentUserID)
-            println("✅ SEARCH: getAllUsers loaded ${users.size} users")
+            println("âœ… SEARCH: getAllUsers loaded ${users.size} users")
             users
 
         } catch (e: Exception) {
-            println("❌ SEARCH: getAllUsers failed: ${e.message}")
+            println("âŒ SEARCH: getAllUsers failed: ${e.message}")
             emptyList()
         }
     }
 
     /**
-     * Search users by text
+     * Search users by text — case-insensitive
+     * Fetches broader set and filters client-side since Firestore range queries are case-sensitive
      */
     private suspend fun searchUsersByText(
         query: String,
@@ -94,35 +95,115 @@ class SearchService {
             val currentUserID = auth.currentUser?.uid
             val lowercaseQuery = query.lowercase()
 
-            println("🔍 SEARCH: searchUsersByText - query: '$lowercaseQuery'")
+            println("SEARCH: searchUsersByText - query: '$lowercaseQuery'")
 
+            // Strategy 1: Try exact prefix on username (fast path)
             val usernameSnapshot = db.collection(USERS_COLLECTION)
                 .whereGreaterThanOrEqualTo("username", lowercaseQuery)
                 .whereLessThan("username", lowercaseQuery + "\uf8ff")
-                .limit((limit * 0.7).toLong())
+                .limit(limit.toLong())
                 .get()
                 .await()
 
+            // Strategy 2: Try capitalized prefix (catches "James", "John" etc.)
+            val capitalizedQuery = query.replaceFirstChar { it.uppercase() }
+            val capitalizedSnapshot = db.collection(USERS_COLLECTION)
+                .whereGreaterThanOrEqualTo("username", capitalizedQuery)
+                .whereLessThan("username", capitalizedQuery + "\uf8ff")
+                .limit(limit.toLong())
+                .get()
+                .await()
+
+            // Strategy 3: displayName search (both cases)
             val displayNameSnapshot = db.collection(USERS_COLLECTION)
+                .whereGreaterThanOrEqualTo("displayName", capitalizedQuery)
+                .whereLessThan("displayName", capitalizedQuery + "\uf8ff")
+                .limit(limit.toLong())
+                .get()
+                .await()
+
+            val displayNameLowerSnapshot = db.collection(USERS_COLLECTION)
                 .whereGreaterThanOrEqualTo("displayName", lowercaseQuery)
                 .whereLessThan("displayName", lowercaseQuery + "\uf8ff")
-                .limit((limit * 0.3).toLong())
+                .limit(limit.toLong())
                 .get()
                 .await()
 
-            val allDocuments = (usernameSnapshot.documents + displayNameSnapshot.documents)
-                .distinctBy { it.id }
+            // Strategy 4: Try usernameLowercase field if it exists
+            val lowercaseFieldSnapshot = try {
+                db.collection(USERS_COLLECTION)
+                    .whereGreaterThanOrEqualTo("usernameLowercase", lowercaseQuery)
+                    .whereLessThan("usernameLowercase", lowercaseQuery + "\uf8ff")
+                    .limit(limit.toLong())
+                    .get()
+                    .await()
+            } catch (e: Exception) {
+                null // Field doesn't exist yet, skip
+            }
 
+            // Merge all results, deduplicate by document ID
+            val allDocuments = (
+                    usernameSnapshot.documents +
+                            capitalizedSnapshot.documents +
+                            displayNameSnapshot.documents +
+                            displayNameLowerSnapshot.documents +
+                            (lowercaseFieldSnapshot?.documents ?: emptyList())
+                    ).distinctBy { it.id }
+
+            // Client-side filter: ensure query actually matches (case-insensitive)
             val users = processUserDocuments(allDocuments, currentUserID)
-            println("✅ SEARCH: searchUsersByText found ${users.size} users")
+                .filter { user ->
+                    user.username.lowercase().contains(lowercaseQuery) ||
+                            user.displayName.lowercase().contains(lowercaseQuery)
+                }
+
+            println("SEARCH: searchUsersByText found ${users.size} users (from ${allDocuments.size} candidates)")
 
             if (users.size > limit) users.subList(0, limit) else users
 
         } catch (e: Exception) {
-            println("❌ SEARCH: searchUsersByText failed: ${e.message}")
+            println("SEARCH: searchUsersByText failed: ${e.message}")
+            // Final fallback: load all users and filter client-side
+            searchUsersBroadFallback(query, limit)
+        }
+    }
+
+    /**
+     * Fallback: Load recent users and filter client-side
+     * Catches anyone missed by prefix queries
+     */
+    private suspend fun searchUsersBroadFallback(
+        query: String,
+        limit: Int
+    ): List<BasicUserInfo> {
+        return try {
+            val currentUserID = auth.currentUser?.uid
+            val lowercaseQuery = query.lowercase()
+
+            println("SEARCH: broadFallback - loading users for client-side filter")
+
+            val snapshot = db.collection(USERS_COLLECTION)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(500)
+                .get()
+                .await()
+
+            val users = processUserDocuments(snapshot.documents, currentUserID)
+                .filter { user ->
+                    user.username.lowercase().contains(lowercaseQuery) ||
+                            user.displayName.lowercase().contains(lowercaseQuery)
+                }
+                .take(limit)
+
+            println("SEARCH: broadFallback found ${users.size} users")
+            users
+
+        } catch (e: Exception) {
+            println("SEARCH: broadFallback failed: ${e.message}")
             emptyList()
         }
     }
+
 
     /**
      * Search videos by title - PARENT VIDEOS ONLY
@@ -134,7 +215,7 @@ class SearchService {
         return try {
             val lowercaseQuery = query.lowercase()
 
-            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
+            // âœ… FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereEqualTo("conversationDepth", 0)
                 .whereGreaterThanOrEqualTo("title", lowercaseQuery)
@@ -144,11 +225,11 @@ class SearchService {
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: searchVideos found ${videos.size} parent videos")
+            println("âœ… SEARCH: searchVideos found ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: searchVideos failed: ${e.message}")
+            println("âŒ SEARCH: searchVideos failed: ${e.message}")
             // Fallback: Query without conversationDepth filter, then filter in code
             searchVideosFallback(query, limit)
         }
@@ -175,24 +256,24 @@ class SearchService {
                 .filter { it.conversationDepth == 0 } // Filter parents only
                 .take(limit)
 
-            println("✅ SEARCH: searchVideosFallback found ${videos.size} parent videos")
+            println("âœ… SEARCH: searchVideosFallback found ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: searchVideosFallback failed: ${e.message}")
+            println("âŒ SEARCH: searchVideosFallback failed: ${e.message}")
             emptyList()
         }
     }
 
     /**
      * Get recent videos for discovery - PARENT VIDEOS ONLY
-     * ✅ FIXED: Now filters conversationDepth == 0
+     * âœ… FIXED: Now filters conversationDepth == 0
      */
     suspend fun getRecentVideos(limit: Int = 20): List<CoreVideoMetadata> {
         return try {
-            println("🔍 SEARCH: getRecentVideos - loading parent videos only")
+            println("ðŸ” SEARCH: getRecentVideos - loading parent videos only")
 
-            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
+            // âœ… FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereEqualTo("conversationDepth", 0)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -201,11 +282,11 @@ class SearchService {
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: getRecentVideos loaded ${videos.size} parent videos")
+            println("âœ… SEARCH: getRecentVideos loaded ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: getRecentVideos failed: ${e.message}")
+            println("âŒ SEARCH: getRecentVideos failed: ${e.message}")
             // Fallback: Query without filter, then filter in code
             getRecentVideosFallback(limit)
         }
@@ -216,7 +297,7 @@ class SearchService {
      */
     private suspend fun getRecentVideosFallback(limit: Int): List<CoreVideoMetadata> {
         return try {
-            println("🔍 SEARCH: getRecentVideosFallback - using code filter")
+            println("ðŸ” SEARCH: getRecentVideosFallback - using code filter")
 
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -228,11 +309,11 @@ class SearchService {
                 .filter { it.conversationDepth == 0 } // Filter parents only
                 .take(limit)
 
-            println("✅ SEARCH: getRecentVideosFallback loaded ${videos.size} parent videos")
+            println("âœ… SEARCH: getRecentVideosFallback loaded ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: getRecentVideosFallback failed: ${e.message}")
+            println("âŒ SEARCH: getRecentVideosFallback failed: ${e.message}")
             emptyList()
         }
     }
@@ -245,9 +326,9 @@ class SearchService {
     suspend fun searchByHashtag(hashtag: String, limit: Int = DEFAULT_LIMIT): List<CoreVideoMetadata> {
         return try {
             val cleanHashtag = hashtag.removePrefix("#").lowercase()
-            println("🏷️ SEARCH: searchByHashtag - hashtag: '$cleanHashtag'")
+            println("ðŸ·ï¸ SEARCH: searchByHashtag - hashtag: '$cleanHashtag'")
 
-            // ✅ FIX: Filter by conversationDepth == 0 (parent videos only)
+            // âœ… FIX: Filter by conversationDepth == 0 (parent videos only)
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereArrayContains("hashtags", cleanHashtag)
                 .whereEqualTo("conversationDepth", 0)
@@ -257,11 +338,11 @@ class SearchService {
                 .await()
 
             val videos = processVideoDocuments(snapshot.documents)
-            println("✅ SEARCH: searchByHashtag found ${videos.size} parent videos for #$cleanHashtag")
+            println("âœ… SEARCH: searchByHashtag found ${videos.size} parent videos for #$cleanHashtag")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: searchByHashtag failed: ${e.message}")
+            println("âŒ SEARCH: searchByHashtag failed: ${e.message}")
             // Fallback
             searchByHashtagFallback(hashtag, limit)
         }
@@ -285,11 +366,11 @@ class SearchService {
                 .filter { it.conversationDepth == 0 }
                 .take(limit)
 
-            println("✅ SEARCH: searchByHashtagFallback found ${videos.size} parent videos")
+            println("âœ… SEARCH: searchByHashtagFallback found ${videos.size} parent videos")
             videos
 
         } catch (e: Exception) {
-            println("❌ SEARCH: searchByHashtagFallback failed: ${e.message}")
+            println("âŒ SEARCH: searchByHashtagFallback failed: ${e.message}")
             emptyList()
         }
     }
@@ -299,7 +380,7 @@ class SearchService {
      */
     suspend fun getTrendingHashtags(limit: Int = 20): List<String> {
         return try {
-            println("📈 SEARCH: getTrendingHashtags - loading recent videos")
+            println("ðŸ“ˆ SEARCH: getTrendingHashtags - loading recent videos")
 
             val cutoffDate = Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000)
             val snapshot = db.collection(VIDEOS_COLLECTION)
@@ -326,11 +407,11 @@ class SearchService {
                 .take(limit)
                 .map { it.key }
 
-            println("✅ SEARCH: getTrendingHashtags found ${trending.size} trending hashtags")
+            println("âœ… SEARCH: getTrendingHashtags found ${trending.size} trending hashtags")
             trending
 
         } catch (e: Exception) {
-            println("❌ SEARCH: getTrendingHashtags failed: ${e.message}")
+            println("âŒ SEARCH: getTrendingHashtags failed: ${e.message}")
             emptyList()
         }
     }
@@ -414,7 +495,7 @@ class SearchService {
                 videos.add(video)
 
             } catch (e: Exception) {
-                println("⚠️ SEARCH: Failed to process video document ${document.id}: ${e.message}")
+                println("âš ï¸ SEARCH: Failed to process video document ${document.id}: ${e.message}")
             }
         }
 
@@ -425,13 +506,13 @@ class SearchService {
      * Test method to verify service is working
      */
     suspend fun testSearchService() {
-        println("🔍 SEARCH: Testing simple user discovery...")
+        println("ðŸ” SEARCH: Testing simple user discovery...")
 
         try {
             val users = getAllUsers(5)
-            println("✅ SEARCH: Successfully loaded ${users.size} users")
+            println("âœ… SEARCH: Successfully loaded ${users.size} users")
         } catch (e: Exception) {
-            println("❌ SEARCH: Test failed: ${e.message}")
+            println("âŒ SEARCH: Test failed: ${e.message}")
         }
     }
 }

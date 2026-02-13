@@ -13,6 +13,7 @@
 package com.stitchsocial.club
 
 import com.stitchsocial.club.services.UserService
+import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.SpecialUsersConfig
 import android.content.Context
@@ -35,6 +36,7 @@ class FollowManager(private val context: Context) : ViewModel() {
 
     // MARK: - Dependencies
     private val userService = UserService(context)
+    private val notificationService = NotificationService()
     private val auth = FirebaseAuth.getInstance()
     private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
@@ -124,6 +126,16 @@ class FollowManager(private val context: Context) : ViewModel() {
                 if (success) {
                     println("✅ FOLLOW MANAGER: Successfully ${if (newFollowingState) "followed" else "unfollowed"} user $userID")
 
+
+                    // Send follow notification via Cloud Function (matches iOS)
+                    if (newFollowingState) {
+                        try {
+                            notificationService.sendFollowNotification(recipientID = userID)
+                            println("FOLLOW MANAGER: Follow notification sent to $userID")
+                        } catch (e: Exception) {
+                            println("FOLLOW MANAGER: Follow notification failed (non-fatal) - ${e.message}")
+                        }
+                    }
                     // Notify completion callback
                     onFollowStateChanged?.invoke(userID, newFollowingState)
 

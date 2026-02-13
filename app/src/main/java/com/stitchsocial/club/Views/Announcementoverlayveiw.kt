@@ -4,9 +4,9 @@
  *
  * Full-screen announcement overlay that users must watch/acknowledge
  * Uses ExoPlayer for video playback
- * FEATURES:
- * - Video looping
- * - Hidden countdown (tracks in background)
+* FIXED: Pauses background videos when showing (matches iOS)
+* FEATURES:
+* - Kills ALL background video playback aggressively
  * - Creator pill with profile navigation
  * - Priority-based styling
  * - Continue/Acknowledge buttons
@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import android.content.Intent
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -104,7 +106,7 @@ fun AnnouncementOverlayView(
             val exoPlayer = ExoPlayer.Builder(context).build().apply {
                 setMediaItem(MediaItem.fromUri(Uri.parse(videoUrl)))
                 repeatMode = Player.REPEAT_MODE_ONE
-                playWhenReady = true
+                playWhenReady = false  // Wait for PlayerView surface
                 prepare()
 
                 addListener(object : Player.Listener {
@@ -132,7 +134,7 @@ fun AnnouncementOverlayView(
             player = exoPlayer
             isLoadingVideo = true
             loadError = null
-            println("📢 ANNOUNCEMENT: ExoPlayer initialized for $videoUrl")
+            println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer initialized for $videoUrl")
         } else {
             loadError = "No video URL provided"
             isLoadingVideo = false
@@ -141,7 +143,7 @@ fun AnnouncementOverlayView(
         onDispose {
             player?.release()
             player = null
-            println("📢 ANNOUNCEMENT: ExoPlayer released")
+            println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer released")
         }
     }
 
@@ -160,6 +162,22 @@ fun AnnouncementOverlayView(
         }
     }
 
+    // AGGRESSIVE PAUSE: Kill all background video playback when announcement shows
+    LaunchedEffect(Unit) {
+        println("📢 ANNOUNCEMENT: KILLING ALL BACKGROUND ACTIVITY")
+
+        // Broadcast PAUSE_ALL signal to stop all video players
+        val pauseIntent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
+        LocalBroadcastManager.getInstance(context).sendBroadcast(pauseIntent)
+
+        // Also send KILL signal for aggressive shutdown
+        val killIntent = Intent("com.stitchsocial.club.KILL_ALL_VIDEOS")
+        LocalBroadcastManager.getInstance(context).sendBroadcast(killIntent)
+
+        println("📢 ANNOUNCEMENT: Background videos killed")
+    }
+
+
     // Watch timer (hidden countdown)
     LaunchedEffect(Unit) {
         while (true) {
@@ -169,7 +187,7 @@ fun AnnouncementOverlayView(
             // Check if minimum watch time reached
             if (watchedSeconds >= announcement.minimumWatchSeconds && !canDismiss) {
                 canDismiss = true
-                println("📢 ANNOUNCEMENT: Minimum watch time reached (${watchedSeconds}s)")
+                println("ðŸ“¢ ANNOUNCEMENT: Minimum watch time reached (${watchedSeconds}s)")
             }
         }
     }
@@ -199,6 +217,13 @@ fun AnnouncementOverlayView(
                             this.player = player
                             useController = false
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        }
+                    },
+                    update = { view ->
+                        view.player = player
+                        // Wait for surface to be ready
+                        view.post {
+                            player?.play()
                         }
                     },
                     modifier = Modifier
@@ -615,9 +640,9 @@ fun AnnouncementOverlayContainer(
                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
                     try {
                         announcementService.markAsCompleted(userId, announcement.id, watchedSeconds)
-                        println("📢 OVERLAY: Completed announcement '${announcement.title}' after ${watchedSeconds}s")
+                        println("ðŸ“¢ OVERLAY: Completed announcement '${announcement.title}' after ${watchedSeconds}s")
                     } catch (e: Exception) {
-                        println("📢 OVERLAY: Error completing announcement: ${e.message}")
+                        println("ðŸ“¢ OVERLAY: Error completing announcement: ${e.message}")
                         announcementService.hideAnnouncement()
                     }
                 }
@@ -627,7 +652,7 @@ fun AnnouncementOverlayContainer(
                     try {
                         announcementService.dismissAnnouncement(userId, announcement.id)
                     } catch (e: Exception) {
-                        println("📢 OVERLAY: Error dismissing announcement: ${e.message}")
+                        println("ðŸ“¢ OVERLAY: Error dismissing announcement: ${e.message}")
                         announcementService.hideAnnouncement()
                     }
                 }

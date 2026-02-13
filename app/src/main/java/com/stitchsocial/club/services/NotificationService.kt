@@ -1,42 +1,340 @@
 /*
- * NotificationService.kt - COMPLETE WITH WRITE OPERATIONS
+ * NotificationService.kt - CLOUD FUNCTIONS PORT (MATCHES iOS)
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 4: Core Services - Load, create, and manage notifications
- * Dependencies: Firebase Firestore
- * Features: Real-time loading, notification creation, mark as read, pagination
+ * Layer 4: Core Services - Notification Management with Cloud Functions
+ * Codebase: stitchnoti
+ * Region: us-central1
+ * Database: stitchfin
  *
- * ADDED: createNotification() method for engagement notifications
+ * ✅ REWRITTEN: Now calls Cloud Functions like iOS instead of direct Firestore writes
+ * ✅ Cloud Functions handle: auth, username lookup, notification creation, FCM push
+ * ✅ Keeps: Firestore reads (loadNotifications, listener, markAsRead) - same as iOS
  */
 
 package com.stitchsocial.club.services
 
 import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
 import java.util.*
 
 /**
- * Service for loading and managing Firebase notifications
- * USES ROOT COLLECTION to match iOS implementation
+ * Notification service matching iOS implementation exactly.
+ * SEND methods → Cloud Functions (stitchnoti_*)
+ * READ methods → Direct Firestore queries
  */
 class NotificationService {
 
     private val db = FirebaseFirestore.getInstance("stitchfin")
+    private val auth = FirebaseAuth.getInstance()
+    private val functions = FirebaseFunctions.getInstance("us-central1")
     private var listenerRegistration: ListenerRegistration? = null
-    private val notificationsCollection = "notifications"  // ROOT collection like iOS
 
-    // MARK: - CREATE NOTIFICATION (NEW)
+    private val notificationsCollection = "notifications"
+    private val functionPrefix = "stitchnoti_"
+
+    init {
+        println("NOTIFICATION SERVICE: Initialized (Cloud Functions mode)")
+        println("  REGION: us-central1 | PREFIX: $functionPrefix")
+    }
+
+    // ========================================================================
+    // MARK: - Cloud Function Caller (matches iOS callFunction)
+    // ========================================================================
 
     /**
-     * Create a new notification in Firebase
-     * Used by EngagementCoordinator to notify video creators
+     * Call Cloud Function via Firebase Callable SDK (handles auth automatically)
+     * Matches iOS: private func callFunction(name:data:)
      */
-    suspend fun createNotification(
+    private suspend fun callFunction(
+        name: String,
+        data: Map<String, Any> = emptyMap()
+    ): Map<String, Any>? {
+        val user = auth.currentUser
+            ?: throw IllegalStateException("User not authenticated")
+
+        val functionName = "$functionPrefix$name"
+        println("CALLING: $functionName (uid: ${user.uid})")
+
+        return try {
+            val callable = functions.getHttpsCallable(functionName)
+            val result = callable.call(data).await()
+
+            println("SUCCESS: $functionName")
+
+            @Suppress("UNCHECKED_CAST")
+            result.data as? Map<String, Any>
+
+        } catch (e: Exception) {
+            println("ERROR: $functionName failed - ${e.message}")
+            throw e
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Engagement Notifications (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Send engagement notification (hype/cool)
+     * Matches iOS: sendEngagementNotification(to:videoID:engagementType:videoTitle:)
+     * Cloud Function resolves sender username from auth context
+     */
+    suspend fun sendEngagementNotification(
+        recipientID: String,
+        videoID: String,
+        engagementType: String,
+        videoTitle: String
+    ) {
+        println("ENGAGEMENT: Sending $engagementType notification")
+
+        val data = mapOf(
+            "recipientID" to recipientID,
+            "videoID" to videoID,
+            "engagementType" to engagementType,
+            "videoTitle" to videoTitle
+        )
+
+        try {
+            val result = callFunction("sendEngagement", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("ENGAGEMENT: Notification sent")
+        } catch (e: Exception) {
+            println("ENGAGEMENT: Failed - ${e.message}")
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Reply & Follow Notifications (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Send reply notification
+     * Matches iOS: sendReplyNotification(to:videoID:videoTitle:)
+     */
+    suspend fun sendReplyNotification(
+        recipientID: String,
+        videoID: String,
+        videoTitle: String
+    ) {
+        println("REPLY: Sending reply notification")
+
+        val data = mapOf(
+            "recipientID" to recipientID,
+            "videoID" to videoID,
+            "videoTitle" to videoTitle
+        )
+
+        try {
+            val result = callFunction("sendReply", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("REPLY: Notification sent")
+        } catch (e: Exception) {
+            println("REPLY: Failed - ${e.message}")
+        }
+    }
+
+    /**
+     * Send follow notification
+     * Matches iOS: sendFollowNotification(to:)
+     */
+    suspend fun sendFollowNotification(recipientID: String) {
+        println("FOLLOW: Sending follow notification")
+
+        val data = mapOf("recipientID" to recipientID)
+
+        try {
+            val result = callFunction("sendFollow", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("FOLLOW: Notification sent")
+        } catch (e: Exception) {
+            println("FOLLOW: Failed - ${e.message}")
+        }
+    }
+
+    /**
+     * Send mention notification
+     * Matches iOS: sendMentionNotification(to:videoID:videoTitle:mentionContext:)
+     */
+    suspend fun sendMentionNotification(
+        recipientID: String,
+        videoID: String,
+        videoTitle: String,
+        mentionContext: String = "video"
+    ) {
+        println("MENTION: Sending mention notification")
+
+        val data = mapOf(
+            "recipientID" to recipientID,
+            "videoID" to videoID,
+            "videoTitle" to videoTitle,
+            "mentionContext" to mentionContext
+        )
+
+        try {
+            val result = callFunction("sendMention", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("MENTION: Notification sent")
+        } catch (e: Exception) {
+            println("MENTION: Failed - ${e.message}")
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Stitch/Thread Notifications (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Send stitch/reply notification to thread participants
+     * Matches iOS: sendStitchNotification(videoID:videoTitle:originalCreatorID:parentCreatorID:threadUserIDs:)
+     */
+    suspend fun sendStitchNotification(
+        videoID: String,
+        videoTitle: String,
+        originalCreatorID: String,
+        parentCreatorID: String?,
+        threadUserIDs: List<String>
+    ) {
+        println("STITCH: Sending stitch notification to ${threadUserIDs.size} thread users")
+
+        val data = mapOf(
+            "videoID" to videoID,
+            "videoTitle" to videoTitle,
+            "originalCreatorID" to originalCreatorID,
+            "parentCreatorID" to (parentCreatorID ?: ""),
+            "threadUserIDs" to threadUserIDs
+        )
+
+        try {
+            val result = callFunction("sendStitch", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("STITCH: Notifications sent")
+        } catch (e: Exception) {
+            println("STITCH: Failed - ${e.message}")
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Milestone Notifications (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Send milestone notification to creator, followers, and engagers
+     * Matches iOS: sendMilestoneNotification(milestone:videoID:videoTitle:creatorID:followerIDs:engagerIDs:)
+     */
+    suspend fun sendMilestoneNotification(
+        milestone: Int,
+        videoID: String,
+        videoTitle: String,
+        creatorID: String,
+        followerIDs: List<String>,
+        engagerIDs: List<String>
+    ) {
+        println("MILESTONE: Sending $milestone-hype milestone notification")
+
+        val data = mapOf(
+            "milestone" to milestone,
+            "videoID" to videoID,
+            "videoTitle" to videoTitle,
+            "creatorID" to creatorID,
+            "followerIDs" to followerIDs,
+            "engagerIDs" to engagerIDs
+        )
+
+        try {
+            val result = callFunction("sendMilestone", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("MILESTONE: Notifications sent")
+        } catch (e: Exception) {
+            println("MILESTONE: Failed - ${e.message}")
+        }
+    }
+
+    // ========================================================================
+    // MARK: - New Video Notifications (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Notify all followers when creator uploads new video
+     * Matches iOS: sendNewVideoNotification(creatorID:creatorUsername:videoID:videoTitle:followerIDs:)
+     */
+    suspend fun sendNewVideoNotification(
+        creatorID: String,
+        creatorUsername: String,
+        videoID: String,
+        videoTitle: String,
+        followerIDs: List<String>
+    ) {
+        println("NEW VIDEO: Notifying ${followerIDs.size} followers")
+
+        val data = mapOf(
+            "creatorID" to creatorID,
+            "creatorUsername" to creatorUsername,
+            "videoID" to videoID,
+            "videoTitle" to videoTitle,
+            "followerIDs" to followerIDs
+        )
+
+        try {
+            val result = callFunction("sendNewVideo", data)
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("NEW VIDEO: Notifications sent")
+        } catch (e: Exception) {
+            println("NEW VIDEO: Failed - ${e.message}")
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Test & Debug (via Cloud Functions)
+    // ========================================================================
+
+    /**
+     * Send test push notification
+     * Matches iOS: sendTestPush()
+     */
+    suspend fun sendTestPush(): Boolean {
+        return try {
+            val result = callFunction("sendTestPush")
+            val success = result?.get("success") as? Boolean ?: false
+            if (success) println("TEST PUSH: Sent successfully")
+            success
+        } catch (e: Exception) {
+            println("TEST PUSH: Failed - ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Check FCM token status
+     * Matches iOS: checkToken()
+     */
+    suspend fun checkToken(): Map<String, Any>? {
+        return try {
+            val result = callFunction("checkToken")
+            println("TOKEN CHECK: $result")
+            result
+        } catch (e: Exception) {
+            println("TOKEN CHECK: Failed - ${e.message}")
+            null
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Legacy Direct Write (fallback only)
+    // ========================================================================
+
+    /**
+     * Create notification directly in Firestore (LEGACY)
+     * Only use if Cloud Functions are unavailable
+     */
+    suspend fun createNotificationDirect(
         type: StitchNotificationType,
         title: String,
         message: String,
@@ -45,9 +343,6 @@ class NotificationService {
         payload: Map<String, String> = emptyMap()
     ): Boolean {
         return try {
-            println("📤 NOTIFICATION SERVICE: Creating ${type.displayName} notification")
-            println("   Sender: $senderID → Recipient: $recipientID")
-
             val notificationData = hashMapOf(
                 "type" to type.rawValue,
                 "title" to title,
@@ -64,35 +359,29 @@ class NotificationService {
                 .add(notificationData)
                 .await()
 
-            println("✅ NOTIFICATION SERVICE: Notification created successfully")
             true
 
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to create notification - ${e.message}")
+            println("NOTIFICATION DIRECT WRITE: Failed - ${e.message}")
             false
         }
     }
 
-    // MARK: - Load Notifications
+    // ========================================================================
+    // MARK: - Load Notifications (Direct Firestore - same as iOS)
+    // ========================================================================
 
-    /**
-     * Load notifications for a user with pagination
-     * FIXED: Queries ROOT collection with recipientID filter
-     */
     suspend fun loadNotifications(
         userID: String,
         limit: Int = 20,
         lastDocument: DocumentSnapshot? = null
     ): NotificationLoadResult {
         return try {
-            println("📢 NOTIFICATION SERVICE: Loading notifications for user $userID")
-
             var query = db.collection(notificationsCollection)
                 .whereEqualTo("recipientID", userID)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
 
-            // Add pagination if last document provided
             if (lastDocument != null) {
                 query = query.startAfter(lastDocument)
             }
@@ -103,38 +392,27 @@ class NotificationService {
                 parseNotification(doc)
             }
 
-            val hasMore = snapshot.documents.size >= limit
-            val lastDoc = snapshot.documents.lastOrNull()
-
-            println("✅ NOTIFICATION SERVICE: Loaded ${notifications.size} notifications")
-
             NotificationLoadResult(
                 notifications = notifications,
-                hasMore = hasMore,
-                lastDocument = lastDoc
+                hasMore = snapshot.documents.size >= limit,
+                lastDocument = snapshot.documents.lastOrNull()
             )
 
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to load notifications - ${e.message}")
-            NotificationLoadResult(
-                notifications = emptyList(),
-                hasMore = false,
-                lastDocument = null
-            )
+            println("LOAD NOTIFICATIONS: Failed - ${e.message}")
+            NotificationLoadResult(emptyList(), false, null)
         }
     }
 
-    /**
-     * Start real-time listener for notifications
-     * FIXED: Listens to ROOT collection with recipientID filter
-     */
+    // ========================================================================
+    // MARK: - Real-time Listener (Direct Firestore - same as iOS)
+    // ========================================================================
+
     fun startListening(
         userID: String,
         onNotificationsUpdated: (List<StitchNotification>) -> Unit
     ) {
         stopListening()
-
-        println("📡 NOTIFICATION SERVICE: Starting real-time listener for user $userID")
 
         listenerRegistration = db.collection(notificationsCollection)
             .whereEqualTo("recipientID", userID)
@@ -142,43 +420,29 @@ class NotificationService {
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    println("❌ NOTIFICATION SERVICE: Listener error - ${error.message}")
+                    println("NOTIFICATION LISTENER: Error - ${error.message}")
                     return@addSnapshotListener
                 }
 
-                if (snapshot == null) {
-                    println("⚠️ NOTIFICATION SERVICE: Null snapshot")
-                    return@addSnapshotListener
-                }
-
-                val notifications = snapshot.documents.mapNotNull { doc ->
+                val notifications = snapshot?.documents?.mapNotNull { doc ->
                     parseNotification(doc)
-                }
+                } ?: emptyList()
 
-                println("🔄 NOTIFICATION SERVICE: Listener update - ${notifications.size} notifications")
                 onNotificationsUpdated(notifications)
             }
     }
 
-    /**
-     * Stop real-time listener
-     */
     fun stopListening() {
         listenerRegistration?.remove()
         listenerRegistration = null
-        println("🔴 NOTIFICATION SERVICE: Stopped real-time listener")
     }
 
-    // MARK: - Mark as Read
+    // ========================================================================
+    // MARK: - Mark as Read (Direct Firestore - same as iOS)
+    // ========================================================================
 
-    /**
-     * Mark single notification as read
-     * FIXED: Updates ROOT collection document
-     */
     suspend fun markAsRead(userID: String, notificationID: String): Boolean {
         return try {
-            println("✓ NOTIFICATION SERVICE: Marking notification $notificationID as read")
-
             db.collection(notificationsCollection)
                 .document(notificationID)
                 .update(mapOf(
@@ -186,59 +450,40 @@ class NotificationService {
                     "readAt" to FieldValue.serverTimestamp()
                 ))
                 .await()
-
-            println("✅ NOTIFICATION SERVICE: Marked as read")
             true
-
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to mark as read - ${e.message}")
+            println("MARK READ: Failed - ${e.message}")
             false
         }
     }
 
-    /**
-     * Mark all notifications as read for a user
-     * FIXED: Queries and updates ROOT collection
-     */
     suspend fun markAllAsRead(userID: String): Boolean {
         return try {
-            println("✓ NOTIFICATION SERVICE: Marking all notifications as read for user $userID")
-
             val unreadDocs = db.collection(notificationsCollection)
                 .whereEqualTo("recipientID", userID)
                 .whereEqualTo("isRead", false)
                 .get()
                 .await()
 
-            println("📊 NOTIFICATION SERVICE: Found ${unreadDocs.documents.size} unread notifications")
-
-            // Batch update
             val batch = db.batch()
             unreadDocs.documents.forEach { doc ->
-                batch.update(
-                    doc.reference,
-                    mapOf(
-                        "isRead" to true,
-                        "readAt" to FieldValue.serverTimestamp()
-                    )
-                )
+                batch.update(doc.reference, mapOf(
+                    "isRead" to true,
+                    "readAt" to FieldValue.serverTimestamp()
+                ))
             }
             batch.commit().await()
-
-            println("✅ NOTIFICATION SERVICE: Marked all as read")
             true
-
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to mark all as read - ${e.message}")
+            println("MARK ALL READ: Failed - ${e.message}")
             false
         }
     }
 
+    // ========================================================================
     // MARK: - Get Unread Count
+    // ========================================================================
 
-    /**
-     * Get unread notification count
-     */
     suspend fun getUnreadCount(userID: String): Int {
         return try {
             val snapshot = db.collection(notificationsCollection)
@@ -247,22 +492,16 @@ class NotificationService {
                 .count()
                 .get(com.google.firebase.firestore.AggregateSource.SERVER)
                 .await()
-
-            val count = snapshot.count.toInt()
-            println("📊 NOTIFICATION SERVICE: Unread count: $count")
-            count
-
+            snapshot.count.toInt()
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to get unread count - ${e.message}")
             0
         }
     }
 
+    // ========================================================================
     // MARK: - Parse Notification
+    // ========================================================================
 
-    /**
-     * Parse Firestore document into StitchNotification
-     */
     private fun parseNotification(doc: DocumentSnapshot): StitchNotification? {
         return try {
             val data = doc.data ?: return null
@@ -274,21 +513,19 @@ class NotificationService {
                 message = (data["message"] as? String) ?: "",
                 senderID = (data["senderID"] as? String) ?: "",
                 recipientID = (data["recipientID"] as? String) ?: "",
-                payload = (data["payload"] as? Map<*, *>)?.mapKeys { it.key.toString() }?.mapValues { it.value.toString() } ?: emptyMap(),
+                payload = (data["payload"] as? Map<*, *>)
+                    ?.mapKeys { it.key.toString() }
+                    ?.mapValues { it.value.toString() }
+                    ?: emptyMap(),
                 isRead = (data["isRead"] as? Boolean) ?: false,
                 createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: Date(),
                 readAt = (data["readAt"] as? Timestamp)?.toDate()
             )
-
         } catch (e: Exception) {
-            println("❌ NOTIFICATION SERVICE: Failed to parse notification ${doc.id} - ${e.message}")
             null
         }
     }
 
-    /**
-     * Parse notification type string to enum
-     */
     private fun parseNotificationType(typeString: String?): StitchNotificationType {
         return when (typeString?.lowercase()) {
             "hype" -> StitchNotificationType.HYPE
@@ -299,26 +536,31 @@ class NotificationService {
             "share" -> StitchNotificationType.SHARE
             "milestone" -> StitchNotificationType.MILESTONE
             "tier_upgrade" -> StitchNotificationType.TIER_UPGRADE
+            "spinoff" -> StitchNotificationType.SPIN_OFF
             "system" -> StitchNotificationType.SYSTEM
             else -> StitchNotificationType.SYSTEM
         }
     }
+
+    fun debugConfiguration() {
+        println("DEBUG: Notification Service Configuration")
+        println("  - Database: stitchfin")
+        println("  - Region: us-central1")
+        println("  - Function Prefix: $functionPrefix")
+        println("  - User: ${auth.currentUser?.uid ?: "none"}")
+    }
 }
 
+// ========================================================================
 // MARK: - Data Classes
+// ========================================================================
 
-/**
- * Result from loading notifications
- */
 data class NotificationLoadResult(
     val notifications: List<StitchNotification>,
     val hasMore: Boolean,
     val lastDocument: DocumentSnapshot?
 )
 
-/**
- * Notification data model matching Firebase structure
- */
 data class StitchNotification(
     val id: String,
     val type: StitchNotificationType,
@@ -332,9 +574,6 @@ data class StitchNotification(
     val readAt: Date? = null
 )
 
-/**
- * Notification types matching Firebase
- */
 enum class StitchNotificationType(val rawValue: String) {
     HYPE("hype"),
     COOL("cool"),
@@ -344,6 +583,7 @@ enum class StitchNotificationType(val rawValue: String) {
     SHARE("share"),
     MILESTONE("milestone"),
     TIER_UPGRADE("tier_upgrade"),
+    SPIN_OFF("spinoff"),
     SYSTEM("system");
 
     val displayName: String
@@ -356,6 +596,7 @@ enum class StitchNotificationType(val rawValue: String) {
             SHARE -> "Share"
             MILESTONE -> "Milestone"
             TIER_UPGRADE -> "Tier Upgrade"
+            SPIN_OFF -> "Spin-off"
             SYSTEM -> "System"
         }
 
@@ -369,6 +610,7 @@ enum class StitchNotificationType(val rawValue: String) {
             SHARE -> "share"
             MILESTONE -> "emoji_events"
             TIER_UPGRADE -> "arrow_upward"
+            SPIN_OFF -> "call_split"
             SYSTEM -> "info"
         }
 }

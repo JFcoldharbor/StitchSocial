@@ -16,7 +16,6 @@
 package com.stitchsocial.club.models
 
 import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.PropertyName
 import java.util.*
 
@@ -307,7 +306,6 @@ sealed class AnnouncementAudience {
  * Tracks a user's interaction with an announcement
  */
 data class UserAnnouncementStatus(
-    @DocumentId
     val visibilityId: String = "",
     val userId: String = "",
     val announcementId: String = "",

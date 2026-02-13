@@ -22,6 +22,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -30,8 +31,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -52,6 +57,7 @@ import kotlinx.coroutines.tasks.await
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.*
 import com.stitchsocial.club.views.*
+import com.stitchsocial.club.ui.screens.ThreadView
 import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.coordination.ModalState
@@ -66,6 +72,7 @@ import java.io.File
 // ✅ NEW: Announcement imports
 import com.stitchsocial.club.models.Announcement
 import com.stitchsocial.club.services.AnnouncementService
+import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.views.AnnouncementOverlayView
 
 
@@ -91,6 +98,9 @@ class MainActivity : ComponentActivity() {
 
         // ✅ REMOVED: FCM initialization moved to AFTER authentication
         // FCM will be initialized in LaunchedEffect after user authenticates
+
+        // ✅ NEW: Create notification channel EARLY (before any push can arrive)
+        FCMService.ensureChannelExists(this)
 
         // ✅ NEW: Request notification permission (Android 13+)
         requestNotificationPermission()
@@ -138,6 +148,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         Log.d("STITCH_MAIN", "⏹️ App stopping - broadcasting pause all videos")
         pauseAllVideos()
+        ShareService.cleanup(this)
     }
 
     /**
@@ -239,7 +250,21 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var selectedTab by remember { mutableStateOf(MainAppTab.HOME) }
+    var selectedTab by remember { mutableStateOf(MainAppTab.DISCOVERY) }  // ✅ Launch to Discovery
+
+    // ✅ NEW: Track when ThreadView is active (renders on top of tab bar)
+    var isShowingThreadView by remember { mutableStateOf(false) }
+    var threadViewThreadID by remember { mutableStateOf<String?>(null) }
+    var threadViewTargetVideoID by remember { mutableStateOf<String?>(null) }
+
+    // Debug logging for ThreadView state
+    LaunchedEffect(isShowingThreadView) {
+        Log.d("STITCH_MAIN", "🧵 isShowingThreadView changed to: $isShowingThreadView")
+    }
+
+    // ✅ NEW: Track when ProfileView is active (renders on top of tab bar)
+    var isShowingProfileView by remember { mutableStateOf(false) }
+    var profileViewUserID by remember { mutableStateOf<String?>(null) }
 
     val authService = remember { AuthService() }
     val videoService = remember { VideoServiceImpl() }
@@ -250,6 +275,11 @@ fun MainScreen() {
 
     // ✅ NEW: Announcement service reference
     val announcementService = remember { AnnouncementService.shared }
+
+    // Initialize ShareService for video file sharing
+    LaunchedEffect(Unit) {
+        ShareService.initialize(context)
+    }
 
     // ✅ FIXED: Process pending notification intent
     LaunchedEffect(navigationCoordinator) {
@@ -331,6 +361,24 @@ fun MainScreen() {
     val currentModal by navigationCoordinator.currentModal.collectAsState()
     val modalData by navigationCoordinator.modalData.collectAsState()
 
+    // ✅ CRITICAL: Pause all videos when recording modal shows
+    LaunchedEffect(currentModal) {
+        if (currentModal == ModalState.RECORDING) {
+            val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
+            LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
+            Log.d("STITCH_MAIN", "🎬 RECORDING MODAL: Paused all videos")
+        }
+        if (currentModal == ModalState.USER_PROFILE) {
+            val targetUserID = modalData["userID"] as? String
+            if (targetUserID != null) {
+                profileViewUserID = targetUserID
+                isShowingProfileView = true
+                Log.d("STITCH_MAIN", "📱 USER_PROFILE modal → opening profile for $targetUserID")
+            }
+            navigationCoordinator.dismissModal()
+        }
+    }
+
     var currentUser: BasicUserInfo? by remember { mutableStateOf(null) }
     var isLoadingUser by remember { mutableStateOf(true) }
     var userError by remember { mutableStateOf<String?>(null) }
@@ -338,6 +386,22 @@ fun MainScreen() {
     // ✅ NEW: Announcement state
     val isShowingAnnouncement by announcementService.isShowingAnnouncement.collectAsState()
     val currentAnnouncement by announcementService.currentAnnouncement.collectAsState()
+
+    // ✅ NEW: Periodic check to auto-dismiss expired announcements
+    LaunchedEffect(currentAnnouncement) {
+        currentAnnouncement?.let { announcement ->
+            while (isShowingAnnouncement) {
+                // Check every 10 seconds if announcement has expired
+                delay(10000)
+
+                if (!announcement.isCurrentlyActive) {
+                    Log.d("STITCH_MAIN", "📢 Announcement expired - auto-dismissing: ${announcement.title}")
+                    announcementService.hideAnnouncement()
+                    break
+                }
+            }
+        }
+    }
 
     // ✅ FIXED: FCM registration moved HERE - after authentication completes
     LaunchedEffect(firebaseUser, isAuthenticated) {
@@ -373,6 +437,9 @@ fun MainScreen() {
                     if (userProfile != null) {
                         currentUser = userProfile
                         Log.d("STITCH_MAIN", "✅ User profile loaded: ${userProfile.username}")
+
+                        // Load hype rating (matches iOS)
+                        HypeRatingService.shared.loadRating()
 
                         // ✅ NEW: Check for announcements after user profile loads
                         Log.d("STITCH_MAIN", "📢 Checking for announcements...")
@@ -425,16 +492,95 @@ fun MainScreen() {
             })
             currentUser != null -> {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    TabContent(selectedTab, currentUser!!, videoService, userService, feedService, navigationCoordinator)
+                    // Tab content with explicit lower z-index
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(0f)  // Ensure this is below ThreadView
+                    ) {
+                        TabContent(
+                            selectedTab = selectedTab,
+                            currentUser = currentUser!!,
+                            videoService = videoService,
+                            userService = userService,
+                            feedService = feedService,
+                            navigationCoordinator = navigationCoordinator,
+                            isAnnouncementShowing = isShowingAnnouncement,
+                            onShowThreadView = { threadID, targetVideoID ->
+                                threadViewThreadID = threadID
+                                threadViewTargetVideoID = targetVideoID
+                                isShowingThreadView = true
+                            },
+                            onShowProfileView = { userId ->
+                                profileViewUserID = userId
+                                isShowingProfileView = true
+                            }
+                        )
 
-                    // Only show tab bar when no modal is active AND no announcement showing
-                    if (currentModal == ModalState.NONE && !isShowingAnnouncement) {
+                        // Blocking overlay when ThreadView is active
+                        if (isShowingThreadView) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black)
+                                    .zIndex(200f)  // Above all TabContent elements including DiscoveryView (100f)
+                            )
+                        }
+                    }
+
+                    // ✅ ThreadView Overlay - MUST render BEFORE tab bar for proper z-index
+                    if (isShowingThreadView) {
+                        Log.d("STITCH_MAIN", "🧵 RENDERING ThreadView")
+                        val user = currentUser  // Capture for smart cast
+                        if (user != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .zIndex(1000f)
+                                    .background(Color.Black)  // Solid black background
+                                    .pointerInput(Unit) {
+                                        // Consume all touches to prevent interaction with content below
+                                        detectTapGestures { /* consume */ }
+                                    }
+                            ) {
+                                ThreadView(
+                                    threadID = threadViewThreadID ?: "",
+                                    videoService = videoService,
+                                    targetVideoID = threadViewTargetVideoID,
+                                    currentUserID = user.id,
+                                    currentUserTier = user.tier,
+                                    onDismiss = {
+                                        isShowingThreadView = false
+                                        threadViewThreadID = null
+                                        threadViewTargetVideoID = null
+                                    },
+                                    onVideoTap = { video ->
+                                        // Video tap handled within ThreadView
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
+                    // Debug: Log state before rendering decision
+                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView
+                    LaunchedEffect(currentModal, isShowingAnnouncement, isShowingThreadView) {
+                        Log.d("STITCH_MAIN", "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | announcement: $isShowingAnnouncement | threadView: $isShowingThreadView")
+                    }
+
+                    if (shouldShowTabBar) {
+                        Log.d("STITCH_MAIN", "🎨 RENDERING CustomDippedTabBar")
                         CustomDippedTabBar(
                             selectedTab = selectedTab,
                             onTabSelected = { tab -> selectedTab = tab },
                             onCreateTapped = { navigationCoordinator.showModal(ModalState.RECORDING) },
-                            modifier = Modifier.align(Alignment.BottomCenter)
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .zIndex(0f)  // Explicitly lower than ThreadView
                         )
+                    } else {
+                        Log.d("STITCH_MAIN", "🚫 NOT RENDERING CustomDippedTabBar - shouldShowTabBar is FALSE")
                     }
 
                     // Regular modal overlay
@@ -528,6 +674,27 @@ fun MainScreen() {
                                 }
                             )
                         }
+                    }
+                }
+
+                // ✅ NEW: ProfileView Overlay (renders on top of tab bar with zIndex)
+                if (isShowingProfileView) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)  // Above tab bar
+                            .background(Color.Black)
+                    ) {
+                        ProfileView(
+                            userID = profileViewUserID ?: "",
+                            viewingUserID = currentUser?.id,
+                            navigationCoordinator = navigationCoordinator,
+                            onDismiss = {
+                                isShowingProfileView = false
+                                profileViewUserID = null
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
             }
@@ -727,6 +894,7 @@ private fun ModalOverlay(
                         navigationCoordinator.dismissModal()
                     }
                 }
+
                 else -> {}
             }
         }
@@ -740,15 +908,21 @@ private fun TabContent(
     videoService: VideoServiceImpl,
     userService: UserService,
     feedService: HybridHomeFeedService,
-    navigationCoordinator: NavigationCoordinator
+    navigationCoordinator: NavigationCoordinator,
+    isAnnouncementShowing: Boolean = false,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    onShowProfileView: (userId: String) -> Unit
 ) {
     when (selectedTab) {
         MainAppTab.HOME -> {
             HomeFeedView(
                 userID = currentUser.id,
                 navigationCoordinator = navigationCoordinator,
+                isAnnouncementShowing = isAnnouncementShowing,
                 modifier = Modifier.fillMaxSize()
             )
+            // TODO: Pass onShowThreadView once HomeFeedView is updated:
+            // onShowThreadView = onShowThreadView
         }
         MainAppTab.DISCOVERY -> {
             DiscoveryView(
@@ -757,10 +931,14 @@ private fun TabContent(
                 },
                 onNavigateToProfile = { userId ->
                     Log.d("NAVIGATION", "Navigate to profile: $userId")
+                    onShowProfileView(userId)
                 },
                 onNavigateToSearch = {
                     Log.d("NAVIGATION", "🔍 SEARCH NAVIGATION TRIGGERED")
                 },
+                onShowThreadView = onShowThreadView,
+                isAnnouncementShowing = isAnnouncementShowing,
+                navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -770,12 +948,16 @@ private fun TabContent(
                 navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
             )
+            // TODO: Pass onShowThreadView once ProfileView is updated:
+            // onShowThreadView = onShowThreadView
         }
         MainAppTab.NOTIFICATIONS -> {
             NotificationViewComplete(
                 navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
             )
+            // TODO: Pass onShowThreadView once NotificationViewComplete is updated:
+            // onShowThreadView = onShowThreadView
         }
     }
 }

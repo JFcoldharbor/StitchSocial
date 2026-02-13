@@ -8,7 +8,8 @@
  *
  * UPDATED: Fixed sizing - non-scaled fonts, responsive padding, size constraints
  * UPDATED: Integrated ShareButton, SwipeForRepliesBanner, TaggedUsersRow from iOS
- * ✅ ADDED: Automatic view tracking when video is displayed
+ * Ã¢Å“â€¦ ADDED: Automatic view tracking when video is displayed
+ * Ã¢Å“â€¦ ADDED: ThreadView integration (iOS-style fullscreen)
  */
 
 package com.stitchsocial.club.views
@@ -61,12 +62,20 @@ import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.VideoServiceImpl
+import com.stitchsocial.club.ShareButton
+import com.stitchsocial.club.ShareButtonSize
 import com.stitchsocial.club.engagement.HypeRatingCalculator
+import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.FollowManager
 
 // 3D Button imports
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
+
+// ============================================================================
+// ThreadView import
+// ============================================================================
+import com.stitchsocial.club.ui.screens.ThreadView
 
 // ============================================================================
 // MARK: - NON-SCALED TEXT SIZE UTILITIES
@@ -118,8 +127,8 @@ object OverlaySizes {
     val PROFILE_IMAGE_THREAD = 28.dp
 
     // Spacing
-    val BOTTOM_PADDING_MIN = 60.dp
-    val BOTTOM_PADDING_MAX = 100.dp
+    val BOTTOM_PADDING_MIN = 60.dp  // Higher from tab bar for HomeFeed
+    val BOTTOM_PADDING_MAX = 80.dp  // Higher from tab bar for large screens
 }
 
 // MARK: - Enums
@@ -129,7 +138,8 @@ enum class OverlayContext {
     DISCOVERY,
     PROFILE_OWN,
     PROFILE_OTHER,
-    THREAD_VIEW
+    THREAD_VIEW,
+    CAROUSEL  // Minimal overlay for CardVideoCarouselView
 }
 
 enum class EngagementType {
@@ -252,7 +262,7 @@ fun ContextualVideoOverlay(
         Log.d("OVERLAY_SIZE", "Screen: ${configuration.screenWidthDp}x${configuration.screenHeightDp}dp")
         Log.d("OVERLAY_SIZE", "Density: ${density.density}, FontScale: ${density.fontScale}")
         if (density.fontScale > 1.0f) {
-            Log.w("OVERLAY_SIZE", "⚠️ Font scaling active (${density.fontScale}x) - using fixed sizes")
+            Log.w("OVERLAY_SIZE", "Ã¢Å¡Â Ã¯Â¸Â Font scaling active (${density.fontScale}x) - using fixed sizes")
         }
     }
 
@@ -261,7 +271,7 @@ fun ContextualVideoOverlay(
         when {
             screenHeight < 600.dp -> OverlaySizes.BOTTOM_PADDING_MIN
             screenHeight > 800.dp -> OverlaySizes.BOTTOM_PADDING_MAX
-            else -> 80.dp // Medium screens
+            else -> 70.dp // Medium screens - higher from tab bar for HomeFeed
         }
     }
 
@@ -279,6 +289,14 @@ fun ContextualVideoOverlay(
     val videoService = remember { VideoServiceImpl() }
     val userService = remember { UserService(context) }
     val authService = remember { AuthService() }
+
+    // Create EngagementCoordinator if needed
+    val engagementCoordinator = remember {
+        com.stitchsocial.club.coordination.EngagementCoordinator(
+            videoService = videoService,
+            userService = userService
+        )
+    }
 
     // Track video views - only once per video per user session
     LaunchedEffect(video.id, currentUserID) {
@@ -305,12 +323,12 @@ fun ContextualVideoOverlay(
                     )
                 }
 
-                Log.d("VIEW_TRACKING", "✅ Recorded view for video ${video.id} by user $currentUserID")
+                Log.d("VIEW_TRACKING", "Ã¢Å“â€¦ Recorded view for video ${video.id} by user $currentUserID")
             } catch (e: Exception) {
-                Log.e("VIEW_TRACKING", "❌ Failed to record view: ${e.message}")
+                Log.e("VIEW_TRACKING", "Ã¢ÂÅ’ Failed to record view: ${e.message}")
             }
         } else {
-            Log.d("VIEW_TRACKING", "⚠️ No currentUserID - skipping view tracking for video ${video.id}")
+            Log.d("VIEW_TRACKING", "Ã¢Å¡Â Ã¯Â¸Â No currentUserID - skipping view tracking for video ${video.id}")
         }
     }
 
@@ -356,10 +374,10 @@ fun ContextualVideoOverlay(
 
     // Can reply logic (self-stitching support)
     val canReply: Boolean = remember(video.conversationDepth, isUserVideo, overlayContext) {
-        if (video.conversationDepth > 1) false
-        else if (isUserVideo) {
+        // Allow replies at all depths (removed depth > 1 restriction)
+        if (isUserVideo) {
             when (overlayContext) {
-                OverlayContext.PROFILE_OWN, OverlayContext.HOME_FEED, OverlayContext.THREAD_VIEW -> true
+                OverlayContext.PROFILE_OWN, OverlayContext.HOME_FEED, OverlayContext.THREAD_VIEW, OverlayContext.CAROUSEL -> true
                 else -> false
             }
         } else true
@@ -372,25 +390,25 @@ fun ContextualVideoOverlay(
 
     // Load user data - fetch from service if not cached
     LaunchedEffect(video.creatorID) {
-        println("👤 CREATOR PILL DEBUG: Fetching profile for creatorID: ${video.creatorID}")
-        println("👤 CREATOR PILL DEBUG: video.creatorName: ${video.creatorName}")
+        println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Fetching profile for creatorID: ${video.creatorID}")
+        println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: video.creatorName: ${video.creatorName}")
 
         val cached = UserDataCache.get(video.creatorID)
         if (cached != null) {
-            println("👤 CREATOR PILL DEBUG: Found in cache: ${cached.displayName}")
+            println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Found in cache: ${cached.displayName}")
             realCreatorName = cached.displayName
             realCreatorProfileImageURL = cached.profileImageURL
         } else {
             // Fetch from UserService
             try {
                 isLoadingUserData = true
-                println("👤 CREATOR PILL DEBUG: Calling userService.getUserProfile...")
+                println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Calling userService.getUserProfile...")
                 val profile = userService.getUserProfile(video.creatorID)
-                println("👤 CREATOR PILL DEBUG: Profile result: $profile")
+                println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile result: $profile")
                 if (profile != null) {
                     realCreatorName = profile.displayName.ifEmpty { profile.username }
                     realCreatorProfileImageURL = profile.profileImageURL
-                    println("👤 CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}")
+                    println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}")
                     // Cache the result
                     UserDataCache.set(video.creatorID, CachedUserData(
                         displayName = realCreatorName ?: "",
@@ -398,12 +416,12 @@ fun ContextualVideoOverlay(
                         tier = null,
                         cachedAt = Date()
                     ))
-                    println("👤 OVERLAY: Fetched creator profile: ${profile.displayName}")
+                    println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched creator profile: ${profile.displayName}")
                 } else {
-                    println("👤 CREATOR PILL DEBUG: Profile was NULL!")
+                    println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile was NULL!")
                 }
             } catch (e: Exception) {
-                println("❌ OVERLAY: Failed to fetch creator profile: ${e.message}")
+                println("Ã¢ÂÅ’ OVERLAY: Failed to fetch creator profile: ${e.message}")
                 e.printStackTrace()
             } finally {
                 isLoadingUserData = false
@@ -431,10 +449,10 @@ fun ContextualVideoOverlay(
                             tier = null,
                             cachedAt = Date()
                         ))
-                        println("👤 OVERLAY: Fetched thread creator profile: ${profile.displayName}")
+                        println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched thread creator profile: ${profile.displayName}")
                     }
                 } catch (e: Exception) {
-                    println("❌ OVERLAY: Failed to fetch thread creator profile: ${e.message}")
+                    println("Ã¢ÂÅ’ OVERLAY: Failed to fetch thread creator profile: ${e.message}")
                 }
             }
         }
@@ -472,6 +490,23 @@ fun ContextualVideoOverlay(
                 context = context,
                 onAction = onAction
             )
+        } else if (overlayContext == OverlayContext.CAROUSEL) {
+            // Carousel-specific overlay - just engagement buttons
+            CarouselOverlay(
+                video = video,
+                canReply = canReply,
+                stitchButtonIcon = stitchButtonIcon,
+                stitchButtonLabel = stitchButtonLabel,
+                stitchButtonRingColor = stitchButtonRingColor,
+                videoEngagement = videoEngagement,
+                currentUserTier = currentUserTier,
+                currentUserID = currentUserID,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                context = context,
+                hapticFeedback = hapticFeedback,
+                onAction = onAction
+            )
         } else {
             FullContextualOverlay(
                 video = video,
@@ -493,6 +528,7 @@ fun ContextualVideoOverlay(
                 videoEngagement = videoEngagement,
                 videoDescription = videoDescription,
                 currentUserTier = currentUserTier,
+                currentUserID = currentUserID,
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
                 followManager = followManager,
@@ -507,7 +543,11 @@ fun ContextualVideoOverlay(
                     Log.d("OVERLAY_FOLLOW", "Toggle follow for ${video.creatorID}, current: $isFollowing")
                 },
                 onViewersTap = { showViewersSheet = true },
-                onAction = onAction
+                onAction = onAction,
+                onThreadTap = {
+                    // Let parent handle thread navigation
+                    onAction?.invoke(OverlayAction.NavigateToThread)
+                }
             )
         }
 
@@ -621,11 +661,100 @@ private fun MinimalDiscoveryOverlay(
             ShareButton(
                 video = video,
                 creatorUsername = displayCreatorName,
-                size = ShareButtonSize.MEDIUM,
-                context = context
+                size = ShareButtonSize.MEDIUM
             )
 
             Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+
+// MARK: - Carousel Overlay (for CardVideoCarouselView)
+
+@Composable
+private fun CarouselOverlay(
+    video: CoreVideoMetadata,
+    canReply: Boolean,
+    stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    stitchButtonLabel: String,
+    stitchButtonRingColor: Color,
+    videoEngagement: ContextualVideoEngagement?,
+    currentUserTier: UserTier,
+    currentUserID: String?,
+    engagementViewModel: EngagementViewModel?,
+    iconManager: FloatingIconManager?,
+    context: Context,
+    hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onAction: ((OverlayAction) -> Unit)?
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Bottom engagement buttons - centered horizontal row
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp),
+            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Cool Button
+            if (engagementViewModel != null && iconManager != null) {
+                ProgressiveCoolButton3D(
+                    videoID = video.id,
+                    creatorID = video.creatorID,
+                    userTier = currentUserTier,
+                    coolCount = videoEngagement?.coolCount ?: video.coolCount,
+                    currentUserID = currentUserID ?: "",
+                    viewModel = engagementViewModel,
+                    iconManager = iconManager
+                )
+            } else {
+                OverlayActionButton(
+                    icon = Icons.Default.AcUnit,
+                    label = "Cool",
+                    ringColor = Color.Blue,
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAction?.invoke(OverlayAction.Engagement(EngagementType.COOL))
+                    }
+                )
+            }
+
+            // Hype Button
+            if (engagementViewModel != null && iconManager != null) {
+                ProgressiveHypeButton3D(
+                    videoID = video.id,
+                    creatorID = video.creatorID,
+                    userTier = currentUserTier,
+                    hypeCount = videoEngagement?.hypeCount ?: video.hypeCount,
+                    currentUserID = currentUserID ?: "",
+                    viewModel = engagementViewModel,
+                    iconManager = iconManager
+                )
+            } else {
+                OverlayActionButton(
+                    icon = Icons.Default.LocalFireDepartment,
+                    label = "Hype",
+                    ringColor = Color(0xFFFF8C00),
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAction?.invoke(OverlayAction.Engagement(EngagementType.HYPE))
+                    }
+                )
+            }
+
+            // Stitch Button
+            if (canReply) {
+                OverlayActionButton(
+                    icon = stitchButtonIcon,
+                    label = stitchButtonLabel,
+                    ringColor = stitchButtonRingColor,
+                    onClick = {
+                        pauseAllVideos(context)
+                        onAction?.invoke(OverlayAction.StitchRecording)
+                    }
+                )
+            }
         }
     }
 }
@@ -653,6 +782,7 @@ private fun FullContextualOverlay(
     videoEngagement: ContextualVideoEngagement?,
     videoDescription: String?,
     currentUserTier: UserTier,
+    currentUserID: String?,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
     followManager: FollowManager?,
@@ -662,22 +792,25 @@ private fun FullContextualOverlay(
     scope: kotlinx.coroutines.CoroutineScope,
     onFollowToggle: () -> Unit,
     onViewersTap: () -> Unit,
-    onAction: ((OverlayAction) -> Unit)?
+    onAction: ((OverlayAction) -> Unit)?,
+    onThreadTap: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        // Top Section
-        TopSection(
-            video = video,
-            threadVideo = threadVideo,
-            displayCreatorName = displayCreatorName,
-            displayCreatorProfileImageURL = displayCreatorProfileImageURL,
-            displayThreadCreatorName = displayThreadCreatorName,
-            displayThreadCreatorProfileImageURL = displayThreadCreatorProfileImageURL,
-            temperatureColor = temperatureColor,
-            overlayContext = overlayContext,
-            context = context,
-            onAction = onAction
-        )
+        // Top Section - hide for CAROUSEL to keep view clean
+        if (overlayContext != OverlayContext.CAROUSEL) {
+            TopSection(
+                video = video,
+                threadVideo = threadVideo,
+                displayCreatorName = displayCreatorName,
+                displayCreatorProfileImageURL = displayCreatorProfileImageURL,
+                displayThreadCreatorName = displayThreadCreatorName,
+                displayThreadCreatorProfileImageURL = displayThreadCreatorProfileImageURL,
+                temperatureColor = temperatureColor,
+                overlayContext = overlayContext,
+                context = context,
+                onAction = onAction
+            )
+        }
 
         // Bottom Section
         BottomSection(
@@ -692,6 +825,7 @@ private fun FullContextualOverlay(
             stitchButtonLabel = stitchButtonLabel,
             stitchButtonRingColor = stitchButtonRingColor,
             currentUserTier = currentUserTier,
+            currentUserID = currentUserID,
             engagementViewModel = engagementViewModel,
             iconManager = iconManager,
             bottomPadding = bottomPadding,
@@ -701,29 +835,10 @@ private fun FullContextualOverlay(
             onFollowToggle = onFollowToggle,
             onViewersTap = onViewersTap,
             onAction = onAction,
+            onThreadTap = onThreadTap,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // Right Side: Swipe banner + Share button - positioned to avoid blocking FollowButton
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 12.dp)
-                .wrapContentHeight(),  // Only take needed height, don't fill
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            if (video.conversationDepth == 0 && displayReplyCount > 0) {
-                SwipeForRepliesBanner(replyCount = displayReplyCount)
-            }
-
-            ShareButton(
-                video = video,
-                creatorUsername = displayCreatorName,
-                size = ShareButtonSize.MEDIUM,
-                context = context
-            )
-        }
     }
 }
 
@@ -805,6 +920,7 @@ private fun BottomSection(
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
     currentUserTier: UserTier,
+    currentUserID: String?,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
     bottomPadding: Dp,
@@ -814,6 +930,7 @@ private fun BottomSection(
     onFollowToggle: () -> Unit,
     onViewersTap: () -> Unit,
     onAction: ((OverlayAction) -> Unit)?,
+    onThreadTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Fixed text sizes
@@ -919,6 +1036,7 @@ private fun BottomSection(
                     ringColor = Color.Cyan,
                     onClick = {
                         pauseAllVideos(context)
+                        onThreadTap()
                         onAction?.invoke(OverlayAction.NavigateToThread)
                     }
                 )
@@ -927,8 +1045,10 @@ private fun BottomSection(
                 if (engagementViewModel != null && iconManager != null) {
                     ProgressiveCoolButton3D(
                         videoID = video.id,
+                        creatorID = video.creatorID,
                         userTier = currentUserTier,
                         coolCount = videoEngagement?.coolCount ?: video.coolCount,
+                        currentUserID = currentUserID ?: "",
                         viewModel = engagementViewModel,
                         iconManager = iconManager
                     )
@@ -957,8 +1077,10 @@ private fun BottomSection(
                 if (engagementViewModel != null && iconManager != null) {
                     ProgressiveHypeButton3D(
                         videoID = video.id,
+                        creatorID = video.creatorID,
                         userTier = currentUserTier,
                         hypeCount = videoEngagement?.hypeCount ?: video.hypeCount,
+                        currentUserID = currentUserID ?: "",
                         viewModel = engagementViewModel,
                         iconManager = iconManager
                     )
@@ -1202,7 +1324,7 @@ private fun VideoMetadataRow(
                 }
             }
 
-            Text("•", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.5f))
+            Text("Ã¢â‚¬Â¢", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.5f))
 
             // Stitches
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1251,75 +1373,8 @@ private fun SwipeForRepliesBanner(replyCount: Int) {
             Text("$replyCount $replyText", fontSize = countFontSize, fontWeight = FontWeight.SemiBold, color = Color.White)
             Icon(Icons.Default.ArrowForward, null, tint = Color.Cyan.copy(alpha = glowAlpha + 0.3f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_SMALL).offset(x = arrowOffset.dp))
         }
-        Text("Swipe →", fontSize = hintFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp))
+        Text("Swipe Ã¢â€ â€™", fontSize = hintFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp))
     }
-}
-
-// MARK: - Share Button
-
-enum class ShareButtonSize { SMALL, MEDIUM, LARGE }
-
-@Composable
-private fun ShareButton(
-    video: CoreVideoMetadata,
-    creatorUsername: String,
-    size: ShareButtonSize,
-    context: Context
-) {
-    val scope = rememberCoroutineScope()
-    var isSharing: Boolean by remember { mutableStateOf(false) }
-    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
-
-    val buttonSize: Dp = when (size) {
-        ShareButtonSize.SMALL -> OverlaySizes.BUTTON_SIZE_SMALL
-        ShareButtonSize.MEDIUM -> OverlaySizes.BUTTON_SIZE
-        ShareButtonSize.LARGE -> OverlaySizes.BUTTON_SIZE_LARGE
-    }
-    val iconSize: Dp = when (size) {
-        ShareButtonSize.SMALL -> OverlaySizes.ICON_SIZE_SMALL
-        ShareButtonSize.MEDIUM -> OverlaySizes.ICON_SIZE
-        ShareButtonSize.LARGE -> 22.dp
-    }
-
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(
-            modifier = Modifier
-                .size(buttonSize)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.3f))
-                .clickable(enabled = !isSharing) {
-                    scope.launch {
-                        isSharing = true
-                        shareVideoLink(context, video, creatorUsername)
-                        isSharing = false
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            if (isSharing) {
-                CircularProgressIndicator(modifier = Modifier.size(iconSize), color = Color.White, strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Default.Share, "Share", tint = Color.White, modifier = Modifier.size(iconSize))
-            }
-        }
-        if (size != ShareButtonSize.SMALL) {
-            Text("Share", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
-        }
-    }
-}
-
-private fun shareVideoLink(context: Context, video: CoreVideoMetadata, creatorUsername: String) {
-    val shareText: String = buildString {
-        append("Check out this video by @$creatorUsername on StitchSocial!")
-        append("\n\n")
-        video.threadID?.let { append("stitch://thread/$it\n\n") }
-        append("Download StitchSocial: https://play.google.com/store/apps/details?id=com.stitchsocial.club")
-    }
-    val shareIntent: Intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, shareText)
-    }
-    context.startActivity(Intent.createChooser(shareIntent, "Share Video"))
 }
 
 // MARK: - Overlay Action Button

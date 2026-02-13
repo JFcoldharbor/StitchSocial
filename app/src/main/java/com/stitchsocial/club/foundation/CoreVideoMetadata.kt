@@ -6,8 +6,12 @@ import kotlin.random.Random
 /**
  * Complete video metadata for Stitch Social
  * Layer 1: Foundation - Pure Kotlin data class
- * ✅ FIXED: Factory methods now generate realistic view counts
- * ✅ NEW: Added taggedUserIDs for user tagging feature
+ *
+ * UPDATED: Added recordingSource for content authenticity scoring
+ * UPDATED: Added collection support fields (collectionID, segmentNumber, segmentTitle, replyTimestamp)
+ * UPDATED: Added collectionSegment() factory method
+ * UPDATED: Added taggedUserIDs for user tagging feature
+ * UPDATED: Added spin-off support
  */
 data class CoreVideoMetadata(
     // Core identity
@@ -19,7 +23,7 @@ data class CoreVideoMetadata(
     val creatorID: String,
     val creatorName: String,
     val hashtags: List<String> = emptyList(),
-    val taggedUserIDs: List<String> = emptyList(),  // NEW: Tagged users
+    val taggedUserIDs: List<String> = emptyList(),
     val createdAt: Date,
 
     // Thread hierarchy
@@ -52,7 +56,22 @@ data class CoreVideoMetadata(
     // Status flags
     val isPromoted: Boolean,
     val isProcessing: Boolean,
-    val isDeleted: Boolean
+    val isDeleted: Boolean,
+
+    // Spin-off support
+    val spinOffFromVideoID: String? = null,
+    val spinOffFromThreadID: String? = null,
+    val spinOffCount: Int = 0,
+
+    // Content Authenticity
+    val recordingSource: String = "unknown",  // "inApp", "cameraRoll", "unknown"
+
+    // Collection Support
+    val collectionID: String? = null,         // If part of a collection, the collection's ID
+    val segmentNumber: Int? = null,           // Order within collection (1-based)
+    val segmentTitle: String? = null,         // Optional title for this segment
+    val isCollectionSegment: Boolean = false,  // True if this video is a collection segment
+    val replyTimestamp: Double? = null         // Timestamp in parent video this reply references
 ) {
     // Computed properties
     val netEngagement: Int get() = hypeCount - coolCount
@@ -62,9 +81,24 @@ data class CoreVideoMetadata(
     val isStepchild: Boolean get() = conversationDepth == 2
     val canHaveReplies: Boolean get() = conversationDepth < 2
 
-    // NEW: Tagged users computed properties
+    // Spin-off computed properties
+    val isSpinOff: Boolean get() = spinOffFromVideoID != null
+    val hasSpinOffs: Boolean get() = spinOffCount > 0
+
+    // Tagged users computed properties
     val hasTaggedUsers: Boolean get() = taggedUserIDs.isNotEmpty()
     val taggedUserCount: Int get() = taggedUserIDs.size
+
+    // Collection computed properties
+    /** Display title for collection segments - uses segmentTitle if available, falls back to "Part N" */
+    val segmentDisplayTitle: String
+        get() {
+            val st = segmentTitle
+            if (!st.isNullOrEmpty()) return st
+            val num = segmentNumber
+            if (num != null) return "Part $num"
+            return if (title.isEmpty()) "Untitled" else title
+        }
 
     val maxRepliesAllowed: Int
         get() = when (conversationDepth) {
@@ -162,9 +196,7 @@ data class CoreVideoMetadata(
         get() = hashtags.map { it.removePrefix("#").lowercase() }
 
     val formattedHashtags: List<String>
-        get() = hashtags.map {
-            if (it.startsWith("#")) it else "#$it"
-        }
+        get() = hashtags.map { if (it.startsWith("#")) it else "#$it" }
 
     val hashtagString: String
         get() = formattedHashtags.joinToString(" ")
@@ -177,7 +209,6 @@ data class CoreVideoMetadata(
         return cleanHashtags.contains(cleanInput)
     }
 
-    // NEW: Check if a user is tagged
     fun isUserTagged(userID: String): Boolean {
         return taggedUserIDs.contains(userID)
     }
@@ -185,7 +216,6 @@ data class CoreVideoMetadata(
     companion object {
         /**
          * Create new thread with realistic view count
-         * ✅ FIXED: Now generates 500-10,000 views
          */
         fun newThread(
             id: String,
@@ -195,11 +225,12 @@ data class CoreVideoMetadata(
             creatorID: String,
             creatorName: String,
             duration: Double,
-            aspectRatio: Double = 9.0/16.0,
+            aspectRatio: Double = 9.0 / 16.0,
             fileSize: Long,
             qualityScore: Int = 75,
             hashtags: List<String> = emptyList(),
-            taggedUserIDs: List<String> = emptyList()  // NEW
+            taggedUserIDs: List<String> = emptyList(),
+            recordingSource: String = "unknown"
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -210,9 +241,9 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
-                taggedUserIDs = taggedUserIDs,  // NEW
+                taggedUserIDs = taggedUserIDs,
                 createdAt = now,
-                threadID = null,
+                threadID = id,
                 replyToVideoID = null,
                 conversationDepth = 0,
                 viewCount = Random.nextInt(500, 10001),
@@ -233,13 +264,16 @@ data class CoreVideoMetadata(
                 discoverabilityScore = 0.5,
                 isPromoted = false,
                 isProcessing = false,
-                isDeleted = false
+                isDeleted = false,
+                spinOffFromVideoID = null,
+                spinOffFromThreadID = null,
+                spinOffCount = 0,
+                recordingSource = recordingSource
             )
         }
 
         /**
          * Create child reply with realistic view count
-         * ✅ FIXED: Now generates 200-5,000 views
          */
         fun childReply(
             id: String,
@@ -250,11 +284,12 @@ data class CoreVideoMetadata(
             creatorName: String,
             parentThreadID: String,
             duration: Double,
-            aspectRatio: Double = 9.0/16.0,
+            aspectRatio: Double = 9.0 / 16.0,
             fileSize: Long,
             qualityScore: Int = 75,
             hashtags: List<String> = emptyList(),
-            taggedUserIDs: List<String> = emptyList()  // NEW
+            taggedUserIDs: List<String> = emptyList(),
+            recordingSource: String = "unknown"
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -265,7 +300,7 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
-                taggedUserIDs = taggedUserIDs,  // NEW
+                taggedUserIDs = taggedUserIDs,
                 createdAt = now,
                 threadID = parentThreadID,
                 replyToVideoID = parentThreadID,
@@ -288,13 +323,16 @@ data class CoreVideoMetadata(
                 discoverabilityScore = 0.5,
                 isPromoted = false,
                 isProcessing = false,
-                isDeleted = false
+                isDeleted = false,
+                spinOffFromVideoID = null,
+                spinOffFromThreadID = null,
+                spinOffCount = 0,
+                recordingSource = recordingSource
             )
         }
 
         /**
          * Create stepchild reply with realistic view count
-         * ✅ FIXED: Now generates 100-2,000 views
          */
         fun stepchildReply(
             id: String,
@@ -306,11 +344,12 @@ data class CoreVideoMetadata(
             parentThreadID: String,
             parentChildID: String,
             duration: Double,
-            aspectRatio: Double = 9.0/16.0,
+            aspectRatio: Double = 9.0 / 16.0,
             fileSize: Long,
             qualityScore: Int = 75,
             hashtags: List<String> = emptyList(),
-            taggedUserIDs: List<String> = emptyList()  // NEW
+            taggedUserIDs: List<String> = emptyList(),
+            recordingSource: String = "unknown"
         ): CoreVideoMetadata {
             val now = Date()
             return CoreVideoMetadata(
@@ -321,7 +360,7 @@ data class CoreVideoMetadata(
                 creatorID = creatorID,
                 creatorName = creatorName,
                 hashtags = hashtags,
-                taggedUserIDs = taggedUserIDs,  // NEW
+                taggedUserIDs = taggedUserIDs,
                 createdAt = now,
                 threadID = parentThreadID,
                 replyToVideoID = parentChildID,
@@ -344,12 +383,144 @@ data class CoreVideoMetadata(
                 discoverabilityScore = 0.5,
                 isPromoted = false,
                 isProcessing = false,
-                isDeleted = false
+                isDeleted = false,
+                spinOffFromVideoID = null,
+                spinOffFromThreadID = null,
+                spinOffCount = 0,
+                recordingSource = recordingSource
             )
         }
 
         /**
-         * Create test video for development (already had correct views)
+         * Create spin-off thread from another video
+         * A spin-off is a NEW thread (depth 0) that references a source video
+         */
+        fun spinOffThread(
+            id: String,
+            title: String,
+            videoURL: String,
+            thumbnailURL: String,
+            creatorID: String,
+            creatorName: String,
+            spinOffFromVideoID: String,
+            spinOffFromThreadID: String,
+            duration: Double,
+            aspectRatio: Double = 9.0 / 16.0,
+            fileSize: Long,
+            qualityScore: Int = 75,
+            hashtags: List<String> = emptyList(),
+            taggedUserIDs: List<String> = emptyList(),
+            recordingSource: String = "unknown"
+        ): CoreVideoMetadata {
+            val now = Date()
+            return CoreVideoMetadata(
+                id = id,
+                title = title,
+                videoURL = videoURL,
+                thumbnailURL = thumbnailURL,
+                creatorID = creatorID,
+                creatorName = creatorName,
+                hashtags = hashtags,
+                taggedUserIDs = taggedUserIDs,
+                createdAt = now,
+                threadID = id, // Self-referential - this IS a new thread
+                replyToVideoID = null,
+                conversationDepth = 0,
+                viewCount = Random.nextInt(300, 8001),
+                hypeCount = 0,
+                coolCount = 0,
+                replyCount = 0,
+                shareCount = 0,
+                lastEngagementAt = null,
+                duration = duration,
+                aspectRatio = aspectRatio,
+                fileSize = fileSize,
+                contentType = ContentType.THREAD,
+                temperature = Temperature.COOL,
+                qualityScore = qualityScore,
+                engagementRatio = 0.0,
+                velocityScore = 0.0,
+                trendingScore = 0.0,
+                discoverabilityScore = 0.5,
+                isPromoted = false,
+                isProcessing = false,
+                isDeleted = false,
+                spinOffFromVideoID = spinOffFromVideoID,
+                spinOffFromThreadID = spinOffFromThreadID,
+                spinOffCount = 0,
+                recordingSource = recordingSource
+            )
+        }
+
+        /**
+         * Create a collection segment video
+         * Parameters ordered to match CollectionPlayerViewModel call pattern
+         */
+        fun collectionSegment(
+            collectionID: String = "",
+            segmentNumber: Int = 1,
+            segmentTitle: String? = null,
+            segmentID: String? = null,
+            videoURL: String = "",
+            thumbnailURL: String = "",
+            duration: Double = 0.0,
+            creatorID: String = "",
+            creatorName: String = "",
+            fileSize: Long = 0,
+            id: String? = null,
+            title: String? = null,
+            createdAt: Date = Date()
+        ): CoreVideoMetadata {
+            val finalID = id ?: segmentID ?: java.util.UUID.randomUUID().toString()
+            val finalTitle = title ?: segmentTitle ?: "Part $segmentNumber"
+
+            return CoreVideoMetadata(
+                id = finalID,
+                title = finalTitle,
+                description = "",
+                videoURL = videoURL,
+                thumbnailURL = thumbnailURL,
+                creatorID = creatorID,
+                creatorName = creatorName,
+                hashtags = emptyList(),
+                taggedUserIDs = emptyList(),
+                createdAt = createdAt,
+                threadID = finalID,
+                replyToVideoID = null,
+                conversationDepth = 0,
+                viewCount = 0,
+                hypeCount = 0,
+                coolCount = 0,
+                replyCount = 0,
+                shareCount = 0,
+                lastEngagementAt = null,
+                duration = duration,
+                aspectRatio = 9.0 / 16.0,
+                fileSize = fileSize,
+                contentType = ContentType.THREAD,
+                temperature = Temperature.COOL,
+                qualityScore = 50,
+                engagementRatio = 0.5,
+                velocityScore = 0.0,
+                trendingScore = 0.0,
+                discoverabilityScore = 0.5,
+                isPromoted = false,
+                isProcessing = false,
+                isDeleted = false,
+                spinOffFromVideoID = null,
+                spinOffFromThreadID = null,
+                spinOffCount = 0,
+                recordingSource = "inApp",
+                collectionID = collectionID,
+                segmentNumber = segmentNumber,
+                segmentTitle = segmentTitle ?: finalTitle,
+                isCollectionSegment = true,
+                replyTimestamp = null
+            )
+        }
+
+        /**
+         * Create test video for development
          */
         fun testVideo(
             id: String = "test_video_123",
@@ -358,7 +529,7 @@ data class CoreVideoMetadata(
             isThread: Boolean = true,
             engagement: Int = 50,
             hashtags: List<String> = listOf("test", "video", "stitch"),
-            taggedUserIDs: List<String> = emptyList()  // NEW
+            taggedUserIDs: List<String> = emptyList()
         ): CoreVideoMetadata {
             return if (isThread) {
                 newThread(
@@ -372,7 +543,8 @@ data class CoreVideoMetadata(
                     fileSize = 5 * 1024 * 1024,
                     qualityScore = 80,
                     hashtags = hashtags,
-                    taggedUserIDs = taggedUserIDs
+                    taggedUserIDs = taggedUserIDs,
+                    recordingSource = "inApp"
                 ).copy(
                     hypeCount = engagement,
                     viewCount = engagement * 5,
@@ -391,7 +563,8 @@ data class CoreVideoMetadata(
                     fileSize = 4 * 1024 * 1024,
                     qualityScore = 75,
                     hashtags = hashtags,
-                    taggedUserIDs = taggedUserIDs
+                    taggedUserIDs = taggedUserIDs,
+                    recordingSource = "inApp"
                 ).copy(
                     hypeCount = engagement,
                     viewCount = engagement * 3,

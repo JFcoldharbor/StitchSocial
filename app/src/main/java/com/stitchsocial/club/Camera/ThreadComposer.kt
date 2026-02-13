@@ -63,8 +63,10 @@ import kotlinx.coroutines.tasks.await
 // Import from your existing packages
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.services.VideoAnalysisResult
+import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.SearchService
 import com.stitchsocial.club.foundation.BasicUserInfo
+import com.stitchsocial.club.TaggedUserChipById
 import com.stitchsocial.club.foundation.UserTier
 
 // Constants
@@ -87,6 +89,7 @@ fun ThreadComposer(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val notificationService = remember { NotificationService() }
 
     // Convert String path to Uri
     val videoUri = remember(recordedVideoURL) {
@@ -153,16 +156,25 @@ fun ThreadComposer(
                             coroutineScope.launch {
                                 isPosting = true
                                 try {
-                                    // Complete video creation with user's title/description/hashtags AND tagged users
-                                    videoCoordinator.completeVideoCreation(
+                                    // Complete video creation
+                                    val createdVideo = videoCoordinator.completeVideoCreation(
                                         userTitle = title.trim(),
                                         userDescription = description.trim(),
                                         userHashtags = hashtags,
                                         taggedUserIDs = taggedUserIds
                                     )
+
+                                    // Send notifications via Cloud Functions (matches iOS)
+                                    sendPostCreationNotifications(
+                                        notificationService = notificationService,
+                                        createdVideo = createdVideo,
+                                        recordingContext = recordingContext,
+                                        taggedUserIds = taggedUserIds
+                                    )
+
                                     onVideoCreated()
                                 } catch (e: Exception) {
-                                    println("❌ COMPOSER: Upload failed: ${e.message}")
+                                    println("COMPOSER: Upload failed: ${e.message}")
                                 } finally {
                                     isPosting = false
                                 }
@@ -397,151 +409,6 @@ private fun UserTagSection(
 }
 
 // ============================================================================
-// MARK: - Tagged User Chip (loads by ID)
-// ============================================================================
-
-@Composable
-private fun TaggedUserChipById(
-    userID: String,
-    onRemove: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var user by remember { mutableStateOf<BasicUserInfo?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var hasError by remember { mutableStateOf(false) }
-
-    // Load user from Firebase
-    LaunchedEffect(userID) {
-        isLoading = true
-        hasError = false
-
-        try {
-            val db = FirebaseFirestore.getInstance("stitchfin")
-            val doc = db.collection("users").document(userID).get().await()
-
-            if (doc.exists()) {
-                user = BasicUserInfo.fromFirebaseDocument(doc)
-                if (user == null) hasError = true
-            } else {
-                hasError = true
-            }
-        } catch (e: Exception) {
-            println("❌ TAGGED CHIP: Failed to load user $userID: ${e.message}")
-            hasError = true
-        } finally {
-            isLoading = false
-        }
-    }
-
-    when {
-        isLoading -> LoadingChip(modifier)
-        hasError -> ErrorChip(onRemove = onRemove, modifier = modifier)
-        user != null -> TaggedUserChipContent(
-            user = user!!,
-            onRemove = onRemove,
-            modifier = modifier
-        )
-    }
-}
-
-@Composable
-private fun TaggedUserChipContent(
-    user: BasicUserInfo,
-    onRemove: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .background(
-                Brush.horizontalGradient(
-                    colors = listOf(Color(0xFF2196F3), Color(0xFF2196F3).copy(alpha = 0.8f))
-                ),
-                RoundedCornerShape(20.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Profile image
-        AsyncImage(
-            model = user.profileImageURL,
-            contentDescription = null,
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF4D4D4D)),
-            contentScale = ContentScale.Crop
-        )
-
-        // Username
-        Text(
-            "@${user.username}",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White
-        )
-
-        // Remove button
-        Icon(
-            Icons.Default.Cancel,
-            contentDescription = "Remove",
-            tint = Color.White.copy(alpha = 0.8f),
-            modifier = Modifier
-                .size(16.dp)
-                .clickable { onRemove() }
-        )
-    }
-}
-
-@Composable
-private fun LoadingChip(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier
-            .background(Color(0xFF333333), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        CircularProgressIndicator(
-            color = Color.Cyan,
-            modifier = Modifier.size(16.dp),
-            strokeWidth = 2.dp
-        )
-        Text("Loading...", fontSize = 13.sp, color = Color.Gray)
-    }
-}
-
-@Composable
-private fun ErrorChip(
-    onRemove: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .background(Color(0xFF5C2828), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            Icons.Default.Warning,
-            contentDescription = null,
-            tint = Color(0xFFFF6B6B),
-            modifier = Modifier.size(14.dp)
-        )
-        Text("User not found", fontSize = 13.sp, color = Color(0xFFFF6B6B))
-        Icon(
-            Icons.Default.Cancel,
-            contentDescription = "Remove",
-            tint = Color(0xFFFF6B6B),
-            modifier = Modifier
-                .size(16.dp)
-                .clickable { onRemove() }
-        )
-    }
-}
-
-// ============================================================================
 // MARK: - User Tag Sheet Content
 // ============================================================================
 
@@ -555,6 +422,7 @@ private fun UserTagSheetContent(
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val notificationService = remember { NotificationService() }
 
     // Services
     val searchService = remember { SearchService() }
@@ -1035,6 +903,14 @@ private fun ContextBanner(recordingContext: RecordingContext) {
                 creatorName = recordingContext.threadInfo.creatorName
             )
         }
+        is RecordingContext.SpinOffFrom -> {
+            ContextInfoBanner(
+                icon = Icons.Filled.CallSplit,
+                label = "Spinning off from",
+                title = recordingContext.videoInfo.title,
+                creatorName = recordingContext.videoInfo.creatorName
+            )
+        }
     }
 }
 
@@ -1206,3 +1082,85 @@ val RecordingContext.contextDisplayTitle: String
         is RecordingContext.ContinueThread -> "Continue Thread"
         else -> "New Thread"
     }
+// ============================================================================
+// MARK: - Post-Creation Notifications (matches iOS ThreadComposer)
+// ============================================================================
+
+/**
+ * Send all relevant notifications after video creation.
+ * Cloud Functions handle username lookup, message building, and FCM push.
+ */
+private suspend fun sendPostCreationNotifications(
+    notificationService: NotificationService,
+    createdVideo: com.stitchsocial.club.foundation.CoreVideoMetadata,
+    recordingContext: RecordingContext,
+    taggedUserIds: List<String>
+) {
+    try {
+        val currentUserID = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
+
+        // 1. STITCH / REPLY notifications based on context
+        when (recordingContext) {
+            is RecordingContext.StitchToThread -> {
+                // Notify original thread creator
+                notificationService.sendStitchNotification(
+                    videoID = createdVideo.id,
+                    videoTitle = createdVideo.title,
+                    originalCreatorID = recordingContext.threadInfo.creatorId,
+                    parentCreatorID = null,
+                    threadUserIDs = emptyList()
+                )
+                println("COMPOSER NOTIF: Stitch notification sent to thread creator")
+            }
+
+            is RecordingContext.ReplyToVideo -> {
+                // Notify video creator being replied to
+                notificationService.sendReplyNotification(
+                    recipientID = recordingContext.videoInfo.creatorId,
+                    videoID = createdVideo.id,
+                    videoTitle = createdVideo.title
+                )
+                println("COMPOSER NOTIF: Reply notification sent to video creator")
+            }
+
+            is RecordingContext.ContinueThread -> {
+                // Notify thread creator
+                notificationService.sendStitchNotification(
+                    videoID = createdVideo.id,
+                    videoTitle = createdVideo.title,
+                    originalCreatorID = recordingContext.threadInfo.creatorId,
+                    parentCreatorID = null,
+                    threadUserIDs = emptyList()
+                )
+                println("COMPOSER NOTIF: Continue thread notification sent")
+            }
+
+            is RecordingContext.NewThread -> {
+                // No notification needed for new threads
+            }
+
+            else -> { }
+        }
+
+        // 2. MENTION notifications for tagged users
+        taggedUserIds.forEach { taggedUserID ->
+            if (taggedUserID != currentUserID) {
+                try {
+                    notificationService.sendMentionNotification(
+                        recipientID = taggedUserID,
+                        videoID = createdVideo.id,
+                        videoTitle = createdVideo.title,
+                        mentionContext = "video"
+                    )
+                    println("COMPOSER NOTIF: Mention notification sent to $taggedUserID")
+                } catch (e: Exception) {
+                    println("COMPOSER NOTIF: Mention failed for $taggedUserID - ${e.message}")
+                }
+            }
+        }
+
+    } catch (e: Exception) {
+        // Non-fatal — video was already created successfully
+        println("COMPOSER NOTIF: Post-creation notifications failed - ${e.message}")
+    }
+}

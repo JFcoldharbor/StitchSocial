@@ -305,11 +305,10 @@ enum class UserTier(val rawValue: String) {
 // ===== TIER COMPARISON EXTENSIONS =====
 
 /**
- * Compare two tiers
+ * Compare two tiers by level (use tier.level for custom comparison)
+ * Note: Removed operator compareTo - enums already implement Comparable.
+ * Use UserTier.isHigherTier(tier1, tier2) or tier1.level > tier2.level
  */
-operator fun UserTier.compareTo(other: UserTier): Int {
-    return this.level.compareTo(other.level)
-}
 
 // ===== DEBUG HELPER =====
 
