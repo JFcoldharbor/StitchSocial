@@ -7,8 +7,10 @@
  * Features: Token registration, background notifications, notification handling
  *
  * EXACT PORT: FCMPushManager.swift functionality for Android
- * ✅ FIXED: Added missing Android API imports
- * ✅ FIXED: Proper PendingIntent flags and extras
+ * ✅ FIXED: Uses ic_stat_name for notification icon
+ * ✅ FIXED: Lock screen visibility + heads-up popup
+ * ✅ FIXED: Channel created with IMPORTANCE_HIGH for popup
+ * ✅ FIXED: Early channel creation via ensureChannelExists()
  */
 
 package com.stitchsocial.club.services
@@ -18,6 +20,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.google.firebase.auth.FirebaseAuth
@@ -25,6 +29,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.stitchsocial.club.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,6 +49,40 @@ class FCMService : FirebaseMessagingService() {
         private const val CHANNEL_ID = "stitch_notifications"
         private const val CHANNEL_NAME = "Stitch Social Notifications"
         private const val NOTIFICATION_ID_BASE = 1000
+
+        /**
+         * ✅ CALL THIS FROM MainActivity.onCreate() to ensure channel exists early
+         * Must be called before any notification is sent
+         */
+        fun ensureChannelExists(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_HIGH // ✅ Required for heads-up popup
+                ).apply {
+                    description = "Notifications for Stitch Social activity"
+                    enableLights(true)
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 250, 250, 250)
+                    lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC // ✅ Lock screen
+                    setSound(
+                        soundUri,
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                            .build()
+                    )
+                    setShowBadge(true) // ✅ App icon badge
+                }
+
+                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.createNotificationChannel(channel)
+                println("✅ FCM: Notification channel created/verified")
+            }
+        }
 
         /**
          * Request FCM token and store in Firebase
@@ -82,7 +121,7 @@ class FCMService : FirebaseMessagingService() {
                     "isActive" to true
                 )
 
-                db.collection("userTokens")
+                db.collection("user_tokens")
                     .document(userID)
                     .set(tokenData)
                     .await()
@@ -111,15 +150,12 @@ class FCMService : FirebaseMessagingService() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        ensureChannelExists(this)
         println("📱 FCM SERVICE: Service created")
     }
 
     // MARK: - Token Management
 
-    /**
-     * Called when FCM token is refreshed
-     */
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         println("📱 FCM: New token received: ${token.take(20)}...")
@@ -136,9 +172,6 @@ class FCMService : FirebaseMessagingService() {
 
     // MARK: - Message Handling
 
-    /**
-     * Called when message is received
-     */
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
@@ -146,7 +179,7 @@ class FCMService : FirebaseMessagingService() {
         println("📱 FCM: From: ${remoteMessage.from}")
         println("📱 FCM: Data: ${remoteMessage.data}")
 
-        // Handle notification payload
+        // Handle notification payload (foreground)
         remoteMessage.notification?.let { notification ->
             println("📱 FCM: Notification - ${notification.title}: ${notification.body}")
             showNotification(
@@ -156,65 +189,65 @@ class FCMService : FirebaseMessagingService() {
             )
         }
 
-        // Handle data payload
-        if (remoteMessage.data.isNotEmpty()) {
-            println("📱 FCM: Data payload - ${remoteMessage.data}")
+        // Handle data-only payload (no notification field)
+        if (remoteMessage.notification == null && remoteMessage.data.isNotEmpty()) {
+            println("📱 FCM: Data-only payload - ${remoteMessage.data}")
             handleDataPayload(remoteMessage.data)
         }
     }
 
     // MARK: - Notification Display
 
-    /**
-     * Show notification to user
-     */
     private fun showNotification(title: String, body: String, data: Map<String, String> = emptyMap()) {
-        println("📱 FCM: Showing notification - $title")
+        println("📱 FCM: Building notification - $title")
 
-        // Create intent to open app using package name (avoids compile-time dependency)
+        // Ensure channel exists before every notification
+        ensureChannelExists(this)
+
         val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-
-            // Add notification data to intent
-            data.forEach { (key, value) ->
-                putExtra(key, value)
-            }
+            data.forEach { (key, value) -> putExtra(key, value) }
             putExtra("fromNotification", true)
             putExtra("notificationTitle", title)
             putExtra("notificationBody", body)
         } ?: Intent().apply {
             setClassName(packageName, "$packageName.MainActivity")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-
-            data.forEach { (key, value) ->
-                putExtra(key, value)
-            }
+            data.forEach { (key, value) -> putExtra(key, value) }
             putExtra("fromNotification", true)
             putExtra("notificationTitle", title)
             putExtra("notificationBody", body)
         }
 
+        val notificationId = NOTIFICATION_ID_BASE + (System.currentTimeMillis() % 10000).toInt()
+
         val pendingIntent = PendingIntent.getActivity(
             this,
-            NOTIFICATION_ID_BASE + System.currentTimeMillis().toInt(),
+            notificationId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Build notification
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Replace with your app icon
+            .setSmallIcon(R.drawable.ic_stat_name)               // ✅ Your Stitch logo
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)        // ✅ Heads-up popup
+            .setDefaults(NotificationCompat.DEFAULT_ALL)          // ✅ Sound + vibrate + lights
+            .setSound(defaultSoundUri)                            // ✅ Notification sound
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)  // ✅ Show on lock screen
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)      // ✅ Social category
+            .setNumber(1)                                         // ✅ Badge count
             .build()
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID_BASE + System.currentTimeMillis().toInt(), notification)
+        notificationManager.notify(notificationId, notification)
 
-        println("✅ FCM: Notification displayed")
+        println("✅ FCM: Notification displayed (id=$notificationId)")
     }
 
     /**
@@ -226,60 +259,7 @@ class FCMService : FirebaseMessagingService() {
         val body = data["body"] ?: ""
 
         println("📱 FCM: Handling data payload - Type: $notificationType")
-
-        // Show notification for data-only messages
         showNotification(title, body, data)
-
-        // Store notification in Firestore (background operation)
-        serviceScope.launch {
-            try {
-                val userID = auth.currentUser?.uid ?: return@launch
-
-                val notificationData = hashMapOf(
-                    "type" to notificationType,
-                    "title" to title,
-                    "body" to body,
-                    "payload" to data,
-                    "isRead" to false,
-                    "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                )
-
-                db.collection("users")
-                    .document(userID)
-                    .collection("notifications")
-                    .add(notificationData)
-                    .await()
-
-                println("✅ FCM: Notification stored in Firestore")
-
-            } catch (e: Exception) {
-                println("❌ FCM: Failed to store notification - ${e.message}")
-            }
-        }
-    }
-
-    // MARK: - Channel Management
-
-    /**
-     * Create notification channel for Android O+
-     */
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Notifications for Stitch Social activity"
-                enableLights(true)
-                enableVibration(true)
-            }
-
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
-
-            println("✅ FCM: Notification channel created")
-        }
     }
 
     // MARK: - Cleanup
@@ -295,17 +275,13 @@ class FCMService : FirebaseMessagingService() {
  */
 object FCMManager {
 
-    /**
-     * Initialize FCM and request token
-     */
     fun initialize(context: Context) {
         println("📱 FCM MANAGER: Initializing...")
+        // ✅ Create channel early so system-delivered notifications work
+        FCMService.ensureChannelExists(context)
         FCMService.registerFCMToken(context)
     }
 
-    /**
-     * Check if FCM is registered
-     */
     suspend fun isRegistered(): Boolean {
         return try {
             val token = FirebaseMessaging.getInstance().token.await()
@@ -315,9 +291,6 @@ object FCMManager {
         }
     }
 
-    /**
-     * Get current FCM token
-     */
     suspend fun getToken(): String? {
         return try {
             FirebaseMessaging.getInstance().token.await()
@@ -326,9 +299,6 @@ object FCMManager {
         }
     }
 
-    /**
-     * Delete FCM token (for sign out)
-     */
     suspend fun deleteToken() {
         try {
             FirebaseMessaging.getInstance().deleteToken().await()
@@ -338,9 +308,6 @@ object FCMManager {
         }
     }
 
-    /**
-     * Subscribe to topic
-     */
     suspend fun subscribeToTopic(topic: String) {
         try {
             FirebaseMessaging.getInstance().subscribeToTopic(topic).await()
@@ -350,9 +317,6 @@ object FCMManager {
         }
     }
 
-    /**
-     * Unsubscribe from topic
-     */
     suspend fun unsubscribeFromTopic(topic: String) {
         try {
             FirebaseMessaging.getInstance().unsubscribeFromTopic(topic).await()

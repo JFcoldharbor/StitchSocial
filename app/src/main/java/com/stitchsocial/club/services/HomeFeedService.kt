@@ -1,133 +1,483 @@
 /*
- * HomeFeedService.kt
+ * HomeFeedService.kt - Deep Discovery Feed Service
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 4: Core Services - Following Feed with Deep Discovery
- * MATCHES iOS HomeFeedService.swift
- * Features: Deep time-based discovery, seen-video exclusion, session resume
+ * FULL iOS PARITY: HomeFeedService.swift
+ * Features:
+ *   - Deep time-based discovery (recent 40%, medium 30%, older 20%, deep cuts 10%)
+ *   - Seen-video exclusion via FeedViewHistory
+ *   - Follower rotation (ensures all followed users get coverage)
+ *   - Deduplication across time tiers
+ *   - Load more with exclusion of already-loaded videos
+ *   - Session resume support
+ *   - Children preloading around current position
  */
 
 package com.stitchsocial.club.services
 
 import android.content.Context
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
-import com.stitchsocial.club.AppConfig
+import com.stitchsocial.club.firebase.FirebaseSchema
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
-import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.foundation.ContentType
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import com.stitchsocial.club.foundation.Temperature
 import kotlinx.coroutines.tasks.await
-import java.util.Calendar
 import java.util.Date
 
-/**
- * Following-only feed service with deep discovery and view history
- * MATCHES iOS HomeFeedService
- */
 class HomeFeedService(
     private val videoService: VideoServiceImpl,
     private val userService: UserService,
-    private val context: Context? = null
+    private val context: Context
 ) {
+    private val db = FirebaseFirestore.getInstance("stitchfin")
+    private val viewHistory: FeedViewHistory? get() = FeedViewHistory.shared
 
-    // MARK: - View History
-
-    private val viewHistory: FeedViewHistory?
-        get() = context?.let { FeedViewHistory.getInstance(it) }
-
-    // MARK: - Published State
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading
-
-    private val _isRefreshing = MutableStateFlow(false)
-    val isRefreshing: StateFlow<Boolean> = _isRefreshing
-
-    private val _feedStats = MutableStateFlow(FeedStats())
-    val feedStats: StateFlow<FeedStats> = _feedStats
-
-    private val _canResumeSession = MutableStateFlow(false)
-    val canResumeSession: StateFlow<Boolean> = _canResumeSession
-
-    // MARK: - Feed State
-
+    // Feed state
     private var currentFeed: MutableList<ThreadData> = mutableListOf()
-    private var currentFeedVideoIDs: MutableSet<String> = mutableSetOf()
-    private var lastDocument: DocumentSnapshot? = null
+    private val currentFeedVideoIDs: MutableSet<String> = mutableSetOf()
     private var hasMoreContent: Boolean = true
+    private var isLoading: Boolean = false
 
-    // MARK: - Follower Rotation
-
+    // Follower rotation
     private var followerRotationIndex: Int = 0
     private var allFollowerIDs: List<String> = emptyList()
 
-    // MARK: - Configuration
-
+    // Configuration (matches iOS)
     private val defaultFeedSize = 40
     private val triggerLoadThreshold = 10
     private val maxCachedThreads = 300
     private val followersPerBatch = 15
 
-    // MARK: - Caching
-
+    // Following cache
     private var cachedFollowingIDs: List<String> = emptyList()
     private var followingIDsCacheTime: Long = 0
-    private val followingCacheExpiration = 5 * 60 * 1000L // 5 minutes
+    private val followingCacheExpiration = 300_000L // 5 minutes
 
-    init {
-        _canResumeSession.value = viewHistory?.canResumeSession() ?: false
-        println("ðŸ  HOME FEED: Initialized with view history tracking")
-        viewHistory?.let { println(it.debugStatus()) }
+    // Children cache for preloading
+    private val childrenCache: MutableMap<String, List<CoreVideoMetadata>> = mutableMapOf()
+
+    // MARK: - Primary Feed Loading (Deep Discovery)
+
+    suspend fun loadFeed(userID: String, limit: Int = 40): List<ThreadData> {
+        return loadFeedWithDeepDiscovery(userID, limit)
     }
 
-    // MARK: - Session Resume
+    private suspend fun loadFeedWithDeepDiscovery(userID: String, limit: Int = 40): List<ThreadData> {
+        isLoading = true
 
-    fun checkSessionResume(): Pair<Boolean, FeedPosition?> {
-        val canResume = viewHistory?.canResumeSession() ?: false
-        val position = viewHistory?.getSavedPosition()
-        _canResumeSession.value = canResume
-        return Pair(canResume, position)
-    }
+        try {
+            println("🔍 DEEP DISCOVERY: Loading diverse feed for user $userID")
 
-    fun getLastSessionThreadIDs(): List<String>? {
-        return viewHistory?.getLastSessionThreadIDs()
-    }
-
-    suspend fun loadThreadsByIDs(threadIDs: List<String>): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        // Process in chunks of 10 (Firestore limit for whereIn)
-        threadIDs.chunked(10).forEach { chunk ->
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("threadID", chunk)
-                    .whereEqualTo("conversationDepth", 0)
-                    .get()
-                    .await()
-
-                for (document in snapshot.documents) {
-                    createParentThreadFromDocument(document)?.let { threads.add(it) }
-                }
-            } catch (e: Exception) {
-                println("âŒ HOME FEED: Error loading threads - ${e.message}")
+            val followingIDs = getCachedFollowingIDs(userID)
+            if (followingIDs.isEmpty()) {
+                println("🔍 DEEP DISCOVERY: No following found")
+                return emptyList()
             }
+
+            allFollowerIDs = followingIDs
+            println("🔍 DEEP DISCOVERY: Found ${followingIDs.size} following users")
+
+            val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
+            println("🔍 DEEP DISCOVERY: Excluding ${recentlySeenIDs.size} recently seen videos")
+
+            val allThreads = mutableListOf<ThreadData>()
+
+            // 40% recent (last 7 days)
+            val recentThreads = getRecentContent(followingIDs, (limit * 0.4).toInt(), recentlySeenIDs)
+            allThreads.addAll(recentThreads)
+            println("🔍 DEEP DISCOVERY: Loaded ${recentThreads.size} recent threads")
+
+            // 30% medium-old (7-30 days)
+            val mediumOldThreads = getMediumOldContent(followingIDs, (limit * 0.3).toInt(), recentlySeenIDs)
+            allThreads.addAll(mediumOldThreads)
+            println("🔍 DEEP DISCOVERY: Loaded ${mediumOldThreads.size} medium-old threads")
+
+            // 20% older (30-90 days)
+            val olderThreads = getOlderContent(followingIDs, (limit * 0.2).toInt(), recentlySeenIDs)
+            allThreads.addAll(olderThreads)
+            println("🔍 DEEP DISCOVERY: Loaded ${olderThreads.size} older threads")
+
+            // 10% deep cuts (90-365 days)
+            val deepCutThreads = getDeepCutContent(followingIDs, (limit * 0.1).toInt(), recentlySeenIDs)
+            allThreads.addAll(deepCutThreads)
+            println("🔍 DEEP DISCOVERY: Loaded ${deepCutThreads.size} deep cut threads")
+
+            val dedupedThreads = deduplicateThreads(allThreads)
+            val shuffledThreads = dedupedThreads.shuffled()
+
+            currentFeed = shuffledThreads.toMutableList()
+            currentFeedVideoIDs.clear()
+            currentFeedVideoIDs.addAll(shuffledThreads.map { it.parentVideo.id })
+
+            println("✅ DEEP DISCOVERY: Loaded ${shuffledThreads.size} total threads with diverse time range")
+            return shuffledThreads
+
+        } finally {
+            isLoading = false
+        }
+    }
+
+    // MARK: - Time-Based Content Loading
+
+    private suspend fun getRecentContent(
+        followingIDs: List<String>, limit: Int, excludeVideoIDs: Set<String>
+    ): List<ThreadData> {
+        val sevenDaysAgo = Date(System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000)
+        return getContentInTimeRange(followingIDs, sevenDaysAgo, Date(), limit, excludeVideoIDs)
+    }
+
+    private suspend fun getMediumOldContent(
+        followingIDs: List<String>, limit: Int, excludeVideoIDs: Set<String>
+    ): List<ThreadData> {
+        val thirtyDaysAgo = Date(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
+        val sevenDaysAgo = Date(System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000)
+        return getContentInTimeRange(followingIDs, thirtyDaysAgo, sevenDaysAgo, limit, excludeVideoIDs)
+    }
+
+    private suspend fun getOlderContent(
+        followingIDs: List<String>, limit: Int, excludeVideoIDs: Set<String>
+    ): List<ThreadData> {
+        val ninetyDaysAgo = Date(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
+        val thirtyDaysAgo = Date(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
+        return getContentInTimeRange(followingIDs, ninetyDaysAgo, thirtyDaysAgo, limit, excludeVideoIDs)
+    }
+
+    private suspend fun getDeepCutContent(
+        followingIDs: List<String>, limit: Int, excludeVideoIDs: Set<String>
+    ): List<ThreadData> {
+        val yearAgo = Date(System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000)
+        val ninetyDaysAgo = Date(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
+        return getContentInTimeRange(followingIDs, yearAgo, ninetyDaysAgo, limit, excludeVideoIDs)
+    }
+
+    private suspend fun getContentInTimeRange(
+        followingIDs: List<String>,
+        startDate: Date,
+        endDate: Date,
+        limit: Int,
+        excludeVideoIDs: Set<String>
+    ): List<ThreadData> {
+        val sampledFollowers = getRotatingFollowerBatch(followingIDs)
+        if (sampledFollowers.isEmpty()) return emptyList()
+
+        val fetchLimit = maxOf(limit * 3, 30).toLong()
+
+        return try {
+            val snapshot = db.collection(FirebaseSchema.Collections.VIDEOS)
+                .whereIn(FirebaseSchema.VideoDocument.CREATOR_ID, sampledFollowers)
+                .whereEqualTo(FirebaseSchema.VideoDocument.CONVERSATION_DEPTH, 0)
+                .whereGreaterThanOrEqualTo(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(startDate))
+                .whereLessThan(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(endDate))
+                .orderBy(FirebaseSchema.VideoDocument.CREATED_AT, Query.Direction.DESCENDING)
+                .limit(fetchLimit)
+                .get()
+                .await()
+
+            val threads = mutableListOf<ThreadData>()
+            for (document in snapshot.documents) {
+                val videoID = document.getString(FirebaseSchema.VideoDocument.ID) ?: document.id
+                if (excludeVideoIDs.contains(videoID)) continue
+                if (currentFeedVideoIDs.contains(videoID)) continue
+
+                val thread = createThreadFromDocument(document)
+                if (thread != null) {
+                    threads.add(thread)
+                    if (threads.size >= limit) break
+                }
+            }
+            threads
+        } catch (e: Exception) {
+            println("⚠️ DEEP DISCOVERY: Time range query failed — ${e.message}")
+            emptyList()
+        }
+    }
+
+    // MARK: - Follower Rotation (matches iOS)
+
+    private fun getRotatingFollowerBatch(followingIDs: List<String>): List<String> {
+        if (followingIDs.isEmpty()) return emptyList()
+
+        // Firestore 'in' queries limited to 30 items
+        val batchSize = minOf(followersPerBatch, 30)
+
+        if (followingIDs.size <= batchSize) return followingIDs
+
+        val shuffled = followingIDs.shuffled()
+        val startIndex = followerRotationIndex % shuffled.size
+
+        val batch = mutableListOf<String>()
+        for (i in 0 until batchSize) {
+            val index = (startIndex + i) % shuffled.size
+            batch.add(shuffled[index])
         }
 
-        // Sort by original order
-        val threadIDOrder = threadIDs.withIndex().associate { it.value to it.index }
-        threads.sortBy { threadIDOrder[it.id] ?: Int.MAX_VALUE }
-
-        return threads
+        followerRotationIndex += batchSize
+        println("🔄 FOLLOWER ROTATION: Using batch starting at $startIndex")
+        return batch
     }
 
-    // MARK: - Position Tracking
+    // MARK: - Deduplication
+
+    private fun deduplicateThreads(threads: List<ThreadData>): List<ThreadData> {
+        val seen = mutableSetOf<String>()
+        return threads.filter { thread ->
+            if (seen.contains(thread.parentVideo.id)) {
+                false
+            } else {
+                seen.add(thread.parentVideo.id)
+                true
+            }
+        }
+    }
+
+    // MARK: - Load More Content
+
+    suspend fun loadMoreContent(userID: String): List<ThreadData> {
+        if (isLoading) return currentFeed
+        isLoading = true
+
+        try {
+            val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
+            val exclusionSet = recentlySeenIDs.toMutableSet()
+            exclusionSet.addAll(currentFeedVideoIDs)
+
+            val followingIDs = getCachedFollowingIDs(userID)
+            val newThreads = mutableListOf<ThreadData>()
+
+            newThreads.addAll(getRecentContent(followingIDs, 15, exclusionSet))
+            newThreads.addAll(getMediumOldContent(followingIDs, 10, exclusionSet))
+            newThreads.addAll(getOlderContent(followingIDs, 10, exclusionSet))
+            newThreads.addAll(getDeepCutContent(followingIDs, 5, exclusionSet))
+
+            // Deduplicate and shuffle
+            val seen = mutableSetOf<String>()
+            val shuffledNew = newThreads.shuffled().filter { thread ->
+                if (seen.contains(thread.id)) {
+                    false
+                } else {
+                    seen.add(thread.id)
+                    true
+                }
+            }
+
+            if (shuffledNew.isNotEmpty()) {
+                currentFeed.addAll(shuffledNew)
+                currentFeedVideoIDs.addAll(shuffledNew.map { it.parentVideo.id })
+
+                // Trim if over max
+                if (currentFeed.size > maxCachedThreads) {
+                    val toRemove = currentFeed.size - maxCachedThreads
+                    val removed = currentFeed.take(toRemove)
+                    currentFeed = currentFeed.drop(toRemove).toMutableList()
+                    removed.forEach { currentFeedVideoIDs.remove(it.parentVideo.id) }
+                }
+
+                println("✅ DEEP DISCOVERY: Added ${shuffledNew.size} diverse threads")
+            } else {
+                // No new content — recycle existing feed shuffled
+                // Never dead-end. Endless scroll.
+                recycleExistingFeed()
+            }
+
+            return currentFeed
+        } finally {
+            isLoading = false
+        }
+    }
+
+    // MARK: - Endless Scroll Recycle
+
+    /**
+     * When no new content is available, shuffle and re-append existing feed.
+     * Ensures the user never hits a dead-end.
+     * Clears seen exclusion set so recycled content can re-enter discovery queries next time.
+     */
+    private fun recycleExistingFeed() {
+        if (currentFeed.isEmpty()) return
+
+        val recycled = currentFeed.shuffled()
+        currentFeed.addAll(recycled)
+
+        // Clear the exclusion set so next loadMore can find "new" old content
+        currentFeedVideoIDs.clear()
+        currentFeedVideoIDs.addAll(currentFeed.map { it.parentVideo.id })
+
+        // Reset follower rotation to get different creator batches
+        followerRotationIndex = 0
+
+        println("🔄 ENDLESS SCROLL: Recycled ${recycled.size} threads, reset rotation")
+    }
+
+    // MARK: - Thread Creation from Document
+
+    private fun createThreadFromDocument(document: DocumentSnapshot): ThreadData? {
+        val data = document.data ?: return null
+
+        try {
+            val id = data[FirebaseSchema.VideoDocument.ID] as? String ?: document.id
+            val title = data[FirebaseSchema.VideoDocument.TITLE] as? String ?: ""
+            val description = data[FirebaseSchema.VideoDocument.DESCRIPTION] as? String ?: ""
+            val videoURL = data[FirebaseSchema.VideoDocument.VIDEO_URL] as? String ?: ""
+            val thumbnailURL = data[FirebaseSchema.VideoDocument.THUMBNAIL_URL] as? String ?: ""
+            val creatorID = data[FirebaseSchema.VideoDocument.CREATOR_ID] as? String ?: ""
+            val creatorName = data[FirebaseSchema.VideoDocument.CREATOR_NAME] as? String ?: "Unknown"
+            val createdAt = (data[FirebaseSchema.VideoDocument.CREATED_AT] as? Timestamp)?.toDate() ?: Date()
+            val threadID = data[FirebaseSchema.VideoDocument.THREAD_ID] as? String ?: id
+            val conversationDepth = (data[FirebaseSchema.VideoDocument.CONVERSATION_DEPTH] as? Long)?.toInt() ?: 0
+
+            val viewCount = (data[FirebaseSchema.VideoDocument.VIEW_COUNT] as? Long)?.toInt() ?: 0
+            val hypeCount = (data[FirebaseSchema.VideoDocument.HYPE_COUNT] as? Long)?.toInt() ?: 0
+            val coolCount = (data[FirebaseSchema.VideoDocument.COOL_COUNT] as? Long)?.toInt() ?: 0
+            val replyCount = (data[FirebaseSchema.VideoDocument.REPLY_COUNT] as? Long)?.toInt() ?: 0
+            val shareCount = (data[FirebaseSchema.VideoDocument.SHARE_COUNT] as? Long)?.toInt() ?: 0
+            val lastEngagementAt = (data[FirebaseSchema.VideoDocument.LAST_ENGAGEMENT_AT] as? Timestamp)?.toDate()
+
+            val duration = data[FirebaseSchema.VideoDocument.DURATION] as? Double ?: 0.0
+            val aspectRatio = data[FirebaseSchema.VideoDocument.ASPECT_RATIO] as? Double ?: (9.0 / 16.0)
+            val fileSize = data[FirebaseSchema.VideoDocument.FILE_SIZE] as? Long ?: 0L
+
+            @Suppress("UNCHECKED_CAST")
+            val hashtags = (data[FirebaseSchema.VideoDocument.HASHTAGS] as? List<String>)?.map { it.lowercase() } ?: emptyList()
+
+            val temperatureStr = data[FirebaseSchema.VideoDocument.TEMPERATURE] as? String ?: "WARM"
+            val temperature = try { Temperature.valueOf(temperatureStr.uppercase()) } catch (_: Exception) { Temperature.WARM }
+
+            val contentTypeStr = data[FirebaseSchema.VideoDocument.CONTENT_TYPE] as? String ?: "THREAD"
+            val contentType = try { ContentType.valueOf(contentTypeStr.uppercase()) } catch (_: Exception) { ContentType.THREAD }
+
+            val total = hypeCount + coolCount
+            val engagementRatio = if (total > 0) hypeCount.toDouble() / total else 0.5
+
+            val parentVideo = CoreVideoMetadata(
+                id = id,
+                title = title,
+                description = description,
+                videoURL = videoURL,
+                thumbnailURL = thumbnailURL,
+                creatorID = creatorID,
+                creatorName = creatorName,
+                createdAt = createdAt,
+                hashtags = hashtags,
+                threadID = threadID,
+                replyToVideoID = data[FirebaseSchema.VideoDocument.REPLY_TO_VIDEO_ID] as? String,
+                conversationDepth = conversationDepth,
+                viewCount = viewCount,
+                hypeCount = hypeCount,
+                coolCount = coolCount,
+                replyCount = replyCount,
+                shareCount = shareCount,
+                lastEngagementAt = lastEngagementAt,
+                duration = duration,
+                aspectRatio = aspectRatio,
+                fileSize = fileSize,
+                contentType = contentType,
+                temperature = temperature,
+                qualityScore = (data[FirebaseSchema.VideoDocument.QUALITY_SCORE] as? Long)?.toInt() ?: 50,
+                engagementRatio = engagementRatio,
+                velocityScore = data[FirebaseSchema.VideoDocument.VELOCITY_SCORE] as? Double ?: 0.0,
+                trendingScore = data[FirebaseSchema.VideoDocument.TRENDING_SCORE] as? Double ?: 0.0,
+                discoverabilityScore = data[FirebaseSchema.VideoDocument.DISCOVERABILITY_SCORE] as? Double ?: 0.5,
+                isPromoted = data[FirebaseSchema.VideoDocument.IS_PROMOTED] as? Boolean ?: false,
+                isProcessing = data["isProcessing"] as? Boolean ?: false,
+                isDeleted = data["isDeleted"] as? Boolean ?: false
+            )
+
+            return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())
+
+        } catch (e: Exception) {
+            println("⚠️ HOME FEED: Failed to parse document ${document.id} — ${e.message}")
+            return null
+        }
+    }
+
+    // MARK: - Load Thread Children
+
+    suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
+        return try {
+            val snapshot = db.collection(FirebaseSchema.Collections.VIDEOS)
+                .whereEqualTo(FirebaseSchema.VideoDocument.THREAD_ID, threadID)
+                .whereGreaterThan(FirebaseSchema.VideoDocument.CONVERSATION_DEPTH, 0)
+                .orderBy(FirebaseSchema.VideoDocument.CONVERSATION_DEPTH, Query.Direction.ASCENDING)
+                .orderBy(FirebaseSchema.VideoDocument.CREATED_AT, Query.Direction.ASCENDING)
+                .limit(50)
+                .get()
+                .await()
+
+            val children = snapshot.documents.mapNotNull { doc ->
+                val thread = createThreadFromDocument(doc)
+                thread?.parentVideo // Reuse the same parser, extract video
+            }
+
+            // Cache for preloading
+            childrenCache[threadID] = children
+            println("✅ HOME FEED: Loaded ${children.size} children for thread $threadID")
+            children
+        } catch (e: Exception) {
+            println("❌ HOME FEED: Failed to load children for $threadID — ${e.message}")
+            emptyList()
+        }
+    }
+
+    // MARK: - Children Preloading
+
+    fun getCachedChildren(threadID: String): List<CoreVideoMetadata>? {
+        return childrenCache[threadID]
+    }
+
+    suspend fun preloadChildrenAround(currentIndex: Int, threads: List<ThreadData>) {
+        val range = maxOf(0, currentIndex - 1)..minOf(threads.size - 1, currentIndex + 2)
+        for (i in range) {
+            val thread = threads[i]
+            if (!childrenCache.containsKey(thread.id) && thread.parentVideo.replyCount > 0) {
+                try {
+                    loadThreadChildren(thread.id)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // MARK: - Following IDs with Caching
+
+    private suspend fun getCachedFollowingIDs(userID: String): List<String> {
+        val now = System.currentTimeMillis()
+        if (cachedFollowingIDs.isNotEmpty() && (now - followingIDsCacheTime) < followingCacheExpiration) {
+            return cachedFollowingIDs
+        }
+
+        val followingIDs = userService.getFollowingIDs(userID)
+        cachedFollowingIDs = followingIDs
+        followingIDsCacheTime = now
+        return followingIDs
+    }
+
+    fun getFollowingCount(): Int = cachedFollowingIDs.size
+
+    // MARK: - Feed State
+
+    fun shouldLoadMore(currentIndex: Int): Boolean {
+        val remaining = currentFeed.size - currentIndex
+        return remaining <= triggerLoadThreshold && !isLoading
+    }
+
+    fun getCurrentFeed(): List<ThreadData> = currentFeed.toList()
+
+    fun clearFeed() {
+        currentFeed.clear()
+        currentFeedVideoIDs.clear()
+        hasMoreContent = true
+        followerRotationIndex = 0
+        childrenCache.clear()
+    }
+
+    // MARK: - View History Tracking
+
+    fun markVideoSeen(videoID: String) {
+        viewHistory?.markVideoSeen(videoID)
+    }
 
     fun saveCurrentPosition(itemIndex: Int, stitchIndex: Int, threadID: String?) {
         viewHistory?.saveFeedPosition(itemIndex, stitchIndex, threadID)
@@ -136,752 +486,4 @@ class HomeFeedService(
     fun saveCurrentFeed(threads: List<ThreadData>) {
         viewHistory?.saveLastSessionFeed(threads)
     }
-
-    fun clearSessionData() {
-        viewHistory?.clearFeedPosition()
-        viewHistory?.clearLastSession()
-    }
-
-    // MARK: - Video View Tracking
-
-    fun markVideoSeen(videoID: String) {
-        viewHistory?.markVideoSeen(videoID)
-    }
-
-    fun markVideosSeen(videoIDs: List<String>) {
-        viewHistory?.markVideosSeen(videoIDs)
-    }
-
-    // MARK: - DEEP DISCOVERY - Primary Feed Loading
-
-    suspend fun loadFeed(userID: String, limit: Int = 40): List<ThreadData> {
-        // FAST PATH: Return cached feed immediately if available
-        if (currentFeed.isNotEmpty()) {
-            println("âš¡ INSTANT FEED: Returning ${currentFeed.size} cached threads")
-            return currentFeed.toList()
-        }
-
-        // FAST LOAD: Get content quickly first, then optimize in background
-        return loadFeedFast(userID, limit)
-    }
-
-    // Fast initial load - single query, no time splits
-    private suspend fun loadFeedFast(userID: String, limit: Int): List<ThreadData> {
-        _isLoading.value = true
-
-        try {
-            println("ðŸš€ FAST FEED: Loading feed quickly for user $userID")
-
-            val followingIDs = getCachedFollowingIDs(userID)
-            if (followingIDs.isEmpty()) {
-                println("ðŸš€ FAST FEED: No following, loading discovery")
-                return loadDiscoveryFeed(limit)
-            }
-
-            allFollowerIDs = followingIDs
-            val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
-
-            // Single fast query - get recent content from followed users
-            val db = FirebaseFirestore.getInstance("stitchfin")
-            val threads = mutableListOf<ThreadData>()
-
-            // Query in batches of 10 (Firestore 'in' limit)
-            val batches = followingIDs.chunked(10)
-
-            // Use parallel queries for speed
-            coroutineScope {
-                val deferredResults = batches.map { batch ->
-                    async {
-                        try {
-                            db.collection("videos")
-                                .whereIn("creatorID", batch)
-                                .whereEqualTo("conversationDepth", 0)
-                                .orderBy("createdAt", Query.Direction.DESCENDING)
-                                .limit((limit / batches.size + 5).toLong())
-                                .get()
-                                .await()
-                        } catch (e: Exception) {
-                            println("âš ï¸ FAST FEED: Batch query failed - ${e.message}")
-                            null
-                        }
-                    }
-                }
-
-                // Collect results
-                deferredResults.forEach { deferred ->
-                    deferred.await()?.documents?.forEach { doc ->
-                        val videoID = doc.getString("id") ?: doc.id
-                        if (videoID !in recentlySeenIDs) {
-                            createParentThreadFromDocument(doc)?.let { threads.add(it) }
-                        }
-                    }
-                }
-            }
-
-            // If no content from following, fallback to discovery
-            if (threads.isEmpty()) {
-                println("ðŸš€ FAST FEED: No content from following, using discovery")
-                return loadDiscoveryFeed(limit)
-            }
-
-            // Shuffle for variety
-            val shuffled = threads.shuffled().take(limit)
-
-            // Update cache
-            currentFeed.clear()
-            currentFeed.addAll(shuffled)
-            currentFeedVideoIDs.clear()
-            currentFeedVideoIDs.addAll(shuffled.map { it.parentVideo.id })
-
-            println("âœ… FAST FEED: Loaded ${shuffled.size} threads")
-            return shuffled
-
-        } catch (e: Exception) {
-            println("âŒ FAST FEED ERROR: ${e.message}")
-            return loadDiscoveryFeed(limit)
-        } finally {
-            _isLoading.value = false
-        }
-    }
-
-    suspend fun loadFeedWithDeepDiscovery(userID: String, limit: Int = 40): List<ThreadData> {
-        _isLoading.value = true
-
-        try {
-            println("ðŸ” DEEP DISCOVERY: Loading diverse feed for user $userID")
-
-            val followingIDs = getCachedFollowingIDs(userID)
-            if (followingIDs.isEmpty()) {
-                println("ðŸ” DEEP DISCOVERY: No following found, loading discovery feed")
-                return loadDiscoveryFeed(limit)
-            }
-
-            allFollowerIDs = followingIDs
-            println("ðŸ” DEEP DISCOVERY: Found ${followingIDs.size} following users")
-
-            val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
-            println("ðŸ” DEEP DISCOVERY: Excluding ${recentlySeenIDs.size} recently seen videos")
-
-            val allThreads = mutableListOf<ThreadData>()
-
-            // 40% recent content (last 24 hours)
-            val recentThreads = getRecentContent(
-                followingIDs = followingIDs,
-                limit = (limit * 0.4).toInt(),
-                excludeVideoIDs = recentlySeenIDs
-            )
-            allThreads.addAll(recentThreads)
-            println("ðŸ” DEEP DISCOVERY: Loaded ${recentThreads.size} recent threads")
-
-            // 30% medium-old content (1-7 days)
-            val mediumOldThreads = getMediumOldContent(
-                followingIDs = followingIDs,
-                limit = (limit * 0.3).toInt(),
-                excludeVideoIDs = recentlySeenIDs
-            )
-            allThreads.addAll(mediumOldThreads)
-            println("ðŸ” DEEP DISCOVERY: Loaded ${mediumOldThreads.size} medium-old threads")
-
-            // 20% older content (7-30 days)
-            val olderThreads = getOlderContent(
-                followingIDs = followingIDs,
-                limit = (limit * 0.2).toInt(),
-                excludeVideoIDs = recentlySeenIDs
-            )
-            allThreads.addAll(olderThreads)
-            println("ðŸ” DEEP DISCOVERY: Loaded ${olderThreads.size} older threads")
-
-            // 10% deep cuts (30+ days)
-            val deepCutThreads = getDeepCutContent(
-                followingIDs = followingIDs,
-                limit = (limit * 0.1).toInt(),
-                excludeVideoIDs = recentlySeenIDs
-            )
-            allThreads.addAll(deepCutThreads)
-            println("ðŸ” DEEP DISCOVERY: Loaded ${deepCutThreads.size} deep cut threads")
-
-            // Deduplicate and shuffle
-            val dedupedThreads = deduplicateThreads(allThreads)
-            val shuffledThreads = shuffleWithVariety(dedupedThreads)
-
-            // FALLBACK: If deep discovery found nothing, use discovery feed
-            if (shuffledThreads.isEmpty()) {
-                println("ðŸ” DEEP DISCOVERY: No content from following, falling back to discovery")
-                val discoveryThreads = loadDiscoveryFeed(limit)
-                currentFeed.clear()
-                currentFeed.addAll(discoveryThreads)
-                currentFeedVideoIDs.clear()
-                currentFeedVideoIDs.addAll(discoveryThreads.map { it.parentVideo.id })
-
-                _feedStats.value = _feedStats.value.copy(
-                    totalThreadsLoaded = currentFeed.size,
-                    lastRefreshTime = Date()
-                )
-
-                println("âœ… DEEP DISCOVERY: Fallback loaded ${discoveryThreads.size} discovery threads")
-                return discoveryThreads
-            }
-
-            // Update cache
-            currentFeed.clear()
-            currentFeed.addAll(shuffledThreads)
-            currentFeedVideoIDs.clear()
-            currentFeedVideoIDs.addAll(shuffledThreads.map { it.parentVideo.id })
-
-            _feedStats.value = _feedStats.value.copy(
-                totalThreadsLoaded = currentFeed.size,
-                lastRefreshTime = Date()
-            )
-
-            println("âœ… DEEP DISCOVERY: Feed loaded with ${shuffledThreads.size} diverse threads")
-            return shuffledThreads
-
-        } catch (e: Exception) {
-            println("âŒ DEEP DISCOVERY: Error - ${e.message}")
-            e.printStackTrace()
-
-            // Fallback to discovery on error
-            println("ðŸ” DEEP DISCOVERY: Error occurred, falling back to discovery")
-            return loadDiscoveryFeed(limit)
-        } finally {
-            _isLoading.value = false
-        }
-    }
-
-    // MARK: - Time-Based Content Loading
-
-    private suspend fun getRecentContent(
-        followingIDs: List<String>,
-        limit: Int,
-        excludeVideoIDs: Set<String>
-    ): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        val oneDayAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -1)
-        }.time
-
-        // Get content from rotated subset of followers
-        val batchFollowers = getRotatedFollowerBatch(followingIDs, followersPerBatch)
-
-        for (chunk in batchFollowers.chunked(10)) {
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("creatorID", chunk)
-                    .whereEqualTo("conversationDepth", 0)
-                    .whereGreaterThan("createdAt", oneDayAgo)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
-                    .limit(limit.toLong())
-                    .get()
-                    .await()
-
-                for (document in snapshot.documents) {
-                    val thread = createParentThreadFromDocument(document)
-                    if (thread != null && !excludeVideoIDs.contains(thread.parentVideo.id)) {
-                        threads.add(thread)
-                    }
-                }
-            } catch (e: Exception) {
-                println("âŒ RECENT CONTENT: Error - ${e.message}")
-            }
-        }
-
-        return threads.take(limit)
-    }
-
-    private suspend fun getMediumOldContent(
-        followingIDs: List<String>,
-        limit: Int,
-        excludeVideoIDs: Set<String>
-    ): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        val sevenDaysAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -7)
-        }.time
-
-        val oneDayAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -1)
-        }.time
-
-        val batchFollowers = getRotatedFollowerBatch(followingIDs, followersPerBatch)
-
-        for (chunk in batchFollowers.chunked(10)) {
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("creatorID", chunk)
-                    .whereEqualTo("conversationDepth", 0)
-                    .whereGreaterThan("createdAt", sevenDaysAgo)
-                    .whereLessThan("createdAt", oneDayAgo)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
-                    .limit(limit.toLong())
-                    .get()
-                    .await()
-
-                for (document in snapshot.documents) {
-                    val thread = createParentThreadFromDocument(document)
-                    if (thread != null && !excludeVideoIDs.contains(thread.parentVideo.id)) {
-                        threads.add(thread)
-                    }
-                }
-            } catch (e: Exception) {
-                println("âŒ MEDIUM OLD CONTENT: Error - ${e.message}")
-            }
-        }
-
-        return threads.shuffled().take(limit)
-    }
-
-    private suspend fun getOlderContent(
-        followingIDs: List<String>,
-        limit: Int,
-        excludeVideoIDs: Set<String>
-    ): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        val thirtyDaysAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -30)
-        }.time
-
-        val sevenDaysAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -7)
-        }.time
-
-        val batchFollowers = getRotatedFollowerBatch(followingIDs, followersPerBatch)
-
-        for (chunk in batchFollowers.chunked(10)) {
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("creatorID", chunk)
-                    .whereEqualTo("conversationDepth", 0)
-                    .whereGreaterThan("createdAt", thirtyDaysAgo)
-                    .whereLessThan("createdAt", sevenDaysAgo)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
-                    .limit(limit.toLong())
-                    .get()
-                    .await()
-
-                for (document in snapshot.documents) {
-                    val thread = createParentThreadFromDocument(document)
-                    if (thread != null && !excludeVideoIDs.contains(thread.parentVideo.id)) {
-                        threads.add(thread)
-                    }
-                }
-            } catch (e: Exception) {
-                println("âŒ OLDER CONTENT: Error - ${e.message}")
-            }
-        }
-
-        return threads.shuffled().take(limit)
-    }
-
-    private suspend fun getDeepCutContent(
-        followingIDs: List<String>,
-        limit: Int,
-        excludeVideoIDs: Set<String>
-    ): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        val thirtyDaysAgo = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -30)
-        }.time
-
-        val batchFollowers = getRotatedFollowerBatch(followingIDs, followersPerBatch)
-
-        for (chunk in batchFollowers.chunked(10)) {
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("creatorID", chunk)
-                    .whereEqualTo("conversationDepth", 0)
-                    .whereLessThan("createdAt", thirtyDaysAgo)
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
-                    .limit(limit.toLong())
-                    .get()
-                    .await()
-
-                for (document in snapshot.documents) {
-                    val thread = createParentThreadFromDocument(document)
-                    if (thread != null && !excludeVideoIDs.contains(thread.parentVideo.id)) {
-                        threads.add(thread)
-                    }
-                }
-            } catch (e: Exception) {
-                println("âŒ DEEP CUT CONTENT: Error - ${e.message}")
-            }
-        }
-
-        return threads.shuffled().take(limit)
-    }
-
-    // MARK: - Discovery Feed (for users not following anyone)
-
-    private suspend fun loadDiscoveryFeed(limit: Int): List<ThreadData> {
-        println("ðŸ” DISCOVERY FALLBACK: Using VideoServiceImpl")
-
-        return try {
-            // Use VideoServiceImpl which has working queries
-            val videos = videoService.getDiscoveryVideos(limit)
-            println("ðŸ” DISCOVERY FALLBACK: Got ${videos.size} videos from VideoServiceImpl")
-
-            if (videos.isEmpty()) {
-                println("ðŸ” DISCOVERY FALLBACK: No videos, trying personalized")
-                val personalizedVideos = videoService.getPersonalizedVideos("", limit)
-                println("ðŸ” DISCOVERY FALLBACK: Got ${personalizedVideos.size} personalized videos")
-                return personalizedVideos.map { ThreadData.fromVideo(it) }
-            }
-
-            videos.map { ThreadData.fromVideo(it) }
-        } catch (e: Exception) {
-            println("âŒ DISCOVERY FALLBACK ERROR: ${e.message}")
-            e.printStackTrace()
-
-            // Last resort - direct Firebase query
-            loadDiscoveryFeedDirect(limit)
-        }
-    }
-
-    private suspend fun loadDiscoveryFeedDirect(limit: Int): List<ThreadData> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val threads = mutableListOf<ThreadData>()
-
-        try {
-            println("ðŸ” DISCOVERY DIRECT: Querying Firebase directly")
-
-            // Simple query without composite index requirement
-            val snapshot = db.collection("videos")
-                .limit(limit.toLong())
-                .get()
-                .await()
-
-            println("ðŸ” DISCOVERY DIRECT: Got ${snapshot.documents.size} documents")
-
-            for (document in snapshot.documents) {
-                val data = document.data ?: continue
-                val depth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
-                if (depth == 0) {
-                    createParentThreadFromDocument(document)?.let { threads.add(it) }
-                }
-            }
-
-            println("ðŸ” DISCOVERY DIRECT: Filtered to ${threads.size} parent threads")
-        } catch (e: Exception) {
-            println("âŒ DISCOVERY DIRECT ERROR: ${e.message}")
-            e.printStackTrace()
-        }
-
-        return threads
-    }
-
-    // MARK: - Thread Creation
-
-    private fun createParentThreadFromDocument(document: DocumentSnapshot): ThreadData? {
-        val data = document.data ?: return null
-
-        val id = data["id"] as? String ?: document.id
-        val title = data["title"] as? String ?: ""
-        val videoURL = data["videoURL"] as? String ?: ""
-        val thumbnailURL = data["thumbnailURL"] as? String ?: ""
-        val creatorID = data["creatorID"] as? String ?: ""
-        val creatorName = data["creatorName"] as? String ?: "Unknown"
-        val createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
-        val threadID = data["threadID"] as? String ?: id
-        val conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
-
-        val viewCount = (data["viewCount"] as? Long)?.toInt() ?: 0
-        val hypeCount = (data["hypeCount"] as? Long)?.toInt() ?: 0
-        val coolCount = (data["coolCount"] as? Long)?.toInt() ?: 0
-        val replyCount = (data["replyCount"] as? Long)?.toInt() ?: 0
-        val shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0
-
-        val duration = (data["duration"] as? Double) ?: 0.0
-        val aspectRatio = (data["aspectRatio"] as? Double) ?: (9.0 / 16.0)
-        val fileSize = (data["fileSize"] as? Long)?.toInt() ?: 0
-
-        val total = hypeCount + coolCount
-        val engagementRatio = if (total > 0) hypeCount.toDouble() / total else 0.5
-
-        val parentVideo = CoreVideoMetadata(
-            id = id,
-            title = title,
-            description = data["description"] as? String ?: "",
-            videoURL = videoURL,
-            thumbnailURL = thumbnailURL,
-            creatorID = creatorID,
-            creatorName = creatorName,
-            hashtags = emptyList(),
-            createdAt = createdAt,
-            threadID = threadID,
-            replyToVideoID = null,
-            conversationDepth = conversationDepth,
-            viewCount = viewCount,
-            hypeCount = hypeCount,
-            coolCount = coolCount,
-            replyCount = replyCount,
-            shareCount = shareCount,
-            lastEngagementAt = null,
-            duration = duration,
-            aspectRatio = aspectRatio,
-            fileSize = fileSize.toLong(),
-            contentType = ContentType.THREAD,
-            temperature = Temperature.WARM,
-            qualityScore = 50,
-            engagementRatio = engagementRatio,
-            velocityScore = 0.0,
-            trendingScore = 0.0,
-            discoverabilityScore = 0.5,
-            isPromoted = false,
-            isProcessing = false,
-            isDeleted = false
-        )
-
-        return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())
-    }
-
-    // MARK: - Helper Methods
-
-    private fun getRotatedFollowerBatch(followingIDs: List<String>, batchSize: Int): List<String> {
-        if (followingIDs.isEmpty()) return emptyList()
-
-        val startIndex = followerRotationIndex % followingIDs.size
-        val batch = mutableListOf<String>()
-
-        for (i in 0 until batchSize.coerceAtMost(followingIDs.size)) {
-            val index = (startIndex + i) % followingIDs.size
-            batch.add(followingIDs[index])
-        }
-
-        followerRotationIndex += batchSize
-        return batch
-    }
-
-    private fun deduplicateThreads(threads: List<ThreadData>): List<ThreadData> {
-        val seen = mutableSetOf<String>()
-        return threads.filter { thread ->
-            val isNew = !seen.contains(thread.id)
-            if (isNew) seen.add(thread.id)
-            isNew
-        }
-    }
-
-    private fun shuffleWithVariety(threads: List<ThreadData>): List<ThreadData> {
-        // Group by creator
-        val byCreator = threads.groupBy { it.parentVideo.creatorID }
-        val result = mutableListOf<ThreadData>()
-        val used = mutableSetOf<String>()
-
-        // Interleave creators for variety
-        var addedThisRound = true
-        while (addedThisRound && result.size < threads.size) {
-            addedThisRound = false
-            for ((_, creatorThreads) in byCreator) {
-                val nextThread = creatorThreads.firstOrNull { !used.contains(it.id) }
-                if (nextThread != null) {
-                    result.add(nextThread)
-                    used.add(nextThread.id)
-                    addedThisRound = true
-                }
-            }
-        }
-
-        return result
-    }
-
-    suspend fun getCachedFollowingIDs(userID: String): List<String> {
-        val now = System.currentTimeMillis()
-
-        if (cachedFollowingIDs.isNotEmpty() &&
-            (now - followingIDsCacheTime) < followingCacheExpiration) {
-            return cachedFollowingIDs
-        }
-
-        return try {
-            val followingIDs = userService.getFollowingIDs(userID)
-            cachedFollowingIDs = followingIDs
-            followingIDsCacheTime = now
-            followingIDs
-        } catch (e: Exception) {
-            println("âŒ FOLLOWING CACHE: Error - ${e.message}")
-            emptyList()
-        }
-    }
-
-    fun getFollowingCount(): Int {
-        return cachedFollowingIDs.size
-    }
-
-    // MARK: - Load More
-
-    suspend fun loadMoreContent(userID: String): List<ThreadData> {
-        if (!hasMoreContent || _isLoading.value) return currentFeed
-
-        _isLoading.value = true
-
-        try {
-            val followingIDs = getCachedFollowingIDs(userID)
-            if (followingIDs.isEmpty()) return currentFeed
-
-            val exclusionSet = currentFeedVideoIDs.toSet() +
-                    (viewHistory?.getRecentlySeenVideoIDs() ?: emptySet())
-
-            val newThreads = mutableListOf<ThreadData>()
-
-            // Load from various time ranges
-            newThreads.addAll(getRecentContent(followingIDs, 5, exclusionSet))
-            newThreads.addAll(getMediumOldContent(followingIDs, 5, exclusionSet))
-            newThreads.addAll(getOlderContent(followingIDs, 5, exclusionSet))
-            newThreads.addAll(getDeepCutContent(followingIDs, 5, exclusionSet))
-
-            val dedupedNew = deduplicateThreads(newThreads)
-            val shuffledNew = dedupedNew.shuffled()
-
-            if (shuffledNew.isNotEmpty()) {
-                currentFeed.addAll(shuffledNew)
-                currentFeedVideoIDs.addAll(shuffledNew.map { it.parentVideo.id })
-
-                _feedStats.value = _feedStats.value.copy(totalThreadsLoaded = currentFeed.size)
-
-                // Trim if too large
-                if (currentFeed.size > maxCachedThreads) {
-                    val threadsToRemove = currentFeed.size - maxCachedThreads
-                    repeat(threadsToRemove) {
-                        val removed = currentFeed.removeAt(0)
-                        currentFeedVideoIDs.remove(removed.parentVideo.id)
-                    }
-                }
-
-                println("âœ… DEEP DISCOVERY: Added ${shuffledNew.size} diverse threads")
-            } else {
-                hasMoreContent = false
-            }
-
-            return currentFeed
-        } finally {
-            _isLoading.value = false
-        }
-    }
-
-    // MARK: - Thread Children
-
-    suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
-        val db = FirebaseFirestore.getInstance("stitchfin")
-        val children = mutableListOf<CoreVideoMetadata>()
-
-        try {
-            val snapshot = db.collection("videos")
-                .whereEqualTo("threadID", threadID)
-                .whereGreaterThan("conversationDepth", 0)
-                .orderBy("conversationDepth", Query.Direction.ASCENDING)
-                .orderBy("createdAt", Query.Direction.ASCENDING)
-                .limit(50)
-                .get()
-                .await()
-
-            for (document in snapshot.documents) {
-                val data = document.data ?: continue
-
-                val id = data["id"] as? String ?: document.id
-                val title = data["title"] as? String ?: ""
-                val videoURL = data["videoURL"] as? String ?: ""
-                val thumbnailURL = data["thumbnailURL"] as? String ?: ""
-                val creatorID = data["creatorID"] as? String ?: ""
-                val creatorName = data["creatorName"] as? String ?: "Unknown"
-                val createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
-                val conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
-                val replyToVideoID = data["replyToVideoID"] as? String
-
-                val viewCount = (data["viewCount"] as? Long)?.toInt() ?: 0
-                val hypeCount = (data["hypeCount"] as? Long)?.toInt() ?: 0
-                val coolCount = (data["coolCount"] as? Long)?.toInt() ?: 0
-                val replyCount = (data["replyCount"] as? Long)?.toInt() ?: 0
-                val shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0
-
-                val duration = (data["duration"] as? Double) ?: 0.0
-                val aspectRatio = (data["aspectRatio"] as? Double) ?: (9.0 / 16.0)
-                val fileSize = (data["fileSize"] as? Long)?.toInt() ?: 0
-
-                val total = hypeCount + coolCount
-                val engagementRatio = if (total > 0) hypeCount.toDouble() / total else 0.5
-
-                val childVideo = CoreVideoMetadata(
-                    id = id,
-                    title = title,
-                    description = data["description"] as? String ?: "",
-                    videoURL = videoURL,
-                    thumbnailURL = thumbnailURL,
-                    creatorID = creatorID,
-                    creatorName = creatorName,
-                    hashtags = emptyList(),
-                    createdAt = createdAt,
-                    threadID = threadID,
-                    replyToVideoID = replyToVideoID,
-                    conversationDepth = conversationDepth,
-                    viewCount = viewCount,
-                    hypeCount = hypeCount,
-                    coolCount = coolCount,
-                    replyCount = replyCount,
-                    shareCount = shareCount,
-                    lastEngagementAt = null,
-                    duration = duration,
-                    aspectRatio = aspectRatio,
-                    fileSize = fileSize.toLong(),
-                    contentType = ContentType.CHILD,
-                    temperature = Temperature.WARM,
-                    qualityScore = 50,
-                    engagementRatio = engagementRatio,
-                    velocityScore = 0.0,
-                    trendingScore = 0.0,
-                    discoverabilityScore = 0.5,
-                    isPromoted = false,
-                    isProcessing = false,
-                    isDeleted = false
-                )
-
-                children.add(childVideo)
-            }
-
-            println("âœ… HOME FEED: Loaded ${children.size} children for thread $threadID")
-        } catch (e: Exception) {
-            println("âŒ HOME FEED: Error loading children - ${e.message}")
-        }
-
-        return children
-    }
-
-    // MARK: - State Management
-
-    fun getCurrentFeed(): List<ThreadData> = currentFeed.toList()
-
-    fun shouldLoadMore(currentIndex: Int): Boolean {
-        val remainingThreads = currentFeed.size - currentIndex
-        return remainingThreads <= triggerLoadThreshold && hasMoreContent && !_isLoading.value
-    }
-
-    fun clearFeed() {
-        currentFeed.clear()
-        currentFeedVideoIDs.clear()
-        lastDocument = null
-        hasMoreContent = true
-        followerRotationIndex = 0
-        _feedStats.value = FeedStats()
-    }
-
-    fun clearFollowingCache() {
-        cachedFollowingIDs = emptyList()
-        followingIDsCacheTime = 0
-    }
-}
-
-// MARK: - Feed Statistics
-
-data class FeedStats(
-    val totalThreadsLoaded: Int = 0,
-    val lastRefreshTime: Date? = null,
-    val refreshCount: Int = 0
-) {
-    val timeSinceRefresh: Long?
-        get() = lastRefreshTime?.let { System.currentTimeMillis() - it.time }
 }

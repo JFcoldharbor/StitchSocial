@@ -30,6 +30,9 @@ import com.stitchsocial.club.foundation.UserTier
 
 // Coordination imports
 import com.stitchsocial.club.coordination.EngagementCoordinator
+import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.ModalState
+import com.stitchsocial.club.camera.RecordingContextFactory
 
 // ViewModel imports
 import com.stitchsocial.club.viewmodels.EngagementViewModel
@@ -67,6 +70,7 @@ fun FullscreenVideoPlayer(
     engagementCoordinator: EngagementCoordinator? = null,
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
+    navigationCoordinator: NavigationCoordinator? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -77,9 +81,13 @@ fun FullscreenVideoPlayer(
 
     var showControls by remember { mutableStateOf(true) }
 
+    // CRITICAL: Fullscreen containment Box
+    // This Box ensures complete edge-to-edge coverage and blocks all parent content
+    // Required to prevent bleed-through from Discovery/Home feed videos
     Box(
         modifier = modifier
             .fillMaxSize()
+            .fillMaxWidth() // Explicit full width - prevents edge bleed-through
             .background(Color.Black)
     ) {
         // ACTUAL VIDEO PLAYER
@@ -155,7 +163,23 @@ fun FullscreenVideoPlayer(
                         println("FULLSCREEN: Share video ${video.id}")
                     }
                     is OverlayAction.StitchRecording -> {
-                        println("FULLSCREEN: Start stitch recording")
+                        val isOwn = video.creatorID == currentUserID
+                        val ctx = if (isOwn) {
+                            RecordingContextFactory.createContinueThread(
+                                video.id, video.creatorName, video.title
+                            )
+                        } else {
+                            RecordingContextFactory.createStitchToThread(
+                                video.id, video.creatorName, video.title
+                            )
+                        }
+                        navigationCoordinator?.showModal(
+                            ModalState.RECORDING,
+                            mapOf(
+                                "context" to ctx,
+                                "parentVideo" to convertToMetadata(video)
+                            )
+                        )
                     }
                 }
             }

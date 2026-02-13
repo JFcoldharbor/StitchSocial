@@ -10,7 +10,7 @@ import com.stitchsocial.club.engagement.*
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.NotificationService
-import com.stitchsocial.club.services.StitchNotificationType
+import com.stitchsocial.club.services.SocialSignalService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.Date
@@ -30,7 +30,7 @@ class EngagementCoordinator(
 
     // STATE MANAGEMENT
 
-    private fun getOrCreateState(videoID: String, userID: String): VideoEngagementState {
+    fun getOrCreateState(videoID: String, userID: String): VideoEngagementState {
         val key = "$videoID:$userID"
         val existing = engagementStates[key]
         if (existing != null && !existing.isExpired()) {
@@ -74,45 +74,27 @@ class EngagementCoordinator(
         lastEngagementTimes[videoID] = System.currentTimeMillis()
     }
 
-    // NOTIFICATION
+    // NOTIFICATION (via Cloud Functions - matches iOS)
 
-    private suspend fun sendEngagementNotification(
+    private suspend fun sendEngagementNotificationToCreator(
         recipientID: String,
         senderID: String,
         videoID: String,
-        engagementType: String,
-        senderUsername: String,
-        cloutAwarded: Int,
-        isFounderFirstTap: Boolean,
-        isPremiumBoost: Boolean = false
+        videoTitle: String,
+        engagementType: String
     ) {
         try {
             if (recipientID == senderID) return
 
-            val type = if (engagementType == "hype") StitchNotificationType.HYPE else StitchNotificationType.COOL
-
-            val title = when {
-                isFounderFirstTap -> "🎉 FOUNDER BOOST! $senderUsername hyped your video!"
-                isPremiumBoost -> "⚡ PREMIUM BOOST! $senderUsername hyped your video!"
-                engagementType == "hype" -> "$senderUsername hyped your video"
-                else -> "$senderUsername cooled your video"
-            }
-
-            val message = when {
-                cloutAwarded > 0 -> "+$cloutAwarded clout awarded"
-                else -> "New ${if (engagementType == "hype") "hype" else "cool"} on your video"
-            }
-
-            notificationService.createNotification(
-                type = type,
-                title = title,
-                message = message,
-                senderID = senderID,
+            // Cloud Function handles: username lookup, title/message, FCM push
+            notificationService.sendEngagementNotification(
                 recipientID = recipientID,
-                payload = mapOf("videoID" to videoID, "cloutAwarded" to cloutAwarded.toString())
+                videoID = videoID,
+                engagementType = engagementType,
+                videoTitle = videoTitle
             )
         } catch (e: Exception) {
-            println("❌ NOTIFICATION: Error - ${e.message}")
+            println("NOTIFICATION: Error - ${e.message}")
         }
     }
 
@@ -121,7 +103,8 @@ class EngagementCoordinator(
     suspend fun processHype(
         videoID: String,
         userID: String,
-        userTier: UserTier
+        userTier: UserTier,
+        creatorID: String? = null
     ): Boolean = withContext(Dispatchers.Default) {
 
         val lockKey = "$videoID:$userID:hype"
@@ -183,21 +166,29 @@ class EngagementCoordinator(
                 } catch (e: Exception) { }
             }
 
-            // Notification
-            val senderUsername = try {
-                userService.getBasicUserInfo(userID)?.username ?: "Someone"
-            } catch (e: Exception) { "Someone" }
-
-            sendEngagementNotification(
+            // Notification (Cloud Function handles username)
+            sendEngagementNotificationToCreator(
                 recipientID = video.creatorID,
                 senderID = userID,
                 videoID = videoID,
-                engagementType = "hype",
-                senderUsername = senderUsername,
-                cloutAwarded = cloutAwarded,
-                isFounderFirstTap = isFounderFirstTap,
-                isPremiumBoost = isPremiumBoost
+                videoTitle = video.title,
+                engagementType = "hype"
             )
+
+            // 📢 MEGAPHONE: Record notable engagement if Partner+ tier
+            val hypeWeight = EngagementConfig.getVisualHypeMultiplier(userTier)
+            CoroutineScope(Dispatchers.IO).launch {
+                SocialSignalService.shared.recordNotableEngagement(
+                    engagerID = userID,
+                    engagerName = "", // Cloud Function fetches display name
+                    engagerTier = userTier.name.lowercase(),
+                    engagerProfileImageURL = null,
+                    videoID = videoID,
+                    videoCreatorID = video.creatorID,
+                    hypeWeight = hypeWeight,
+                    cloutAwarded = cloutAwarded
+                )
+            }
 
             // Complete state WITH clout
             state.completeHypeEngagement(cloutAwarded)
@@ -217,7 +208,8 @@ class EngagementCoordinator(
     suspend fun processCool(
         videoID: String,
         userID: String,
-        userTier: UserTier
+        userTier: UserTier,
+        creatorID: String? = null
     ): Boolean = withContext(Dispatchers.Default) {
 
         val lockKey = "$videoID:$userID:cool"
@@ -245,20 +237,14 @@ class EngagementCoordinator(
                 return@withContext false
             }
 
-            val senderUsername = try {
-                userService.getBasicUserInfo(userID)?.username ?: "Someone"
-            } catch (e: Exception) { "Someone" }
-
-            sendEngagementNotification(
+            // Notification (Cloud Function handles username)
+            sendEngagementNotificationToCreator(
                 recipientID = video.creatorID,
                 senderID = userID,
                 videoID = videoID,
-                engagementType = "cool",
-                senderUsername = senderUsername,
-                cloutAwarded = 0,
-                isFounderFirstTap = false
+                videoTitle = video.title,
+                engagementType = "cool"
             )
-
             state.completeCoolEngagement()
             recordEngagementTime(videoID)
 

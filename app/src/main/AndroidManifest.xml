@@ -15,9 +15,10 @@
     <!-- VIDEO SURFACE FIX: Wake lock for video playback -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- ✅ FCM PERMISSIONS (NEW) -->
+    <!-- FCM PERMISSIONS -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Camera hardware -->
     <uses-feature
@@ -54,7 +55,18 @@
             </intent-filter>
         </activity>
 
-        <!-- ✅ FCM SERVICE (NEW) -->
+        <!-- FILE PROVIDER: Required for sharing video files via Intent -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- FCM SERVICE -->
         <service
             android:name=".services.FCMService"
             android:exported="false">
@@ -63,17 +75,17 @@
             </intent-filter>
         </service>
 
-        <!-- ✅ FCM DEFAULT NOTIFICATION ICON (Using app icon) -->
+        <!-- FCM DEFAULT NOTIFICATION ICON -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@mipmap/ic_launcher" />
+            android:resource="@drawable/ic_stat_name" />
 
-        <!-- ✅ FCM DEFAULT NOTIFICATION COLOR (Cyan brand color) -->
+        <!-- FCM DEFAULT NOTIFICATION COLOR (Stitch Cyan) -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
-            android:resource="@android:color/holo_blue_light" />
+            android:resource="@color/notification_color" />
 
-        <!-- ✅ FCM DEFAULT NOTIFICATION CHANNEL (NEW) -->
+        <!-- FCM DEFAULT NOTIFICATION CHANNEL -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="stitch_notifications" />

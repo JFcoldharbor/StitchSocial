@@ -3,7 +3,7 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Connects iOS-style buttons to engagement coordinator
- * ✅ FIXED: Works with existing EngagementCalculator signatures
+ * UPDATED: Added getEngagementState(), creatorID param on onHypeTap/onCoolTap
  */
 
 package com.stitchsocial.club.viewmodels
@@ -68,9 +68,14 @@ class EngagementViewModel(
         currentUserID = userID
     }
 
-    // ✅ FIXED: Use EngagementConfig directly for clout calculations
+    // NEW: Get engagement state for a video/user pair (used by buttons for cap checks)
+    fun getEngagementState(videoID: String, userID: String): VideoEngagementState? {
+        return coordinator.getEngagementState(videoID, userID)
+            ?: coordinator.getOrCreateState(videoID, userID)
+    }
+
     val cloutGivenToVideo: Int
-        get() = 0 // Placeholder - tracked in VideoEngagementState if needed
+        get() = 0
 
     fun remainingCloutAllowance(userTier: UserTier): Int {
         val max = EngagementConfig.getMaxCloutPerUserPerVideo(userTier)
@@ -92,7 +97,8 @@ class EngagementViewModel(
         return (state?.totalEngagements ?: 0) == 0
     }
 
-    fun onHypeTap(videoID: String, userTier: UserTier) {
+    // UPDATED: Added creatorID parameter (matches iOS processHype signature)
+    fun onHypeTap(videoID: String, userTier: UserTier, creatorID: String? = null) {
         viewModelScope.launch {
             _isProcessing.value = true
 
@@ -104,13 +110,12 @@ class EngagementViewModel(
                 coordinator.processHype(
                     videoID = videoID,
                     userID = currentUserID,
-                    userTier = userTier
+                    userTier = userTier,
+                    creatorID = creatorID
                 )
 
-                // ✅ FIXED: Use existing calculateCloutReward signature
                 val cloutAwarded = EngagementCalculator.calculateCloutReward(userTier, engagementNumber)
 
-                // ✅ FIXED: Use existing calculateVisualHypeIncrement signature (single param)
                 val isFounderFirstTap = isFirst && (userTier == UserTier.FOUNDER || userTier == UserTier.CO_FOUNDER)
                 val visualIncrement = EngagementCalculator.calculateVisualHypeIncrement(userTier)
 
@@ -141,7 +146,8 @@ class EngagementViewModel(
         }
     }
 
-    fun onCoolTap(videoID: String, userTier: UserTier) {
+    // UPDATED: Added creatorID parameter (matches iOS processCool signature)
+    fun onCoolTap(videoID: String, userTier: UserTier, creatorID: String? = null) {
         viewModelScope.launch {
             _isProcessing.value = true
 
@@ -149,7 +155,8 @@ class EngagementViewModel(
                 coordinator.processCool(
                     videoID = videoID,
                     userID = currentUserID,
-                    userTier = userTier
+                    userTier = userTier,
+                    creatorID = creatorID
                 )
 
                 _lastEngagementFeedback.value = LastEngagementFeedback(
@@ -180,9 +187,8 @@ class EngagementViewModel(
     fun trackView(videoID: String) {
         viewModelScope.launch {
             try {
-                println("👁️ VIEW: Video $videoID viewed by user $currentUserID")
+                println("👁 VIEW: Video $videoID viewed by user $currentUserID")
 
-                // Get current user data for viewer record
                 val userData = try {
                     userService?.getBasicUserInfo(currentUserID)
                 } catch (e: Exception) {
@@ -191,12 +197,11 @@ class EngagementViewModel(
 
                 val userDataMap = mapOf<String, Any>(
                     "displayName" to (userData?.displayName ?: "User"),
-                    "username" to (userData?.displayName ?: ""), // Use displayName as fallback
+                    "username" to (userData?.displayName ?: ""),
                     "profileImageURL" to (userData?.profileImageURL ?: ""),
                     "tier" to (userData?.tier?.name ?: "ROOKIE")
                 )
 
-                // Record view with user data
                 videoService?.recordVideoView(videoID, currentUserID, userDataMap)
             } catch (e: Exception) {
                 println("❌ VIEW TRACKING ERROR: ${e.message}")

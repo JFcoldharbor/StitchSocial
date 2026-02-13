@@ -1,13 +1,9 @@
 /*
- * LeaderboardVideo.kt - HYPE LEADERBOARD VIDEO MODEL
+ * LeaderboardVideo.kt
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 1: Foundation - Discovery Model for Top Videos
- * Dependencies: None (Pure Kotlin data class)
- * Features: Top performing video data for leaderboard section
- *
- * ✅ FIXED: More lenient fromFirestore parsing (doesn't fail on missing createdAt)
- * EXACT PORT: LeaderboardVideo.swift (LeaderboardModels.swift)
+ * Layer 1: Foundation - Hype Leaderboard Video Model
+ * Port of: LeaderboardVideo from RecentUser.swift (LeaderboardModels)
  */
 
 package com.stitchsocial.club.foundation
@@ -15,10 +11,6 @@ package com.stitchsocial.club.foundation
 import com.google.firebase.Timestamp
 import java.util.Date
 
-/**
- * Represents a video in the hype leaderboard
- * Used for "Top Videos" discovery section in NotificationView
- */
 data class LeaderboardVideo(
     val id: String,
     val title: String,
@@ -30,86 +22,35 @@ data class LeaderboardVideo(
     val temperature: String,
     val createdAt: Date
 ) {
-    companion object {
-        /**
-         * Create LeaderboardVideo from Firestore document data
-         * ✅ FIXED: More lenient - uses defaults instead of returning null
-         */
-        fun fromFirestore(id: String, data: Map<String, Any>): LeaderboardVideo? {
-            // Only require title and creatorID - everything else has defaults
-            val title = data["title"] as? String
-            val creatorID = data["creatorID"] as? String
+    val netScore: Int get() = hypeCount - coolCount
 
-            // If we don't have title or creatorID, skip this video
-            if (title.isNullOrBlank() || creatorID.isNullOrBlank()) {
-                println("⚠️ LeaderboardVideo.fromFirestore: Missing title or creatorID for $id")
-                return null
-            }
-
-            val creatorName = data["creatorName"] as? String ?: "Unknown"
-            val thumbnailURL = data["thumbnailURL"] as? String
-            val hypeCount = (data["hypeCount"] as? Long)?.toInt()
-                ?: (data["hypeCount"] as? Int)
-                ?: 0
-            val coolCount = (data["coolCount"] as? Long)?.toInt()
-                ?: (data["coolCount"] as? Int)
-                ?: 0
-            val temperature = data["temperature"] as? String ?: "cool"
-
-            // Handle createdAt more flexibly
-            val createdAt = when (val timestamp = data["createdAt"]) {
-                is Timestamp -> timestamp.toDate()
-                is Date -> timestamp
-                is Long -> Date(timestamp)
-                else -> Date() // Default to now if missing
-            }
-
-            return LeaderboardVideo(
-                id = id,
-                title = title,
-                creatorID = creatorID,
-                creatorName = creatorName,
-                thumbnailURL = thumbnailURL,
-                hypeCount = hypeCount,
-                coolCount = coolCount,
-                temperature = temperature,
-                createdAt = createdAt
-            )
-        }
+    val temperatureEmoji: String get() = when (temperature.lowercase()) {
+        "fire", "blazing" -> "\uD83D\uDD25"
+        "hot" -> "\uD83C\uDF36\uFE0F"
+        "warm" -> "\u2600\uFE0F"
+        "neutral" -> "\u26A1"
+        "cool" -> "\u2744\uFE0F"
+        "cold", "frozen" -> "\uD83E\uDDCA"
+        else -> "\uD83D\uDCCA"
     }
 
-    /**
-     * Calculate net score (hype - cool)
-     */
-    val netScore: Int
-        get() = hypeCount - coolCount
-
-    /**
-     * Get temperature emoji
-     */
-    val temperatureEmoji: String
-        get() = when (temperature.lowercase()) {
-            "frozen" -> "❄️"
-            "cold" -> "🧊"
-            "cool" -> "😎"
-            "warm" -> "🌡️"
-            "hot" -> "🔥"
-            "blazing" -> "🚀"
-            else -> "😎"
-        }
-
-    /**
-     * Format time ago for display
-     */
-    fun formatTimeAgo(): String {
-        val now = Date()
-        val intervalSeconds = (now.time - createdAt.time) / 1000
-
-        return when {
-            intervalSeconds < 60 -> "Just now"
-            intervalSeconds < 3600 -> "${intervalSeconds / 60}m ago"
-            intervalSeconds < 86400 -> "${intervalSeconds / 3600}h ago"
-            else -> "${intervalSeconds / 86400}d ago"
+    companion object {
+        fun fromFirestore(id: String, data: Map<String, Any>): LeaderboardVideo? {
+            return try {
+                LeaderboardVideo(
+                    id = id,
+                    title = data["title"] as? String ?: "",
+                    creatorID = data["creatorID"] as? String ?: "",
+                    creatorName = data["creatorName"] as? String ?: "",
+                    thumbnailURL = data["thumbnailURL"] as? String,
+                    hypeCount = (data["hypeCount"] as? Number)?.toInt() ?: 0,
+                    coolCount = (data["coolCount"] as? Number)?.toInt() ?: 0,
+                    temperature = data["temperature"] as? String ?: "neutral",
+                    createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: Date()
+                )
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 }
