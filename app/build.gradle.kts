@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,29 @@ plugins {
     alias(libs.plugins.google.gms.google.services)
     alias(libs.plugins.google.firebase.crashlytics)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Load local.properties
+// ─────────────────────────────────────────────────────────────────────────────
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.reader().use { localProps.load(it) }
+}
+
+val keystorePath     = localProps["KEYSTORE_PATH"]?.toString() ?: ""
+val keystorePassword = localProps["KEYSTORE_PASSWORD"]?.toString() ?: ""
+val keyAlias         = localProps["KEY_ALIAS"]?.toString() ?: ""
+val keyPassword      = localProps["KEY_PASSWORD"]?.toString() ?: ""
+
+// Resolve the keystore using Gradle's own file() — but only attempt it if
+// the path is non-empty. We catch the exception so a missing/wrong-platform
+// path never blocks the build.
+val resolvedKeystore: File? = runCatching {
+    if (keystorePath.isNotEmpty()) file(keystorePath) else null
+}.getOrNull()
+
+val canSign = resolvedKeystore?.exists() == true
 
 android {
     namespace = "com.stitchsocial.club"
@@ -17,19 +42,17 @@ android {
         versionCode = 20
         versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        vectorDrawables {
-            useSupportLibrary = true
-        }
+        vectorDrawables { useSupportLibrary = true }
     }
 
-    // SIGNING CONFIGURATION
-    signingConfigs {
-        create("release") {
-            storeFile = file("C:\\Users\\james\\stitch-release.keystore")
-            storePassword = "Stitchsocial2026"  // Replace with your actual password
-            keyAlias = "StitchMean"
-            keyPassword = "Stitchsocial2026"    // Replace with your actual password
+    if (canSign) {
+        signingConfigs {
+            create("release") {
+                storeFile     = resolvedKeystore
+                storePassword = keystorePassword
+                keyAlias      = keyAlias
+                keyPassword   = keyPassword
+            }
         }
     }
 
@@ -43,8 +66,9 @@ android {
             isMinifyEnabled = false
             buildConfigField("String", "BUILD_TYPE", "\"release\"")
             buildConfigField("boolean", "DEBUG", "false")
-            // ADD SIGNING CONFIG TO RELEASE
-            signingConfig = signingConfigs.getByName("release")
+            if (canSign) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -59,8 +83,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-
-        // ✅ FIX: Allow experimental Material3 APIs (fixes 9 warnings in ThreadComposer)
         freeCompilerArgs += "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
     }
 
@@ -81,92 +103,70 @@ android {
 }
 
 dependencies {
-    // Core Android
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
-    // Compose BOM - ensures all Compose versions are compatible
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-    // Additional Compose
     implementation("androidx.compose.material:material-icons-extended:1.6.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.navigation:navigation-compose:2.7.6")
 
-    // Coroutines for async operations
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
 
-    // FIXED: Updated Firebase Platform BOM to latest version
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
-
-    // FIXED: Use standard Firebase dependencies (not -ktx versions for better compatibility)
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-crashlytics")
-
-    // FIXED: Add coroutines support for Firebase Tasks
+    implementation("com.google.firebase:firebase-functions")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
-    // Firebase Functions (if needed for backend processing)
-    implementation("com.google.firebase:firebase-functions")
-
-    // Google Play Services (required for Firebase)
     implementation("com.google.android.gms:play-services-auth:21.0.0")
 
-    // Image Loading for profile pictures and thumbnails
+    // Google Play Billing — HypeCoin in-app purchases
+    implementation("com.android.billingclient:billing-ktx:7.0.0")
+
     implementation("io.coil-kt:coil-compose:2.5.0")
 
-    // Video Player for feed
     implementation("androidx.media3:media3-exoplayer:1.3.0")
     implementation("androidx.media3:media3-ui:1.3.0")
     implementation("androidx.media3:media3-common:1.3.0")
 
-    // Camera for video recording
     implementation("androidx.camera:camera-camera2:1.3.1")
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
     implementation("androidx.camera:camera-video:1.3.1")
     implementation("androidx.camera:camera-extensions:1.3.1")
 
-    // Permission handling
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
-
-    // Gesture detection for swipe navigation
     implementation("androidx.compose.foundation:foundation:1.6.1")
-
-    // Date and time utilities
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
-
-    // JSON parsing (if needed for complex data structures)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-
-    // Network status detection
     implementation("androidx.lifecycle:lifecycle-process:2.7.0")
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
 
-    // Testing
     testImplementation(libs.junit)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
     testImplementation("io.mockk:mockk:1.13.9")
-
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.1")
 
-    // Debug tools
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.1")
