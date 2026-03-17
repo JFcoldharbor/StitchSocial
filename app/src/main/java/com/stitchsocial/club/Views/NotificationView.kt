@@ -18,6 +18,7 @@
 
 package com.stitchsocial.club.views
 
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -109,6 +110,7 @@ fun NotificationViewComplete(
             userService = userService,
             engagementCoordinator = engagementCoordinator,
             navigationCoordinator = navigationCoordinator,
+            videoService = videoService,
             context = context
         )
     }
@@ -131,18 +133,23 @@ fun NotificationViewComplete(
 
     // Observe navigation events from ViewModel
     LaunchedEffect(viewModel) {
+        Log.d("NOTIF_NAV", "🔵 Navigation collector STARTED")
         viewModel.navigationEvent.collect { event ->
+            Log.d("NOTIF_NAV", "🔵 Event received: $event")
             when (event) {
                 is NotificationNavigationEvent.NavigateToProfile -> {
+                    Log.d("NOTIF_NAV", "👤 -> Profile: ${event.userId}")
                     onNavigateToProfile(event.userId)
                 }
                 is NotificationNavigationEvent.NavigateToVideo -> {
+                    Log.d("NOTIF_NAV", "-> Thread: ${event.threadId}, target: ${event.videoId}")
                     onShowThreadView(event.threadId ?: event.videoId, event.videoId)
                 }
                 is NotificationNavigationEvent.NavigateToThread -> {
+                    Log.d("NOTIF_NAV", "🧵 -> Thread only: ${event.threadId}")
                     onShowThreadView(event.threadId, null)
                 }
-                NotificationNavigationEvent.None -> { /* Do nothing */ }
+                NotificationNavigationEvent.None -> { }
             }
         }
     }
@@ -462,6 +469,7 @@ fun NotificationViewComplete(
                             followManager = followManager,
                             profileImages = profileImages,
                             onTap = {
+                                Log.d("NOTIF_NAV", "ROW TAPPED: ${notification.type} | id=${notification.id}")
                                 viewModel.onNotificationTapped(notification)
                             },
                             onProfileTap = { senderID ->

@@ -65,6 +65,7 @@ fun HomeFeedView(
     userID: String,
     navigationCoordinator: NavigationCoordinator?,
     isAnnouncementShowing: Boolean = false,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -294,7 +295,8 @@ fun HomeFeedView(
                                                 "parentVideo" to video
                                             )
                                         )
-                                    }
+                                    },
+                                    onShowThreadView = onShowThreadView
                                 )
                             }
                         }
@@ -349,7 +351,8 @@ private fun ThreadVideoCard(
     navigationCoordinator: NavigationCoordinator?,
     pauseAllVideos: () -> Unit,
     onCreatorProfileTap: (String) -> Unit,
-    onStitchTap: (CoreVideoMetadata) -> Unit
+    onStitchTap: (CoreVideoMetadata) -> Unit,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -462,6 +465,10 @@ private fun ThreadVideoCard(
                     when (action) {
                         is OverlayAction.NavigateToProfile -> onCreatorProfileTap(action.userID)
                         is OverlayAction.StitchRecording -> onStitchTap(currentVideo)
+                        is OverlayAction.NavigateToThread -> {
+                            val threadID = currentVideo.threadID ?: currentVideo.id
+                            onShowThreadView(threadID, currentVideo.id)
+                        }
                         else -> {}
                     }
                 }

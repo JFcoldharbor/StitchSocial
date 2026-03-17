@@ -84,10 +84,13 @@ import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.ui.components.ThreadDepthBadge
 import com.stitchsocial.club.ui.components.Thread3DInfoPanel
 import com.stitchsocial.club.views.CardVideoCarouselView
+import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.coordination.EngagementCoordinator
+import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.services.ConversationLaneService
 
 /**
  * ThreadView - Redesigned with proper spacing
@@ -111,9 +114,11 @@ fun ThreadView(
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
     followManager: FollowManager? = null,
+    navigationCoordinator: NavigationCoordinator? = null,
     onTabBarVisibilityChange: ((Boolean) -> Unit)? = null,
     onDismiss: () -> Unit,
     onVideoTap: (CoreVideoMetadata) -> Unit = {},
+    onShowProfileView: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -122,6 +127,7 @@ fun ThreadView(
     // Services
     val createdVideoService = remember { videoService }
     val userService = remember { UserService(context) }
+    val laneService = remember { ConversationLaneService.shared }
 
     val viewModel = remember {
         engagementViewModel ?: EngagementViewModel(
@@ -160,6 +166,8 @@ fun ThreadView(
     var showCarousel by remember { mutableStateOf(false) }
     var carouselVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
     var directReplies by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
+    var laneParticipantIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var currentLaneAnchorID by remember { mutableStateOf<String?>(null) }
     var isPanelExpanded by remember { mutableStateOf(false) }
 
     // Pagination (20 children per page)
@@ -199,37 +207,65 @@ fun ThreadView(
     val brandDark = Color(0xFF191926)
 
     // Helper: Navigate to a stepchild (depth 2+) by walking up the reply chain
-    // Matches iOS navigateToStepchild exactly
+    // Uses ConversationLaneService to resolve the correct lane — matches iOS exactly
     suspend fun navigateToStepchild(targetID: String) {
         try {
             val targetVideo = videoService.getVideoById(targetID) ?: return
             var currentVideo = targetVideo
 
-            // Walk up until we find the depth-1 ancestor
+            // Walk up until we find the depth-1 ancestor (child anchor)
             while (currentVideo.conversationDepth > 1 && currentVideo.replyToVideoID != null) {
                 currentVideo = videoService.getVideoById(currentVideo.replyToVideoID!!) ?: return
             }
 
             // Must be depth 1 to proceed
             if (currentVideo.conversationDepth != 1) return
+            val childAnchor = currentVideo
 
-            // Load that depth-1 video's replies (the conversation)
-            val stepchildren = videoService.getTimestampedReplies(currentVideo.id)
-            val conversationVideos = listOf(currentVideo) + stepchildren
+            // Use lane service to find which lane the target belongs to
+            val lanes = laneService.getLanes(
+                forChildVideoID = childAnchor.id,
+                childCreatorID = childAnchor.creatorID
+            )
 
-            // Verify target is in this conversation
-            if (conversationVideos.none { it.id == targetID }) return
+            val targetCreator = targetVideo.creatorID
+            val matchingLane = lanes.firstOrNull { it.isParticipant(targetCreator) }
 
-            // Open carousel focused on the target
-            selectedVideo = targetVideo
-            carouselVideos = conversationVideos
-            delay(100)
-            showCarousel = true
+            if (matchingLane != null) {
+                // Load full lane messages
+                val messages = laneService.loadLaneMessages(
+                    childVideo = childAnchor,
+                    participant1 = matchingLane.childCreatorID,
+                    participant2 = matchingLane.responderID
+                )
+
+                val conversationVideos = listOf(childAnchor) + messages
+                if (conversationVideos.none { it.id == targetID }) return
+
+                selectedVideo = targetVideo
+                carouselVideos = conversationVideos
+                laneParticipantIDs = matchingLane.participantIDs
+                currentLaneAnchorID = childAnchor.id
+                delay(100)
+                showCarousel = true
+            } else {
+                // Fallback: load all stepchildren (no lane matched)
+                val stepchildren = videoService.getTimestampedReplies(childAnchor.id)
+                val conversationVideos = listOf(childAnchor) + stepchildren
+                if (conversationVideos.none { it.id == targetID }) return
+
+                selectedVideo = targetVideo
+                carouselVideos = conversationVideos
+                laneParticipantIDs = emptySet()
+                currentLaneAnchorID = childAnchor.id
+                delay(100)
+                showCarousel = true
+            }
         } catch (_: Exception) { }
     }
 
     // Helper: Open video matching iOS openVideo() logic
-    // Parent → fullscreen solo, Child → carousel with depth-2 replies
+    // Parent → fullscreen solo, Child → getLanes → carousel with lane nav bar
     fun openVideo(video: CoreVideoMetadata) {
         selectedVideo = video
         val isParent = video.id == parentVideo?.id
@@ -241,25 +277,54 @@ fun ThreadView(
                 showFullscreen = true
             }
         } else {
-            // Child → fetch its depth-2 replies → open carousel
+            // Child → get lanes via ConversationLaneService → open carousel
             scope.launch {
                 try {
-                    val allReplies = videoService.getTimestampedReplies(video.id)
-                    val depth2Replies = allReplies.filter {
-                        it.conversationDepth == video.conversationDepth + 1
-                    }
+                    val lanes = laneService.getLanes(
+                        forChildVideoID = video.id,
+                        childCreatorID = video.creatorID
+                    )
+
+                    // Convert lane first-replies to directReplies for nav bar
+                    val laneFirstReplies = lanes.map { it.firstReply }
+
                     carouselVideos = listOf(video)
-                    directReplies = depth2Replies
+                    directReplies = laneFirstReplies
+                    laneParticipantIDs = emptySet() // No lane selected yet
+                    currentLaneAnchorID = video.id
+
                     delay(100)
                     showCarousel = true
                 } catch (_: Exception) {
                     carouselVideos = listOf(video)
                     directReplies = emptyList()
+                    laneParticipantIDs = emptySet()
                     showCarousel = true
                 }
             }
         }
         onVideoTap(video)
+    }
+
+    // Helper: Load conversation for a selected lane reply (matches iOS loadConversation)
+    fun loadConversation(reply: CoreVideoMetadata) {
+        val childVideo = selectedVideo ?: carouselVideos.firstOrNull() ?: return
+
+        scope.launch {
+            try {
+                val messages = laneService.loadLaneMessages(
+                    childVideo = childVideo,
+                    participant1 = childVideo.creatorID,
+                    participant2 = reply.creatorID
+                )
+
+                carouselVideos = listOf(childVideo) + messages
+                laneParticipantIDs = setOf(childVideo.creatorID, reply.creatorID)
+                currentLaneAnchorID = childVideo.id
+            } catch (_: Exception) {
+                // Keep current state on error
+            }
+        }
     }
 
     // Load thread data - matches iOS loadThreadData() branching
@@ -519,6 +584,7 @@ fun ThreadView(
                     currentUserID = currentUserID,
                     currentUserTier = currentUserTier,
                     directReplies = directReplies.ifEmpty { null },
+                    laneParticipantIDs = laneParticipantIDs,
                     engagementCoordinator = engagementCoordinator,
                     engagementViewModel = viewModel,
                     iconManager = iconMgr,
@@ -527,24 +593,22 @@ fun ThreadView(
                         showCarousel = false
                         carouselVideos = emptyList()
                         directReplies = emptyList()
+                        laneParticipantIDs = emptySet()
+                        currentLaneAnchorID = null
                         selectedVideo = null
                     },
                     onSelectReply = { selectedReply ->
-                        scope.launch {
-                            try {
-                                val childVideo = selectedVideo ?: carouselVideos.firstOrNull()
-                                if (childVideo != null) {
-                                    val allReplies = videoService.getTimestampedReplies(childVideo.id)
-                                    val conversationPartnerID = selectedReply.creatorID
-                                    val conversationMessages = allReplies.filter { message ->
-                                        message.creatorID == conversationPartnerID ||
-                                                message.creatorID == currentUserID
-                                    }
-                                    carouselVideos = listOf(childVideo) + conversationMessages
-                                }
-                            } catch (e: Exception) {
-                                // Keep current state
+                        loadConversation(selectedReply)
+                    },
+                    onAction = { action ->
+                        when (action) {
+                            is OverlayAction.NavigateToProfile -> {
+                                onShowProfileView?.invoke(action.userID)
                             }
+                            is OverlayAction.NavigateToThread -> {
+                                // Already in thread view — no-op
+                            }
+                            else -> { /* Share, StitchRecording handled by overlay */ }
                         }
                     }
                 )
@@ -566,6 +630,7 @@ fun ThreadView(
                     currentUserID = currentUserID,
                     currentUserTier = currentUserTier,
                     directReplies = null,
+                    laneParticipantIDs = emptySet(),
                     engagementCoordinator = engagementCoordinator,
                     engagementViewModel = viewModel,
                     iconManager = iconMgr,
@@ -574,7 +639,15 @@ fun ThreadView(
                         showFullscreen = false
                         selectedVideo = null
                     },
-                    onSelectReply = { }
+                    onSelectReply = { },
+                    onAction = { action ->
+                        when (action) {
+                            is OverlayAction.NavigateToProfile -> {
+                                onShowProfileView?.invoke(action.userID)
+                            }
+                            else -> { }
+                        }
+                    }
                 )
             }
         }

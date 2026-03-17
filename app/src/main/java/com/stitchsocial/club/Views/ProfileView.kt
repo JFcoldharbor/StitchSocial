@@ -61,6 +61,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 
 // Foundation
@@ -253,6 +254,7 @@ fun ProfileView(
     navigationCoordinator: NavigationCoordinator? = null,
     engagementCoordinator: EngagementCoordinator? = null,
     engagementViewModel: EngagementViewModel? = null,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
     onDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -589,7 +591,10 @@ fun ProfileView(
             thumbnailUrl = currentVid.thumbnailURL ?: "",
             duration = (currentVid.duration * 1000).toLong(),
             creatorID = currentVid.creatorID,
-            creatorName = currentVid.creatorName ?: "Unknown"
+            creatorName = currentVid.creatorName ?: "Unknown",
+            threadID = currentVid.threadID,
+            conversationDepth = currentVid.conversationDepth,
+            replyCount = currentVid.replyCount
         )
 
         // Peek videos for left/right edges
@@ -627,6 +632,17 @@ fun ProfileView(
                     engagementViewModel = viewModel,
                     iconManager = iconManager,
                     navigationCoordinator = navigationCoordinator,
+                    onShowThreadView = { threadID, targetVideoID ->
+                        // Navigate FIRST, then dismiss player after delay
+                        // Setting showingVideoPlayer=false immediately would destroy this
+                        // composable before onShowThreadView propagates to MainActivity
+                        onShowThreadView(threadID, targetVideoID)
+                        scope.launch {
+                            delay(100)
+                            showingVideoPlayer = false
+                            selectedVideo = null
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
                     onDismiss = {
                         showingVideoPlayer = false

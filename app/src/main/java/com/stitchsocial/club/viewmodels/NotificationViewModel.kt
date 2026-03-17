@@ -26,6 +26,7 @@ import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.StitchNotification
 import com.stitchsocial.club.services.StitchNotificationType
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -49,6 +50,7 @@ class NotificationViewModel(
     private val userService: UserService,
     private val engagementCoordinator: EngagementCoordinator,
     private val navigationCoordinator: NavigationCoordinator,
+    private val videoService: VideoServiceImpl,
     private val context: Context
 ) : ViewModel() {
 
@@ -85,8 +87,8 @@ class NotificationViewModel(
     // MARK: - Navigation Events
 
     private val _navigationEvent = MutableSharedFlow<NotificationNavigationEvent>(
-        replay = 0,
-        extraBufferCapacity = 1
+        replay = 1,
+        extraBufferCapacity = 5
     )
     val navigationEvent: SharedFlow<NotificationNavigationEvent> = _navigationEvent.asSharedFlow()
 
@@ -94,6 +96,11 @@ class NotificationViewModel(
 
     private val _profileImages = MutableStateFlow<Map<String, String>>(emptyMap())
     val profileImages: StateFlow<Map<String, String>> = _profileImages.asStateFlow()
+
+    // MARK: - ThreadID Resolution Cache
+    // Caches videoID → threadID lookups to avoid repeat Firestore reads
+    // when user taps same notification multiple times
+    private val threadIDCache = mutableMapOf<String, String>()
 
     // MARK: - Initialization
 
@@ -199,9 +206,10 @@ class NotificationViewModel(
             actionData = buildMap {
                 put("userId", firebaseNotification.senderID)
                 put("senderID", firebaseNotification.senderID)
-                // Copy all payload data
+                // Copy all payload data — toString() handles non-String values
+                // (e.g. batchCount stored as Long in Firestore)
                 firebaseNotification.payload.forEach { (key, value) ->
-                    put(key, value)
+                    put(key, value.toString())
                 }
             }
         )
@@ -269,92 +277,109 @@ class NotificationViewModel(
 
     /**
      * Handle notification tap with proper navigation
+     * Matches iOS handleNotificationTap exactly:
+     * 1. Follow -> profile
+     * 2. Video-related -> try threadID from payload, fallback to video fetch
+     * 3. Milestone -> video if available
+     *
+     * CACHING: threadID lookups cached in threadIDCache to avoid
+     * repeat Firestore reads on re-taps of same notification.
      */
     fun onNotificationTapped(notification: NotificationItem) {
         viewModelScope.launch {
-            Log.d(TAG, "NOTIF_DEBUG tapped: ${notification.title}")
-            Log.d(TAG, "NOTIF_DEBUG type: ${notification.type}")
-            Log.d(TAG, "NOTIF_DEBUG actionData keys: ${notification.actionData.keys}")
-            notification.actionData.forEach { (key, value) ->
-                Log.d(TAG, "NOTIF_DEBUG   $key = $value")
-            }
+            Log.d(TAG, "NOTIF tapped: ${notification.type} | keys: ${notification.actionData.keys}")
 
             // Mark as read
             markAsRead(notification.id)
 
-            // Handle navigation based on notification type
-            when (notification.type) {
-                NotificationType.HYPE_RECEIVED,
-                NotificationType.REPLY_RECEIVED,
-                NotificationType.SHARE_RECEIVED -> {
-                    // Try to get videoID from payload
-                    val videoId = notification.actionData["videoID"] as? String
-                        ?: notification.actionData["videoId"] as? String
-                    val threadId = notification.actionData["threadID"] as? String
-                        ?: notification.actionData["threadId"] as? String
+            // PAYLOAD-FIRST APPROACH: Check what data exists rather than relying
+            // on type mapping (which may fall through to SYSTEM_UPDATE due to
+            // StitchNotificationType enum mismatch with Firestore values).
+            val videoId = notification.actionData["videoID"] as? String
+                ?: notification.actionData["videoId"] as? String
+            val hasVideo = !videoId.isNullOrEmpty()
 
-                    if (videoId != null) {
-                        Log.d(TAG, "ðŸ“± Navigating to video: $videoId (thread: $threadId)")
-                        _navigationEvent.emit(
-                            NotificationNavigationEvent.NavigateToVideo(
-                                videoId = videoId,
-                                threadId = threadId ?: videoId
-                            )
-                        )
-                    } else {
-                        Log.w(TAG, "âš ï¸ No videoID in notification payload: ${notification.actionData}")
-                    }
+            val senderUserId = notification.actionData["senderID"] as? String
+                ?: notification.actionData["userId"] as? String
+                ?: notification.actionData["senderId"] as? String
+
+            // Determine intent from BOTH type AND payload
+            val isFollowType = notification.type == NotificationType.NEW_FOLLOWER
+                    || notification.actionData["engagementType"]?.toString() == "follow"
+            val isTierUpgrade = notification.type == NotificationType.TIER_UPGRADED
+
+            when {
+                // Follow notification (no video) -> profile
+                isFollowType && !hasVideo && senderUserId != null -> {
+                    Log.d(TAG, "NAV -> Profile (follow): $senderUserId")
+                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(senderUserId))
                 }
 
-                NotificationType.NEW_FOLLOWER,
-                NotificationType.FOLLOWING_VIDEO -> {
-                    // Get sender ID for profile navigation
-                    val userId = notification.actionData["userId"] as? String
-                        ?: notification.actionData["senderID"] as? String
-                        ?: notification.actionData["senderId"] as? String
-
-                    if (userId != null) {
-                        Log.d(TAG, "ðŸ“± Navigating to profile: $userId")
-                        _navigationEvent.emit(
-                            NotificationNavigationEvent.NavigateToProfile(userId)
+                // Has videoID -> navigate to thread (covers hype, cool, reply, share, newVideo, mention, milestone)
+                hasVideo -> {
+                    val threadId = resolveThreadID(videoId!!, notification.actionData)
+                    Log.d(TAG, "NAV -> Thread: $threadId, target: $videoId")
+                    _navigationEvent.emit(
+                        NotificationNavigationEvent.NavigateToVideo(
+                            videoId = videoId,
+                            threadId = threadId
                         )
-                    } else {
-                        Log.w(TAG, "âš ï¸ No userId in notification payload: ${notification.actionData}")
-                    }
+                    )
                 }
 
-                NotificationType.TAP_MILESTONE -> {
-                    val milestone = notification.actionData["milestone"] as? String
-                    val videoId = notification.actionData["videoID"] as? String
-                        ?: notification.actionData["videoId"] as? String
-
-                    Log.d(TAG, "ðŸŽ¯ Celebrating milestone: $milestone")
-
-                    // Navigate to video if available
-                    if (videoId != null) {
-                        _navigationEvent.emit(
-                            NotificationNavigationEvent.NavigateToVideo(
-                                videoId = videoId,
-                                threadId = videoId
-                            )
-                        )
-                    }
-                }
-
-                NotificationType.TIER_UPGRADED -> {
-                    // Could navigate to profile or show celebration
+                // Tier upgrade -> own profile
+                isTierUpgrade -> {
                     val userId = getCurrentUserId()
                     if (userId.isNotEmpty()) {
-                        _navigationEvent.emit(
-                            NotificationNavigationEvent.NavigateToProfile(userId)
-                        )
+                        Log.d(TAG, "NAV -> Profile (tier): $userId")
+                        _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(userId))
                     }
+                }
+
+                // Has sender but no video -> profile
+                senderUserId != null -> {
+                    Log.d(TAG, "NAV -> Profile (fallback): $senderUserId")
+                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(senderUserId))
                 }
 
                 else -> {
-                    Log.d(TAG, "ðŸ“± Notification type: ${notification.type} - no specific navigation")
+                    Log.w(TAG, "No navigation possible - no videoID or senderID in payload")
                 }
             }
+        }
+    }
+
+    /**
+     * Resolve threadID for a video - matches iOS fallback logic:
+     * 1. Check payload for threadID
+     * 2. Check local cache
+     * 3. Fetch video from Firestore to resolve threadID
+     * 4. Fallback: use videoID as threadID
+     *
+     * CACHING: Results stored in threadIDCache (in-memory, cleared on ViewModel destroy)
+     */
+    private suspend fun resolveThreadID(videoId: String, actionData: Map<String, Any>): String {
+        // 1. Try threadID from payload (Cloud Functions now include this)
+        val payloadThreadId = actionData["threadID"] as? String
+            ?: actionData["threadId"] as? String
+        if (!payloadThreadId.isNullOrEmpty()) {
+            threadIDCache[videoId] = payloadThreadId
+            return payloadThreadId
+        }
+
+        // 2. Check local cache
+        threadIDCache[videoId]?.let { return it }
+
+        // 3. Fetch video from Firestore to resolve real threadID (matches iOS fallback)
+        return try {
+            val video = videoService.getVideoById(videoId)
+            val resolvedThreadId = video?.threadID ?: video?.id ?: videoId
+            threadIDCache[videoId] = resolvedThreadId
+            Log.d(TAG, "Resolved threadID from Firestore: $videoId -> $resolvedThreadId")
+            resolvedThreadId
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to resolve threadID for $videoId, using fallback")
+            videoId
         }
     }
 

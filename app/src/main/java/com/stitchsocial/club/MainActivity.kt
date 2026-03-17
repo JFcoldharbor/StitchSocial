@@ -58,6 +58,7 @@ import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.*
 import com.stitchsocial.club.views.*
 import com.stitchsocial.club.ui.screens.ThreadView
+import com.stitchsocial.club.services.ConversationLaneService
 import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.coordination.ModalState
@@ -273,6 +274,11 @@ fun MainScreen() {
     val navigationCoordinator = remember { NavigationCoordinator(videoCoordinator) }
     val feedService = remember { HybridHomeFeedService(videoService, userService) }
 
+    // Initialize ConversationLaneService singleton with videoService
+    LaunchedEffect(videoService) {
+        ConversationLaneService.shared.initialize(videoService)
+    }
+
     // ✅ NEW: Announcement service reference
     val announcementService = remember { AnnouncementService.shared }
 
@@ -287,34 +293,56 @@ fun MainScreen() {
             Log.d("STITCH_MAIN", "📱 Processing pending notification intent")
 
             val notificationType = intent.getStringExtra("notification_type")
+                ?: intent.getStringExtra("type")
             val videoId = intent.getStringExtra("video_id")
+                ?: intent.getStringExtra("videoID")
+                ?: intent.getStringExtra("videoId")
+            val threadId = intent.getStringExtra("thread_id")
+                ?: intent.getStringExtra("threadID")
+                ?: intent.getStringExtra("threadId")
             val userId = intent.getStringExtra("user_id")
+                ?: intent.getStringExtra("userID")
+                ?: intent.getStringExtra("senderID")
+
+            Log.d("STITCH_MAIN", "📱 Notification intent: type=$notificationType, video=$videoId, thread=$threadId, user=$userId")
 
             // Wait for authentication to complete
             delay(1000)
 
             when (notificationType) {
-                "hype", "reply", "cool" -> {
-                    videoId?.let { id ->
-                        Log.d("STITCH_MAIN", "📱 Navigating to video: $id")
-                        navigationCoordinator.showModal(
-                            modal = ModalState.VIDEO_PLAYER,
-                            data = mapOf("videoId" to id)
-                        )
+                // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
+                "hype", "reply", "cool", "engagement",
+                "stitch", "thread", "newVideo", "mention",
+                "video", "reengagement_stitches", "reengagement_milestone" -> {
+                    // Cloud Functions include threadID in payload — use it for deep linking
+                    val resolvedThreadID = threadId ?: videoId
+                    if (resolvedThreadID != null) {
+                        Log.d("STITCH_MAIN", "📱 Navigating to ThreadView: thread=$resolvedThreadID, target=$videoId")
+                        threadViewThreadID = resolvedThreadID
+                        threadViewTargetVideoID = videoId
+                        isShowingThreadView = true
                     }
                 }
-                "follow" -> {
+                // Follow → profile navigation
+                "follow", "user", "reengagement_followers" -> {
                     userId?.let { id ->
                         Log.d("STITCH_MAIN", "📱 Navigating to profile: $id")
-                        navigationCoordinator.showModal(
-                            modal = ModalState.USER_PROFILE,
-                            data = mapOf("userID" to id)
-                        )
+                        profileViewUserID = id
+                        isShowingProfileView = true
                     }
                 }
+                // Milestone → notifications tab
                 "milestone" -> {
-                    Log.d("STITCH_MAIN", "📱 Switching to notifications tab")
-                    selectedTab = MainAppTab.NOTIFICATIONS
+                    // Milestones with videoID → ThreadView, otherwise → tab
+                    val resolvedThreadID = threadId ?: videoId
+                    if (resolvedThreadID != null) {
+                        threadViewThreadID = resolvedThreadID
+                        threadViewTargetVideoID = videoId
+                        isShowingThreadView = true
+                    } else {
+                        Log.d("STITCH_MAIN", "📱 Switching to notifications tab")
+                        selectedTab = MainAppTab.NOTIFICATIONS
+                    }
                 }
             }
 
@@ -919,10 +947,9 @@ private fun TabContent(
                 userID = currentUser.id,
                 navigationCoordinator = navigationCoordinator,
                 isAnnouncementShowing = isAnnouncementShowing,
+                onShowThreadView = onShowThreadView,
                 modifier = Modifier.fillMaxSize()
             )
-            // TODO: Pass onShowThreadView once HomeFeedView is updated:
-            // onShowThreadView = onShowThreadView
         }
         MainAppTab.DISCOVERY -> {
             DiscoveryView(
@@ -946,18 +973,17 @@ private fun TabContent(
             ProfileView(
                 userID = currentUser.id,
                 navigationCoordinator = navigationCoordinator,
+                onShowThreadView = onShowThreadView,
                 modifier = Modifier.fillMaxSize()
             )
-            // TODO: Pass onShowThreadView once ProfileView is updated:
-            // onShowThreadView = onShowThreadView
         }
         MainAppTab.NOTIFICATIONS -> {
             NotificationViewComplete(
                 navigationCoordinator = navigationCoordinator,
+                onShowThreadView = onShowThreadView,
+                onNavigateToProfile = onShowProfileView,
                 modifier = Modifier.fillMaxSize()
             )
-            // TODO: Pass onShowThreadView once NotificationViewComplete is updated:
-            // onShowThreadView = onShowThreadView
         }
     }
 }

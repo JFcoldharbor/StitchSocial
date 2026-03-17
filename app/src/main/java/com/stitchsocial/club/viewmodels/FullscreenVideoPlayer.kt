@@ -54,7 +54,10 @@ data class VideoInfo(
     val thumbnailUrl: String,
     val duration: Long = 30000L,
     val creatorID: String = "unknown",
-    val creatorName: String = "Unknown User"
+    val creatorName: String = "Unknown User",
+    val threadID: String? = null,
+    val conversationDepth: Int = 0,
+    val replyCount: Int = 0
 )
 
 // MARK: - Main Composable
@@ -71,6 +74,7 @@ fun FullscreenVideoPlayer(
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
     navigationCoordinator: NavigationCoordinator? = null,
+    onShowThreadView: ((threadID: String, targetVideoID: String?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -120,7 +124,9 @@ fun FullscreenVideoPlayer(
                         println("FULLSCREEN: Navigate to profile ${video.creatorID}")
                     }
                     is OverlayAction.NavigateToThread -> {
-                        println("FULLSCREEN: Navigate to thread")
+                        val threadID = video.threadID ?: video.id
+                        onShowThreadView?.invoke(threadID, video.id)
+                            ?: println("FULLSCREEN: Navigate to thread (no handler)")
                     }
                     is OverlayAction.Follow -> {
                         println("FULLSCREEN: Follow user ${video.creatorID}")
@@ -218,13 +224,13 @@ private fun convertToMetadata(video: VideoInfo): CoreVideoMetadata {
         creatorName = video.creatorName,
         hashtags = emptyList(),
         createdAt = java.util.Date(),
-        threadID = null,
+        threadID = video.threadID,
         replyToVideoID = null,
-        conversationDepth = 0,
+        conversationDepth = video.conversationDepth,
         viewCount = 0,
         hypeCount = 0,
         coolCount = 0,
-        replyCount = 0,
+        replyCount = video.replyCount,
         shareCount = 0,
         lastEngagementAt = null,
         duration = video.duration / 1000.0,
