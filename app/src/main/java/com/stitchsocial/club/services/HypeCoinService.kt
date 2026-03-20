@@ -3,7 +3,7 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 4: Core Services — Coin balance, transfers, cash out, transactions
- * Dependencies: HypeCoinModels.kt, FirebaseSchema.kt, UserTier.kt
+ * Dependencies: HypeCoinModel.kt, FirebaseSchema.kt, UserTier.kt
  *
  * EXACT PORT: HypeCoinService.swift (iOS)
  *

@@ -3,7 +3,7 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 4: Core Services — In-app purchase via Google Play Billing Library 6+
- * Dependencies: HypeCoinModels.kt, HypeCoinService.kt, FirebaseSchema.kt
+ * Dependencies: HypeCoinModel.kt, HypeCoinService.kt, FirebaseSchema.kt
  *
  * ANDROID ONLY — no iOS equivalent.
  * iOS purchases through web/Stripe to avoid Apple 30% cut.

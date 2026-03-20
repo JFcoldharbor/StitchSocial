@@ -12,9 +12,9 @@
 
 package com.stitchsocial.club
 
+import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.NotificationService
-import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.SpecialUsersConfig
 import android.content.Context
 import android.os.VibrationEffect

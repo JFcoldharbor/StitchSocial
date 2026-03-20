@@ -2,6 +2,7 @@ package com.stitchsocial.club.foundation
 
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
+import com.stitchsocial.club.services.AdCategory
 import java.util.Date
 
 /**
@@ -264,8 +265,20 @@ data class BasicUserInfo(
     val totalLikes: Int = 0,
     val totalVideos: Int = 0,
     val createdAt: Date = Date(),
-    val lastActiveAt: Date = Date()
+    val lastActiveAt: Date = Date(),
+    // Business account fields — mirrors iOS BasicUserInfo
+    val accountType: AccountType = AccountType.PERSONAL,
+    val businessProfile: BusinessProfile? = null,
+    // Referral fields
+    val referralCount: Int = 0,
+    val referralGoal: Int? = null,
+    // Custom revenue share override
+    val customSubShare: Double? = null,
+    val customSubShareExpiresAt: Date? = null,
+    val customSubSharePermanent: Boolean = false
 ) {
+    val isBusiness: Boolean get() = accountType == AccountType.BUSINESS
+
     val displayUsername: String
         get() = "@$username"
 
@@ -367,6 +380,21 @@ data class BasicUserInfo(
 
                 val tier = UserTier.fromRawValue(tierString) ?: UserTier.ROOKIE
 
+                val accountTypeRaw = data["accountType"] as? String ?: "personal"
+                val accountType = AccountType.fromRawValue(accountTypeRaw)
+                val businessProfile = BusinessProfileBuilder.build(data)
+                val referralCount = when (val value = data["referralCount"]) {
+                    is Long -> value.toInt(); is Int -> value; else -> 0
+                }
+                val referralGoal = when (val value = data["referralGoal"]) {
+                    is Long -> value.toInt(); is Int -> value; else -> null
+                }
+                val customSubShare = data["customSubShare"] as? Double
+                val customSubShareExpiresAt = when (val value = data["customSubShareExpiresAt"]) {
+                    is Timestamp -> value.toDate(); else -> null
+                }
+                val customSubSharePermanent = data["customSubSharePermanent"] as? Boolean ?: false
+
                 BasicUserInfo(
                     id = doc.id,
                     username = username,
@@ -389,7 +417,14 @@ data class BasicUserInfo(
                     totalLikes = totalHypesReceived,
                     totalVideos = videoCount,
                     createdAt = createdAt,
-                    lastActiveAt = lastActiveAt
+                    lastActiveAt = lastActiveAt,
+                    accountType = accountType,
+                    businessProfile = businessProfile,
+                    referralCount = referralCount,
+                    referralGoal = referralGoal,
+                    customSubShare = customSubShare,
+                    customSubShareExpiresAt = customSubShareExpiresAt,
+                    customSubSharePermanent = customSubSharePermanent
                 )
             } catch (e: Exception) {
                 null

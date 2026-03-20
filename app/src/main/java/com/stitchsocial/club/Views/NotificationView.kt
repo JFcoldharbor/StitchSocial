@@ -55,7 +55,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 // Foundation
-import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.RecentUser
 import com.stitchsocial.club.foundation.LeaderboardVideo
 import com.stitchsocial.club.foundation.CoreVideoMetadata

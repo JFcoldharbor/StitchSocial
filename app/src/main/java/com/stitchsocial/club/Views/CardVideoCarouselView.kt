@@ -101,8 +101,11 @@ fun CardVideoCarouselView(
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
     followManager: FollowManager? = null,
+    navigationCoordinator: com.stitchsocial.club.coordination.NavigationCoordinator? = null,
+    laneParticipantIDs: Set<String> = emptySet(),
     onDismiss: () -> Unit,
-    onSelectReply: ((CoreVideoMetadata) -> Unit)? = null
+    onSelectReply: ((CoreVideoMetadata) -> Unit)? = null,
+    onAction: ((OverlayAction) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -131,10 +134,13 @@ fun CardVideoCarouselView(
     val currentVideo = videos.getOrNull(currentPage) ?: videos.first()
 
     // Check if current user is conversation participant
-    val conversationParticipantIDs = remember(videos) {
-        videos.map { it.creatorID }.toSet()
+    // If laneParticipantIDs provided (stepchild lane), use those — otherwise derive from videos
+    val conversationParticipantIDs = remember(videos, laneParticipantIDs) {
+        if (laneParticipantIDs.isNotEmpty()) laneParticipantIDs
+        else videos.map { it.creatorID }.toSet()
     }
-    val isConversationParticipant = currentUserID?.let { conversationParticipantIDs.contains(it) } ?: false
+    val isConversationParticipant = if (laneParticipantIDs.isEmpty()) true
+    else currentUserID?.let { conversationParticipantIDs.contains(it) } ?: false
 
     // Brand colors - Match iOS exactly
     val brandCyan = Color(0xFF00D9F2)       // RGB(0.0, 0.85, 0.95)
@@ -247,7 +253,8 @@ fun CardVideoCarouselView(
                             followManager = followManager,
                             engagementViewModel = engagementViewModel,
                             iconManager = iconMgr,
-                            parentVideo = if (index > 0) parentVideo else null
+                            parentVideo = if (index > 0) parentVideo else null,
+                            onAction = onAction
                         )
                     }
                 }
@@ -551,7 +558,8 @@ private fun CarouselDiscoveryCard(
     followManager: FollowManager?,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager,
-    parentVideo: CoreVideoMetadata?
+    parentVideo: CoreVideoMetadata?,
+    onAction: ((OverlayAction) -> Unit)? = null
 ) {
     val brandPink = Color(0xFFF266B3)
     val absDistance = kotlin.math.abs(distance)
@@ -646,7 +654,7 @@ private fun CarouselDiscoveryCard(
                 followManager = followManager,
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
-                onAction = { action: OverlayAction -> }
+                onAction = { action: OverlayAction -> onAction?.invoke(action) }
             )
         } else {
             // Inactive card - thumbnail fills entire card edge-to-edge

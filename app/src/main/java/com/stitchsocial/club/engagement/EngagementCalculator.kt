@@ -157,6 +157,7 @@ object EngagementCalculator {
             UserTier.TOP_CREATOR -> 5.0
             UserTier.FOUNDER -> 10.0
             UserTier.CO_FOUNDER -> 15.0
+            UserTier.BUSINESS -> 1.0
         }
     }
 
@@ -180,6 +181,7 @@ object EngagementCalculator {
             UserTier.TOP_CREATOR -> 9
             UserTier.FOUNDER -> 10
             UserTier.CO_FOUNDER -> 11
+            UserTier.BUSINESS -> 0
         }
     }
 

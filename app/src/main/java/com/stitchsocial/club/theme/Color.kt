@@ -174,6 +174,11 @@ object StitchColors {
     /** Placeholder text color */
     val placeholder = Color.Gray
 
+    // MARK: - Tier Colors
+
+    /** Business account tier color — teal, matches iOS StitchColors.tierBusiness */
+    val tierBusiness = Color(0xFF00BCD4)
+
     // MARK: - Creator Pill Colors (Context-Aware)
 
     /** Creator pill for thread content */

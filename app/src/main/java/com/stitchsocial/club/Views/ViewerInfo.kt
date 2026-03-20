@@ -322,6 +322,7 @@ private fun ViewerTierBadge(tier: UserTier) {
         UserTier.VETERAN -> "🎖"
         UserTier.RISING -> "📈"
         UserTier.ROOKIE -> null
+        UserTier.BUSINESS -> null
     }
 
     if (text != null) {

@@ -29,7 +29,8 @@ enum class UserTier(val rawValue: String) {
     LEGENDARY("legendary"),
     TOP_CREATOR("top_creator"),
     FOUNDER("founder"),
-    CO_FOUNDER("co_founder");
+    CO_FOUNDER("co_founder"),
+    BUSINESS("business");          // Business accounts — no clout progression
 
     // ===== DISPLAY PROPERTIES =====
 
@@ -49,6 +50,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> "Top Creator"
             FOUNDER -> "Founder"
             CO_FOUNDER -> "Co-Founder"
+            BUSINESS -> "Business"
         }
 
     // ===== CLOUT RANGES (FIXED to match iOS) =====
@@ -70,6 +72,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> 500_000..Int.MAX_VALUE // iOS: 500000...Int.max
             FOUNDER -> 0..Int.MAX_VALUE          // Special - any clout
             CO_FOUNDER -> 0..Int.MAX_VALUE       // Special - any clout
+            BUSINESS -> 0..Int.MAX_VALUE         // Business accounts don't use clout
         }
 
     // ===== FOLLOWER REQUIREMENTS =====
@@ -91,6 +94,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> 5_000_000
             FOUNDER -> 0                        // Special assignment only
             CO_FOUNDER -> 0                     // Special assignment only
+            BUSINESS -> 0                       // Business accounts don't track followers
         }
 
     // ===== CROWN BADGES =====
@@ -112,6 +116,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> "top_creator_crown"
             FOUNDER -> "founder_crown"
             CO_FOUNDER -> "co_founder_crown"
+            BUSINESS -> null
         }
 
     // ===== TIER PROGRESSION =====
@@ -121,6 +126,9 @@ enum class UserTier(val rawValue: String) {
      */
     val isFounderTier: Boolean
         get() = this == FOUNDER || this == CO_FOUNDER
+
+    val isBusinessAccount: Boolean
+        get() = this == BUSINESS
 
     /**
      * Check if this tier is achievable through normal progression
@@ -145,6 +153,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> null                // Max achievable tier
             FOUNDER -> null                    // Special tier
             CO_FOUNDER -> null                 // Special tier
+            BUSINESS -> null                   // Business accounts don't progress
         }
 
     /**
@@ -163,6 +172,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> LEGENDARY
             FOUNDER -> null
             CO_FOUNDER -> null
+            BUSINESS -> null
         }
 
     // ===== TIER LEVEL (for comparisons) =====
@@ -184,6 +194,7 @@ enum class UserTier(val rawValue: String) {
             TOP_CREATOR -> 9                   // ✅ SHIFTED from 8
             FOUNDER -> 10                      // ✅ SHIFTED from 9
             CO_FOUNDER -> 11                   // ✅ SHIFTED from 10
+            BUSINESS -> 0                      // Business — not in progression
         }
 
     // ===== PROGRESS CALCULATION =====

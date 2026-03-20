@@ -225,6 +225,7 @@ object HypeRatingCalculator {
             UserTier.VETERAN -> 1.0
             UserTier.RISING -> 1.0
             UserTier.ROOKIE -> 1.0
+            UserTier.BUSINESS -> 1.0
         }
     }
 
@@ -360,6 +361,7 @@ object HypeRatingCalculator {
             UserTier.VETERAN -> 0.7
             UserTier.RISING -> 0.6
             UserTier.ROOKIE -> 0.5
+            UserTier.BUSINESS -> 0.5
         }
     }
 

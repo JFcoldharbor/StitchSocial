@@ -14,6 +14,7 @@
 package com.stitchsocial.club
 
 
+import com.stitchsocial.club.foundation.BasicUserInfo
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,7 +47,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
-import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.services.SearchService
 import com.stitchsocial.club.FollowManager

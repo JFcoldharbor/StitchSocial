@@ -216,6 +216,7 @@ object ContentAnalyzer {
             UserTier.VETERAN -> "Veteran's"
             UserTier.RISING -> "Rising"
             UserTier.ROOKIE -> "New"
+            UserTier.BUSINESS -> "Business"
         }
 
         return when (contentType.lowercase()) {
@@ -251,6 +252,7 @@ object ContentAnalyzer {
             UserTier.LEGENDARY -> baseHashtags.add("legendary")
             UserTier.PARTNER -> baseHashtags.add("partner")
             UserTier.AMBASSADOR -> baseHashtags.add("ambassador")
+            UserTier.BUSINESS -> baseHashtags.add("business")
             else -> {}
         }
 
@@ -300,6 +302,7 @@ object ContentAnalyzer {
             UserTier.VETERAN, UserTier.INFLUENCER, UserTier.AMBASSADOR,
             UserTier.ELITE, UserTier.PARTNER, UserTier.LEGENDARY,
             UserTier.TOP_CREATOR, UserTier.FOUNDER, UserTier.CO_FOUNDER -> true
+            UserTier.BUSINESS -> false
         }
     }
 

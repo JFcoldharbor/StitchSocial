@@ -291,6 +291,7 @@ class ProfileViewModel(
             UserTier.VETERAN -> TierBadgeInfo("🛡️", "Veteran", "#FFEAA7")
             UserTier.RISING -> TierBadgeInfo("🚀", "Rising", "#DDA0DD")
             UserTier.ROOKIE -> TierBadgeInfo("🌱", "Rookie", "#98D8C8")
+            UserTier.BUSINESS -> TierBadgeInfo("🏢", "Business", "#00BCD4")
         }
     }
 

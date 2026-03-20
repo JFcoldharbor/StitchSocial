@@ -13,6 +13,7 @@
 
 package com.stitchsocial.club.camera
 
+import com.stitchsocial.club.foundation.BasicUserInfo
 import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -65,7 +66,6 @@ import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.services.VideoAnalysisResult
 import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.SearchService
-import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.TaggedUserChipById
 import com.stitchsocial.club.foundation.UserTier
 

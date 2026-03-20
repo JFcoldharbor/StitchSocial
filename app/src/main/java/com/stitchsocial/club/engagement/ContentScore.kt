@@ -151,6 +151,7 @@ object AlgorithmicEngine {
             UserTier.VETERAN -> 40.0
             UserTier.RISING -> 30.0
             UserTier.ROOKIE -> 20.0
+            UserTier.BUSINESS -> 20.0
         }
 
         val followingBonus = if (isFollowing) 30.0 else 0.0
@@ -223,6 +224,7 @@ object AlgorithmicEngine {
             UserTier.TOP_CREATOR -> 9
             UserTier.FOUNDER -> 10
             UserTier.CO_FOUNDER -> 11
+            UserTier.BUSINESS -> 0
         }
     }
 

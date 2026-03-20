@@ -9,6 +9,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.foundation.BasicUserInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -37,7 +38,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
-import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.FollowManager

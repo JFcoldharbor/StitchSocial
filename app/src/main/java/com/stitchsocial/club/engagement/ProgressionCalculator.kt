@@ -55,6 +55,7 @@ object ProgressionCalculator {
             UserTier.LEGENDARY -> clout in 50000..99999
             UserTier.TOP_CREATOR -> clout >= 100000
             UserTier.FOUNDER, UserTier.CO_FOUNDER -> false
+            UserTier.BUSINESS -> false
         }
     }
 
@@ -71,6 +72,7 @@ object ProgressionCalculator {
             UserTier.TOP_CREATOR -> 100000
             UserTier.FOUNDER -> 250000
             UserTier.CO_FOUNDER -> 500000
+            UserTier.BUSINESS -> 0
         }
     }
 
@@ -117,6 +119,7 @@ object ProgressionCalculator {
             UserTier.TOP_CREATOR -> 9
             UserTier.FOUNDER -> 10
             UserTier.CO_FOUNDER -> 11
+            UserTier.BUSINESS -> 0
         }
     }
 

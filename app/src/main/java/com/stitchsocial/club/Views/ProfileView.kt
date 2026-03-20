@@ -107,6 +107,7 @@ private fun getTierColors(tier: UserTier): List<Color> {
         UserTier.TOP_CREATOR -> listOf(Color(0xFFFFD700), Color(0xFFFFA726))
         UserTier.FOUNDER -> listOf(Color(0xFFFFD700), Color(0xFFFF6B35), Color(0xFFE91E63))
         UserTier.CO_FOUNDER -> listOf(Color(0xFFFFD700), Color(0xFFFF6B35))
+        UserTier.BUSINESS -> listOf(Color(0xFF00BCD4), Color(0xFF26C6DA))
     }
 }
 
@@ -123,6 +124,7 @@ private fun getTierIcon(tier: UserTier): ImageVector {
         UserTier.TOP_CREATOR -> Icons.Default.WorkspacePremium
         UserTier.FOUNDER -> Icons.Default.Verified
         UserTier.CO_FOUNDER -> Icons.Default.Verified
+        UserTier.BUSINESS -> Icons.Default.Business
     }
 }
 

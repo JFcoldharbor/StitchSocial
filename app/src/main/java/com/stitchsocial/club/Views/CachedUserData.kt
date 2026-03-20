@@ -182,7 +182,7 @@ fun SmartCompactAvatar(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(CircleShape),
-                onState = { state -> 
+                onState = { state ->
                     imageState = state
                     if (state is AsyncImagePainter.State.Success) {
                         isLoading = false
@@ -488,5 +488,6 @@ private fun tierColor(tier: UserTier): Color {
         UserTier.VETERAN -> Color.Blue
         UserTier.RISING -> Color.Green
         UserTier.ROOKIE -> Color.Gray
+        UserTier.BUSINESS -> Color(0xFF00BCD4) // Teal
     }
 }

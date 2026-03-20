@@ -11,8 +11,8 @@
 
 package com.stitchsocial.club.services
 
-import com.google.firebase.Timestamp
 import com.stitchsocial.club.foundation.BasicUserInfo
+import com.google.firebase.Timestamp
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.foundation.ContentType

@@ -1,5 +1,5 @@
 /*
- * HypeCoinModels.kt - HYPE COIN SYSTEM MODELS
+ * HypeCoinModel.kt - HYPE COIN SYSTEM MODELS
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Layer 1: Foundation - HypeCoin data models, packages, balance, transactions
@@ -276,6 +276,7 @@ object SubscriptionRevenueShare {
         UserTier.TOP_CREATOR -> 0.90
         UserTier.FOUNDER,
         UserTier.CO_FOUNDER  -> 1.00
+        UserTier.BUSINESS    -> 0.00
     }
 
     /**

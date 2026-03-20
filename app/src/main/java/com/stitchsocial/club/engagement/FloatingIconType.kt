@@ -111,6 +111,7 @@ data class FloatingIcon(
             UserTier.VETERAN -> listOf(Color(0xFF0000FF), Color(0xFF00FFFF), Color(0xFF98FB98))
             UserTier.RISING -> listOf(Color(0xFF00FF00), Color(0xFFFFD700), Color(0xFFFF8C00))
             UserTier.ROOKIE -> listOf(Color(0xFFFF8C00), Color(0xFFFF0000), Color(0xFFFFD700))
+            UserTier.BUSINESS -> listOf(Color(0xFF00BCD4), Color(0xFF26C6DA), Color(0xFF00ACC1))
         }
     }
 }
