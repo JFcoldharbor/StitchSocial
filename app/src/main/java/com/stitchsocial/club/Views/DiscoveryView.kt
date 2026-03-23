@@ -368,6 +368,7 @@ fun DiscoveryView(
     onNavigateToProfile: (String) -> Unit = {},
     onNavigateToSearch: () -> Unit = {},
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
+    onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {},
     navigationCoordinator: NavigationCoordinator? = null,
     isAnnouncementShowing: Boolean = false,
     modifier: Modifier = Modifier
@@ -550,11 +551,11 @@ fun DiscoveryView(
                 val currentErrorMessage = errorMessage
                 when {
                     selectedCategory == DiscoveryCategory.COMMUNITIES -> {
-                        // Communities tab — mirrors iOS CommunityListView(userID: userID)
                         val uid = currentUserID
                         if (uid != null) {
                             CommunityListView(
                                 userID = uid,
+                                onShowCommunity = onShowCommunity,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {

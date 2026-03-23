@@ -46,6 +46,7 @@ package com.stitchsocial.club.ui.screens
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -84,7 +85,11 @@ import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.ui.components.ThreadDepthBadge
 import com.stitchsocial.club.ui.components.Thread3DInfoPanel
 import com.stitchsocial.club.views.CardVideoCarouselView
+import com.stitchsocial.club.views.ContextualVideoOverlay
+import com.stitchsocial.club.views.OverlayContext
 import com.stitchsocial.club.views.OverlayAction
+import com.stitchsocial.club.views.VideoPlayerComposable
+import com.stitchsocial.club.views.VideoNavigationPeeks
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.coordination.EngagementCoordinator
@@ -162,6 +167,7 @@ fun ThreadView(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showFullscreen by remember { mutableStateOf(false) }
+    var fullscreenStartIndex by remember { mutableStateOf(0) }
     var selectedVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
     var showCarousel by remember { mutableStateOf(false) }
     var carouselVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
@@ -264,44 +270,16 @@ fun ThreadView(
         } catch (_: Exception) { }
     }
 
-    // Helper: Open video matching iOS openVideo() logic
-    // Parent → fullscreen solo, Child → getLanes → carousel with lane nav bar
+    // Helper: Open video — matches iOS openVideo() which uses one shared fullscreen pager
+    // Both parent and child tap → showFullscreen at the correct index in allVisibleVideos
+    // showCarousel is only opened from WITHIN the fullscreen pager (child lane replies)
     fun openVideo(video: CoreVideoMetadata) {
+        val index = allVisibleVideos.indexOfFirst { it.id == video.id }
+        fullscreenStartIndex = if (index >= 0) index else 0
         selectedVideo = video
-        val isParent = video.id == parentVideo?.id
-
-        if (isParent) {
-            // Parent opens fullscreen solo (matches iOS showFullscreen)
-            scope.launch {
-                delay(100)
-                showFullscreen = true
-            }
-        } else {
-            // Child → get lanes via ConversationLaneService → open carousel
-            scope.launch {
-                try {
-                    val lanes = laneService.getLanes(
-                        forChildVideoID = video.id,
-                        childCreatorID = video.creatorID
-                    )
-
-                    // Convert lane first-replies to directReplies for nav bar
-                    val laneFirstReplies = lanes.map { it.firstReply }
-
-                    carouselVideos = listOf(video)
-                    directReplies = laneFirstReplies
-                    laneParticipantIDs = emptySet() // No lane selected yet
-                    currentLaneAnchorID = video.id
-
-                    delay(100)
-                    showCarousel = true
-                } catch (_: Exception) {
-                    carouselVideos = listOf(video)
-                    directReplies = emptyList()
-                    laneParticipantIDs = emptySet()
-                    showCarousel = true
-                }
-            }
+        scope.launch {
+            delay(50)
+            showFullscreen = true
         }
         onVideoTap(video)
     }
@@ -615,42 +593,163 @@ fun ThreadView(
             }
         }
 
-        // Fullscreen video overlay for parent (matches iOS showFullscreen)
-        if (showFullscreen && selectedVideo != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(2000f)
-                    .background(Color.Black)
-            ) {
-                CardVideoCarouselView(
-                    videos = listOf(selectedVideo!!),
-                    parentVideo = parentVideo,
-                    startingIndex = 0,
+        // Fullscreen thread player — vertical pager over allVisibleVideos, matches iOS
+        if (showFullscreen) {
+            FullscreenThreadPlayer(
+                videos = allVisibleVideos,
+                startIndex = fullscreenStartIndex,
+                parentVideo = parentVideo,
+                currentUserID = currentUserID,
+                currentUserTier = currentUserTier,
+                engagementCoordinator = engagementCoordinator,
+                engagementViewModel = viewModel,
+                iconManager = iconMgr,
+                followManager = followManager,
+                laneService = laneService,
+                videoService = videoService,
+                onDismiss = {
+                    showFullscreen = false
+                    selectedVideo = null
+                },
+                onShowCarousel = { video, replies, participantIDs ->
+                    carouselVideos = listOf(video)
+                    directReplies = replies
+                    laneParticipantIDs = participantIDs
+                    currentLaneAnchorID = video.id
+                    selectedVideo = video
+                    showCarousel = true
+                },
+                onAction = { action ->
+                    when (action) {
+                        is OverlayAction.NavigateToProfile -> {
+                            onShowProfileView?.invoke(action.userID)
+                        }
+                        else -> { }
+                    }
+                }
+            )
+        }
+    }
+}
+
+// ===== FULLSCREEN THREAD PLAYER =====
+
+/**
+ * FullscreenThreadPlayer — vertical pager over all thread videos, matches iOS.
+ *
+ * Any card tap (parent or child) lands here at the tapped index.
+ * Swipe up/down navigates through parent + children in one continuous feed.
+ * Tapping a child's lane reply button → onShowCarousel → CardVideoCarouselView layer.
+ *
+ * zIndex(3000f) — above carousel (2000f). No caching needed, allVisibleVideos already in state.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FullscreenThreadPlayer(
+    videos: List<CoreVideoMetadata>,
+    startIndex: Int,
+    parentVideo: CoreVideoMetadata?,
+    currentUserID: String?,
+    currentUserTier: UserTier,
+    engagementCoordinator: EngagementCoordinator?,
+    engagementViewModel: EngagementViewModel?,
+    iconManager: FloatingIconManager?,
+    followManager: FollowManager?,
+    laneService: ConversationLaneService,
+    videoService: VideoServiceImpl,
+    onDismiss: () -> Unit,
+    onShowCarousel: (video: CoreVideoMetadata, replies: List<CoreVideoMetadata>, participantIDs: Set<String>) -> Unit,
+    onAction: ((OverlayAction) -> Unit)?
+) {
+    val iconMgr = iconManager ?: remember { FloatingIconManager() }
+    val scope = rememberCoroutineScope()
+
+    val pagerState = rememberPagerState(
+        initialPage = startIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0)),
+        pageCount = { videos.size }
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(3000f)
+            .background(Color.Black)
+    ) {
+        // Horizontal pager — swipe left/right through parent + children (matches iOS)
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val video = videos[page]
+            val isActive = pagerState.currentPage == page
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                VideoPlayerComposable(
+                    video = video,
+                    isActive = isActive,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                ContextualVideoOverlay(
+                    video = video,
+                    overlayContext = OverlayContext.THREAD_VIEW,
                     currentUserID = currentUserID,
                     currentUserTier = currentUserTier,
-                    directReplies = null,
-                    laneParticipantIDs = emptySet(),
-                    engagementCoordinator = engagementCoordinator,
-                    engagementViewModel = viewModel,
+                    engagementViewModel = engagementViewModel,
                     iconManager = iconMgr,
                     followManager = followManager,
-                    onDismiss = {
-                        showFullscreen = false
-                        selectedVideo = null
-                    },
-                    onSelectReply = { },
                     onAction = { action ->
                         when (action) {
-                            is OverlayAction.NavigateToProfile -> {
-                                onShowProfileView?.invoke(action.userID)
+                            is OverlayAction.NavigateToThread -> {
+                                // Child tapped lane reply — load lanes and open carousel
+                                val isChild = video.id != parentVideo?.id
+                                if (isChild) {
+                                    scope.launch {
+                                        try {
+                                            val lanes = laneService.getLanes(
+                                                forChildVideoID = video.id,
+                                                childCreatorID = video.creatorID
+                                            )
+                                            val firstReplies = lanes.map { it.firstReply }
+                                            onShowCarousel(video, firstReplies, emptySet())
+                                        } catch (_: Exception) {
+                                            onShowCarousel(video, emptyList(), emptySet())
+                                        }
+                                    }
+                                }
                             }
-                            else -> { }
+                            else -> onAction?.invoke(action)
                         }
                     }
                 )
             }
         }
+
+        // X dismiss — top-left
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 16.dp, top = 56.dp)
+                .size(44.dp)
+                .zIndex(10f)
+                .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+        ) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "Back to thread",
+                tint = Color.White
+            )
+        }
+
+        // Edge peek thumbnails — prev/next video indicators
+        VideoNavigationPeeks(
+            allVideos = videos,
+            currentVideoIndex = pagerState.currentPage,
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(5f)
+        )
     }
 }
 

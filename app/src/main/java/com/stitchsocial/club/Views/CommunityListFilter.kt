@@ -61,6 +61,7 @@ enum class CommunityListFilter(val label: String, val emoji: String) {
 @Composable
 fun CommunityListView(
     userID: String,
+    onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
@@ -76,30 +77,47 @@ fun CommunityListView(
     LaunchedEffect(userID) {
         isLoading = true
         try {
-            // Fetch communities user is a member of
-            val memberDocs = db.collectionGroup("members")
-                .whereEqualTo("userID", userID)
-                .limit(50)
-                .get().await()
+            println("🏘️ COMMUNITIES: Loading for user $userID from stitchfin")
 
-            val joinedIDs = memberDocs.documents.mapNotNull { it.getString("communityID") }.toSet()
-
-            // Fetch all active communities
+            // Fetch all communities first (no strict filter — matches iOS fetchAllCommunities)
             val commDocs = db.collection("communities")
-                .whereEqualTo("isActive", true)
-                .limit(50)
+                .limit(100)
                 .get().await()
+
+            println("🏘️ COMMUNITIES: Got ${commDocs.documents.size} community docs")
 
             val all = commDocs.documents.mapNotNull { doc ->
                 val data = doc.data ?: return@mapNotNull null
                 parseCommunityListItem(doc.id, data)
             }
 
+            println("🏘️ COMMUNITIES: Parsed ${all.size} communities")
+
+            // Fetch communities user is a member of via member subcollection check
+            // Use community doc IDs and check membership subcollection directly
+            val joinedIDs = mutableSetOf<String>()
+            for (community in all) {
+                try {
+                    val memberDoc = db.collection("communities")
+                        .document(community.id)
+                        .collection("members")
+                        .document(userID)
+                        .get().await()
+                    if (memberDoc.exists()) {
+                        joinedIDs.add(community.id)
+                    }
+                } catch (e: Exception) {
+                    // Skip on error — non-fatal
+                }
+            }
+
+            println("🏘️ COMMUNITIES: User is member of ${joinedIDs.size} communities")
+
             myCommunities = all.filter { joinedIDs.contains(it.id) }
             allCommunities = all
         } catch (e: Exception) {
             errorMessage = e.message
-            println("⚠️ COMMUNITIES: Load failed — ${e.message}")
+            println("❌ COMMUNITIES: Load failed — ${e.message}")
         } finally {
             isLoading = false
         }
@@ -147,9 +165,7 @@ fun CommunityListView(
                         CommunitySectionHeader("🔴 Live Now")
                     }
                     items(liveItems) { item ->
-                        CommunityCardView(item = item, onClick = {
-                            println("🏠 COMMUNITY: Tapped ${item.id}")
-                        })
+                        CommunityCardView(item = item, onClick = { onShowCommunity(item) })
                     }
                 }
 
@@ -158,9 +174,7 @@ fun CommunityListView(
                         item { CommunitySectionHeader("My Communities") }
                     }
                     items(regularItems) { item ->
-                        CommunityCardView(item = item, onClick = {
-                            println("🏠 COMMUNITY: Tapped ${item.id}")
-                        })
+                        CommunityCardView(item = item, onClick = { onShowCommunity(item) })
                     }
                 }
 
@@ -397,7 +411,10 @@ private fun CommunityEmptyState() {
 // MARK: - Helpers
 
 private fun parseCommunityListItem(id: String, data: Map<String, Any>): CommunityListItem? {
-    val creatorUsername = data["creatorUsername"] as? String ?: return null
+    val creatorUsername = data["creatorUsername"] as? String ?: run {
+        println("⚠️ COMMUNITIES: Doc $id missing creatorUsername — keys: ${data.keys}")
+        return null
+    }
     val creatorDisplayName = data["creatorDisplayName"] as? String ?: creatorUsername
     val creatorTier = data["tier"] as? String ?: "rookie"
     val memberCount = (data["memberCount"] as? Number)?.toInt() ?: 0
@@ -408,6 +425,8 @@ private fun parseCommunityListItem(id: String, data: Map<String, Any>): Communit
     val lastActivityPreview = data["lastActivityPreview"] as? String ?: ""
     val lastActivityTs = data["lastActivityAt"]
     val lastActivityAt = if (lastActivityTs is com.google.firebase.Timestamp) lastActivityTs.toDate() else Date()
+
+    println("✅ COMMUNITIES: Parsed community $id — @$creatorUsername ($memberCount members)")
 
     return CommunityListItem(
         id = id,

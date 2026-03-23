@@ -258,6 +258,10 @@ fun MainScreen() {
     var threadViewThreadID by remember { mutableStateOf<String?>(null) }
     var threadViewTargetVideoID by remember { mutableStateOf<String?>(null) }
 
+    // ✅ NEW: Track when CommunityDetailView is active — hides tab bar, full screen
+    var isShowingCommunity by remember { mutableStateOf(false) }
+    var communityItem by remember { mutableStateOf<com.stitchsocial.club.community.CommunityListItem?>(null) }
+
     // Debug logging for ThreadView state
     LaunchedEffect(isShowingThreadView) {
         Log.d("STITCH_MAIN", "🧵 isShowingThreadView changed to: $isShowingThreadView")
@@ -542,6 +546,10 @@ fun MainScreen() {
                             onShowProfileView = { userId ->
                                 profileViewUserID = userId
                                 isShowingProfileView = true
+                            },
+                            onShowCommunity = { item ->
+                                communityItem = item
+                                isShowingCommunity = true
                             }
                         )
 
@@ -590,9 +598,33 @@ fun MainScreen() {
                         }
                     }
 
-                    // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
-                    // Debug: Log state before rendering decision
-                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView
+                    // ✅ CommunityDetailView Overlay — full screen, hides tab bar (mirrors iOS)
+                    if (isShowingCommunity) {
+                        val user = currentUser
+                        val item = communityItem
+                        if (user != null && item != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .zIndex(1000f)
+                                    .background(Color.Black)
+                                    .pointerInput(Unit) { detectTapGestures { /* consume */ } }
+                            ) {
+                                com.stitchsocial.club.views.CommunityDetailView(
+                                    userID = user.id,
+                                    communityID = item.id,
+                                    communityItem = item,
+                                    onDismiss = {
+                                        isShowingCommunity = false
+                                        communityItem = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView AND no Community
+                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView && !isShowingCommunity
                     LaunchedEffect(currentModal, isShowingAnnouncement, isShowingThreadView) {
                         Log.d("STITCH_MAIN", "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | announcement: $isShowingAnnouncement | threadView: $isShowingThreadView")
                     }
@@ -939,7 +971,8 @@ private fun TabContent(
     navigationCoordinator: NavigationCoordinator,
     isAnnouncementShowing: Boolean = false,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
-    onShowProfileView: (userId: String) -> Unit
+    onShowProfileView: (userId: String) -> Unit,
+    onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {}
 ) {
     when (selectedTab) {
         MainAppTab.HOME -> {
@@ -964,6 +997,7 @@ private fun TabContent(
                     Log.d("NAVIGATION", "🔍 SEARCH NAVIGATION TRIGGERED")
                 },
                 onShowThreadView = onShowThreadView,
+                onShowCommunity = onShowCommunity,
                 isAnnouncementShowing = isAnnouncementShowing,
                 navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
