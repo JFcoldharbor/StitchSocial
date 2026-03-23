@@ -16,7 +16,7 @@ import com.stitchsocial.club.foundation.PayoutMethod
 import com.stitchsocial.club.foundation.TipPreset
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.CashOutRequest
-import com.stitchsocial.club.foundation.SubscriptionTier
+import com.stitchsocial.club.foundation.CoinPriceTier
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -209,7 +209,7 @@ class HypeCoinCoordinator private constructor(context: Context) {
         lastTipTime = System.currentTimeMillis()
     }
 
-    suspend fun subscribe(toCreatorID: String, tier: SubscriptionTier) {
+    suspend fun subscribe(toCreatorID: String, tier: CoinPriceTier) {
         val userID = currentUserID ?: throw CoinError.TransferFailed
         _isLoading.value = true
         try {

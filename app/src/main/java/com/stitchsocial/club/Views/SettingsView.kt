@@ -51,6 +51,7 @@ import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.AccountType
 import com.stitchsocial.club.foundation.BusinessProfile
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.ReferralService
 import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.launch
 
@@ -97,6 +98,27 @@ fun SettingsView(
     var isSigningOut by remember { mutableStateOf(false) }
     var showingError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var showingReferralDashboard by remember { mutableStateOf(false) }
+    var showingWallet by remember { mutableStateOf(false) }
+
+    // Inline wallet — mirrors iOS .sheet(isPresented: $showingWallet)
+    if (showingWallet) {
+        WalletView(
+            userID = currentUser.id,
+            userTier = currentUser.tier,
+            onDismiss = { showingWallet = false }
+        )
+        return
+    }
+
+    // Show referral dashboard inline if no external handler provided
+    if (showingReferralDashboard) {
+        ReferralDashboardView(
+            userID = currentUser.id,
+            onDismiss = { showingReferralDashboard = false }
+        )
+        return
+    }
 
     var isHapticEnabled by remember { mutableStateOf(prefs.getBoolean("hapticFeedbackEnabled", true)) }
     var isNotificationsEnabled by remember { mutableStateOf(prefs.getBoolean("notificationsEnabled", true)) }
@@ -128,7 +150,7 @@ fun SettingsView(
                     user = currentUser,
                     isCreator = isCreator,
                     coinBalance = coinBalance,
-                    onShowWallet = onShowWallet,
+                    onShowWallet = onShowWallet ?: { showingWallet = true },
                     onShowManageAccount = onShowManageAccount
                 )
 
@@ -151,7 +173,7 @@ fun SettingsView(
                 if (!isBusiness) {
                     SocialSection(
                         user = currentUser,
-                        onShowReferralDashboard = onShowReferralDashboard
+                        onShowReferralDashboard = onShowReferralDashboard ?: { showingReferralDashboard = true }
                     )
                 }
 
@@ -445,6 +467,29 @@ private fun SocialSection(
     user: BasicUserInfo,
     onShowReferralDashboard: (() -> Unit)?
 ) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val referralService = remember { ReferralService() }
+    var isGeneratingLink by remember { mutableStateOf(false) }
+
+    fun handleSimpleShare() {
+        scope.launch {
+            isGeneratingLink = true
+            try {
+                val link = referralService.generateReferralLink(user.id)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, link.shareText)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share your invite code"))
+            } catch (e: Exception) {
+                println("⚠️ REFERRAL: Share failed — ${e.message}")
+            } finally {
+                isGeneratingLink = false
+            }
+        }
+    }
+
     SettingsSectionContainer(title = "SOCIAL", icon = Icons.Default.People, iconColor = Color(0xFF007AFF)) {
 
         // ReferralButton FIRST — mirrors iOS socialSection order
@@ -476,8 +521,9 @@ private fun SocialSection(
                 }
             }
         } else {
+            // Simple invite — mirrors iOS ReferralButton simple share path
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable { /* Share invite link */ },
+                modifier = Modifier.fillMaxWidth().clickable(enabled = !isGeneratingLink) { handleSimpleShare() },
                 shape = RoundedCornerShape(16.dp),
                 color = Color.White.copy(alpha = 0.05f)
             ) {
@@ -490,7 +536,15 @@ private fun SocialSection(
                         modifier = Modifier.size(40.dp).background(StitchColors.primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.PersonAddAlt1, contentDescription = null, tint = StitchColors.primary, modifier = Modifier.size(18.dp))
+                        if (isGeneratingLink) {
+                            CircularProgressIndicator(
+                                color = StitchColors.primary,
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.PersonAddAlt1, contentDescription = null, tint = StitchColors.primary, modifier = Modifier.size(18.dp))
+                        }
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Invite Friends", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)

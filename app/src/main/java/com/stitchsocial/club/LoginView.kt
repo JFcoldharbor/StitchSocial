@@ -64,6 +64,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.AdCategory
+import com.stitchsocial.club.services.ReferralService
 import com.stitchsocial.club.foundation.AccountType
 import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.delay
@@ -251,8 +252,28 @@ fun LoginView(
                         // Process referral code — only on signup, only if provided
                         val trimmedCode = referralCode.trim().uppercase()
                         if (trimmedCode.isNotEmpty()) {
-                            // TODO: Wire ReferralService when ported to Android
-                            println("🎟 REFERRAL: Code $trimmedCode — ReferralService not yet on Android")
+                            try {
+                                val referralResult = ReferralService().processReferralSignup(
+                                    referralCode = trimmedCode,
+                                    newUserID = userID,
+                                    platform = "android",
+                                    sourceType = "manual"
+                                )
+                                if (referralResult.success) {
+                                    println("🎉 REFERRAL: Code redeemed — referred by ${referralResult.referrerID ?: "unknown"}")
+                                } else {
+                                    println("⚠️ REFERRAL: Code failed — ${referralResult.error ?: "unknown error"}")
+                                }
+                            } catch (e: Exception) {
+                                println("⚠️ REFERRAL: Exception — ${e.message}")
+                            }
+                        } else {
+                            // No referral code — track organic signup
+                            try {
+                                ReferralService().processOrganicSignup(userID, "android")
+                            } catch (e: Exception) {
+                                println("⚠️ REFERRAL: Organic tracking failed — ${e.message}")
+                            }
                         }
 
                         // Auto-join official community

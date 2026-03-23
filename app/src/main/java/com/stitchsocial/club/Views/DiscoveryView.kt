@@ -94,6 +94,7 @@ enum class DiscoveryCategory(
     val icon: ImageVector
 ) {
     ALL("All", Icons.Default.Apps),
+    COMMUNITIES("Communities", Icons.Default.Groups),
     TRENDING("Trending", Icons.Default.LocalFireDepartment),
     RECENT("Recent", Icons.Default.Schedule),
     POPULAR("Popular", Icons.Default.Star),
@@ -292,6 +293,7 @@ class DiscoveryViewModel(
 
         val filtered = when (category) {
             DiscoveryCategory.ALL -> allVideos
+            DiscoveryCategory.COMMUNITIES -> emptyList() // Handled by CommunityListView
             DiscoveryCategory.TRENDING -> allVideos.filter {
                 it.temperature == Temperature.HOT || it.temperature == Temperature.BLAZING
             }
@@ -547,6 +549,20 @@ fun DiscoveryView(
                 // Content Area
                 val currentErrorMessage = errorMessage
                 when {
+                    selectedCategory == DiscoveryCategory.COMMUNITIES -> {
+                        // Communities tab — mirrors iOS CommunityListView(userID: userID)
+                        val uid = currentUserID
+                        if (uid != null) {
+                            CommunityListView(
+                                userID = uid,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Sign in to view communities", color = Color.Gray, fontSize = 15.sp)
+                            }
+                        }
+                    }
                     isLoading && videos.isEmpty() -> {
                         DiscoveryLoadingView()
                     }

@@ -2,11 +2,18 @@
  * SubscriptionService.kt - SUBSCRIPTION SERVICE
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 4: Core Services - Subscriptions, perks, subscriber management
- * Dependencies: SubscriptionTier, HypeCoinService
- * Features: Subscribe flow, coin transfer, plan management, perk checking, caching
+ * REWRITTEN: Full parity with iOS SubscriptionService.swift.
+ * Removed SUPPORTER/SUPER_FAN. Now uses CoinPriceTier + TierPricing.
  *
- * EXACT PORT: SubscriptionService.swift
+ * CACHING (add to CachingOptimization):
+ *   - creatorPlanCache: Map<creatorID, plan+fetchedAt> — 10min TTL
+ *   - mySubsFetchedAt: timestamp — 5min TTL for fan subscriptions list
+ *   - isSubscribedCache: Map<creatorID, bool+fetchedAt> — 5min TTL
+ *   - subscriptionCache: Map<key, SubscriptionCheckResult> — session scope
+ *   All caches invalidated on write (subscribe/cancel/update).
+ *
+ * BATCHING: subscribe() does coin transfer + sub doc + plan stats in sequence.
+ * Future: wrap in transaction for atomicity.
  */
 
 package com.stitchsocial.club.services
@@ -31,10 +38,9 @@ class SubscriptionService private constructor() {
     private val coinService = HypeCoinService.shared
 
     private object Collections {
-        const val PLANS = "subscription_plans"
+        const val PLANS         = "creator_subscription_plans"
         const val SUBSCRIPTIONS = "subscriptions"
-        const val SUBSCRIBERS = "subscribers"
-        const val EVENTS = "subscription_events"
+        const val EVENTS        = "subscription_events"
     }
 
     private val _mySubscriptions = MutableStateFlow<List<ActiveSubscription>>(emptyList())
@@ -49,30 +55,57 @@ class SubscriptionService private constructor() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Cache for quick perk lookups
-    private val subscriptionCache = mutableMapOf<String, SubscriptionCheckResult>()
+    // Cache — mirrors iOS exactly
+    private data class CachedPlan(val plan: CreatorSubscriptionPlan, val fetchedAt: Date)
+    private data class CachedBool(val value: Boolean, val fetchedAt: Date)
 
-    // MARK: - Creator Plan Setup
+    private val creatorPlanCache = mutableMapOf<String, CachedPlan>()
+    private val isSubscribedCache = mutableMapOf<String, CachedBool>()
+    private val subscriptionCache = mutableMapOf<String, SubscriptionCheckResult>()
+    private var mySubsFetchedAt: Date? = null
+    private var mySubscribersFetchedAt: Date? = null
+
+    private val planTTL: Long = 10 * 60 * 1000L  // 10 min
+    private val subsTTL: Long = 5 * 60 * 1000L   // 5 min
+
+    private var currentUserEmail: String? = null
+
+    fun setCurrentUserEmail(email: String?) { currentUserEmail = email }
+
+    // MARK: - Creator Plan
 
     suspend fun fetchCreatorPlan(creatorID: String): CreatorSubscriptionPlan? {
+        val cached = creatorPlanCache[creatorID]
+        if (cached != null && (Date().time - cached.fetchedAt.time) < planTTL) {
+            return cached.plan
+        }
+
         val doc = db.collection(Collections.PLANS).document(creatorID).get().await()
         val data = doc.data ?: return null
+
+        val tierPricingData = data["tierPricing"]
+        val tierPricing = if (tierPricingData is Map<*, *>) {
+            @Suppress("UNCHECKED_CAST")
+            TierPricing.fromMap(tierPricingData as Map<String, Any>)
+        } else {
+            TierPricing()
+        }
 
         val plan = CreatorSubscriptionPlan(
             id = doc.id,
             creatorID = creatorID,
             isEnabled = data["isEnabled"] as? Boolean ?: false,
-            supporterPrice = (data["supporterPrice"] as? Number)?.toInt() ?: SubscriptionTier.SUPPORTER.defaultCoins,
-            superFanPrice = (data["superFanPrice"] as? Number)?.toInt() ?: SubscriptionTier.SUPER_FAN.defaultCoins,
-            supporterEnabled = data["supporterEnabled"] as? Boolean ?: true,
-            superFanEnabled = data["superFanEnabled"] as? Boolean ?: true,
+            tierPricing = tierPricing,
             customWelcomeMessage = data["customWelcomeMessage"] as? String,
-            subscriberCount = (data["subscriberCount"] as? Number)?.toInt() ?: 0,
-            totalEarned = (data["totalEarned"] as? Number)?.toInt() ?: 0,
+            subscriberCount = toInt(data["subscriberCount"]),
+            totalEarned = toInt(data["totalEarned"]),
+            lastPriceChangeAt = (data["lastPriceChangeAt"] as? Timestamp)?.toDate(),
+            nextPriceChangeAllowedAt = (data["nextPriceChangeAllowedAt"] as? Timestamp)?.toDate(),
             createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: Date(),
             updatedAt = (data["updatedAt"] as? Timestamp)?.toDate() ?: Date()
         )
 
+        creatorPlanCache[creatorID] = CachedPlan(plan, Date())
         _creatorPlan.value = plan
         return plan
     }
@@ -80,100 +113,92 @@ class SubscriptionService private constructor() {
     suspend fun createOrUpdatePlan(
         creatorID: String,
         isEnabled: Boolean,
-        supporterPrice: Int,
-        superFanPrice: Int,
-        supporterEnabled: Boolean,
-        superFanEnabled: Boolean,
+        tierPricing: TierPricing,
         welcomeMessage: String?
     ): CreatorSubscriptionPlan {
-        // Validate prices
-        require(supporterPrice in SubscriptionTier.SUPPORTER.coinRange) {
-            throw SubscriptionError.InvalidPrice
-        }
-        require(superFanPrice in SubscriptionTier.SUPER_FAN.coinRange) {
-            throw SubscriptionError.InvalidPrice
-        }
+        val existing = fetchCreatorPlan(creatorID)
 
-        val docRef = db.collection(Collections.PLANS).document(creatorID)
-        val existingDoc = docRef.get().await()
+        // 60-day cooldown check — mirrors iOS exactly
+        if (existing != null && existing.tierPricing.customPerks != tierPricing.customPerks) {
+            if (!existing.canChangePrice) {
+                throw SubscriptionError.PriceCooldown(existing.daysUntilPriceChange)
+            }
+        }
 
         val planData = hashMapOf<String, Any>(
             "creatorID" to creatorID,
             "isEnabled" to isEnabled,
-            "supporterPrice" to supporterPrice,
-            "superFanPrice" to superFanPrice,
-            "supporterEnabled" to supporterEnabled,
-            "superFanEnabled" to superFanEnabled,
+            "tierPricing" to tierPricing.toMap(),
             "updatedAt" to Timestamp.now()
         )
         welcomeMessage?.let { planData["customWelcomeMessage"] = it }
 
-        if (!existingDoc.exists()) {
+        // Mark perk change timestamp if changed
+        if (existing != null && existing.tierPricing.customPerks != tierPricing.customPerks) {
+            val nextAllowed = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 60) }.time
+            planData["lastPriceChangeAt"] = Timestamp.now()
+            planData["nextPriceChangeAllowedAt"] = Timestamp(nextAllowed)
+        }
+
+        if (existing == null) {
             planData["subscriberCount"] = 0
             planData["totalEarned"] = 0
             planData["createdAt"] = Timestamp.now()
         }
 
-        docRef.set(planData, com.google.firebase.firestore.SetOptions.merge()).await()
+        db.collection(Collections.PLANS).document(creatorID)
+            .set(planData, com.google.firebase.firestore.SetOptions.merge()).await()
 
-        val plan = fetchCreatorPlan(creatorID)!!
+        creatorPlanCache.remove(creatorID)
+        val updated = fetchCreatorPlan(creatorID)!!
         println("✅ SUBS: Plan updated for $creatorID")
-        return plan
+        return updated
     }
 
     // MARK: - Subscribe
 
-    suspend fun subscribe(subscriberID: String, creatorID: String, tier: SubscriptionTier): ActiveSubscription {
+    /**
+     * Subscribe fan to creator at chosen coin tier.
+     * Mirrors iOS SubscriptionService.subscribe(subscriberID, creatorID, creatorTier, coinTier)
+     */
+    suspend fun subscribe(
+        subscriberID: String,
+        creatorID: String,
+        coinTier: CoinPriceTier = CoinPriceTier.STARTER
+    ): ActiveSubscription {
         _isLoading.value = true
         try {
             val plan = fetchCreatorPlan(creatorID)
-                ?: throw SubscriptionError.SubscriptionsNotEnabled
-            if (!plan.isEnabled || !plan.isTierEnabled(tier)) {
-                throw SubscriptionError.SubscriptionsNotEnabled
-            }
+            if (plan == null || !plan.isEnabled) throw SubscriptionError.PlanNotFound
 
-            val price = plan.priceForTier(tier)
-
-            // Check existing
+            // Check already subscribed
             val existing = getSubscription(subscriberID, creatorID)
             if (existing?.isActive == true) throw SubscriptionError.AlreadySubscribed
 
-            // Transfer coins
+            val price = coinTier.rawValue
+
+            // Debit coins — mirrors iOS HypeCoinService.transferCoins
             coinService.transferCoins(
                 fromUserID = subscriberID,
                 toUserID = creatorID,
                 amount = price,
-                type = CoinTransactionType.SUBSCRIPTION_RECEIVED
+                type = CoinTransactionType.SUBSCRIPTION_SENT
             )
 
-            // Create subscription
             val subID = "${subscriberID}_${creatorID}"
-            val calendar = Calendar.getInstance()
-            calendar.add(Calendar.MONTH, 1)
-            val expiresAt = calendar.time
-
-            val subscription = ActiveSubscription(
-                id = subID,
-                subscriberID = subscriberID,
-                creatorID = creatorID,
-                tier = tier,
-                coinsPaid = price,
-                status = SubscriptionStatus.ACTIVE,
-                startedAt = Date(),
-                expiresAt = expiresAt,
-                renewalEnabled = true,
-                renewalCount = 0
-            )
+            val now = Date()
+            val periodEnd = Calendar.getInstance().apply { add(Calendar.MONTH, 1) }.time
 
             val subData = hashMapOf<String, Any>(
                 "subscriberID" to subscriberID,
                 "creatorID" to creatorID,
-                "tier" to tier.value,
+                "coinTier" to coinTier.rawValue,
                 "coinsPaid" to price,
                 "status" to SubscriptionStatus.ACTIVE.value,
-                "startedAt" to Timestamp.now(),
-                "expiresAt" to Timestamp(expiresAt),
-                "renewalEnabled" to true,
+                "subscribedAt" to Timestamp.now(),
+                "currentPeriodStart" to Timestamp.now(),
+                "currentPeriodEnd" to Timestamp(periodEnd),
+                "autoRenew" to true,
                 "renewalCount" to 0
             )
 
@@ -181,30 +206,42 @@ class SubscriptionService private constructor() {
 
             // Update creator plan stats
             db.collection(Collections.PLANS).document(creatorID).update(
-                mapOf(
-                    "subscriberCount" to FieldValue.increment(1),
+                hashMapOf<String, Any>(
+                    "subscriberCount" to FieldValue.increment(1L),
                     "totalEarned" to FieldValue.increment(price.toLong())
                 )
             ).await()
 
             // Record event
-            val eventID = UUID.randomUUID().toString()
             val eventData = hashMapOf<String, Any>(
                 "subscriptionID" to subID,
                 "subscriberID" to subscriberID,
                 "creatorID" to creatorID,
                 "type" to SubscriptionEventType.NEW_SUBSCRIPTION.value,
-                "tier" to tier.value,
+                "coinTier" to coinTier.rawValue,
                 "coinAmount" to price,
                 "createdAt" to Timestamp.now()
             )
-            db.collection(Collections.EVENTS).document(eventID).set(eventData).await()
+            db.collection(Collections.EVENTS).document(UUID.randomUUID().toString()).set(eventData).await()
 
+            // Invalidate caches
+            isSubscribedCache.remove(creatorID)
             subscriptionCache.remove("${subscriberID}_${creatorID}")
-            fetchMySubscriptions(subscriberID)
+            mySubsFetchedAt = null
 
-            println("🎉 SUBS: $subscriberID subscribed to $creatorID at ${tier.displayName}")
-            return subscription
+            println("🎉 SUBS: $subscriberID → $creatorID at ${coinTier.displayName} (${price} coins)")
+
+            return ActiveSubscription(
+                id = subID,
+                subscriberID = subscriberID,
+                creatorID = creatorID,
+                coinTier = coinTier,
+                coinsPaid = price,
+                status = SubscriptionStatus.ACTIVE,
+                subscribedAt = now,
+                currentPeriodStart = now,
+                currentPeriodEnd = periodEnd
+            )
         } finally {
             _isLoading.value = false
         }
@@ -214,49 +251,74 @@ class SubscriptionService private constructor() {
 
     suspend fun cancelSubscription(subscriberID: String, creatorID: String) {
         val subID = "${subscriberID}_${creatorID}"
+
         db.collection(Collections.SUBSCRIPTIONS).document(subID).update(
-            mapOf(
-                "renewalEnabled" to false,
-                "status" to SubscriptionStatus.CANCELLED.value
+            hashMapOf<String, Any>(
+                "status" to SubscriptionStatus.CANCELLED.value,
+                "autoRenew" to false,
+                "updatedAt" to Timestamp.now()
             )
         ).await()
 
-        val eventID = UUID.randomUUID().toString()
+        db.collection(Collections.PLANS).document(creatorID).update(
+            hashMapOf<String, Any>("subscriberCount" to FieldValue.increment(-1L))
+        ).await()
+
         val eventData = hashMapOf<String, Any>(
             "subscriptionID" to subID,
             "subscriberID" to subscriberID,
             "creatorID" to creatorID,
             "type" to SubscriptionEventType.CANCELLATION.value,
-            "tier" to SubscriptionTier.SUPPORTER.value,
+            "coinTier" to CoinPriceTier.STARTER.rawValue,
             "coinAmount" to 0,
             "createdAt" to Timestamp.now()
         )
-        db.collection(Collections.EVENTS).document(eventID).set(eventData).await()
+        db.collection(Collections.EVENTS).document(UUID.randomUUID().toString()).set(eventData).await()
 
+        isSubscribedCache.remove(creatorID)
         subscriptionCache.remove("${subscriberID}_${creatorID}")
-        println("❌ SUBS: $subscriberID cancelled subscription to $creatorID")
+        mySubsFetchedAt = null
+        mySubscribersFetchedAt = null
+
+        _mySubscriptions.value = _mySubscriptions.value.filter { it.creatorID != creatorID }
+        println("❌ SUBS: $subscriberID cancelled → $creatorID")
     }
 
     // MARK: - Check Subscription
 
+    /**
+     * Mirrors iOS SubscriptionService.checkSubscription(subscriberID, creatorID)
+     * Returns SubscriptionCheckResult with coinTier and hasNoAds.
+     * Used by AdService to gate ads.
+     */
     suspend fun checkSubscription(subscriberID: String, creatorID: String): SubscriptionCheckResult {
-        val cacheKey = "${subscriberID}_${creatorID}"
-        subscriptionCache[cacheKey]?.let { return it }
+        val key = "${subscriberID}_${creatorID}"
+        subscriptionCache[key]?.let { return it }
 
-        val subscription = getSubscription(subscriberID, creatorID)
-        if (subscription?.isActive != true) {
+        val sub = getSubscription(subscriberID, creatorID)
+        if (sub?.isActive != true) {
             val result = SubscriptionCheckResult.NONE
-            subscriptionCache[cacheKey] = result
+            subscriptionCache[key] = result
             return result
         }
 
         val result = SubscriptionCheckResult(
             isSubscribed = true,
-            tier = subscription.tier,
-            perks = subscription.tier.perks,
-            hypeBoost = subscription.tier.hypeBoost
+            coinsPaid = sub.coinsPaid,
+            coinTier = sub.coinTier
         )
-        subscriptionCache[cacheKey] = result
+        subscriptionCache[key] = result
+        return result
+    }
+
+    // MARK: - Is Subscribed (cached)
+
+    suspend fun isSubscribed(subscriberID: String, creatorID: String): Boolean {
+        val cached = isSubscribedCache[creatorID]
+        if (cached != null && (Date().time - cached.fetchedAt.time) < subsTTL) return cached.value
+
+        val result = checkSubscription(subscriberID, creatorID).isSubscribed
+        isSubscribedCache[creatorID] = CachedBool(result, Date())
         return result
     }
 
@@ -266,103 +328,123 @@ class SubscriptionService private constructor() {
         val subID = "${subscriberID}_${creatorID}"
         val doc = db.collection(Collections.SUBSCRIPTIONS).document(subID).get().await()
         val data = doc.data ?: return null
-
-        return ActiveSubscription(
-            id = subID,
-            subscriberID = data["subscriberID"] as? String ?: subscriberID,
-            creatorID = data["creatorID"] as? String ?: creatorID,
-            tier = SubscriptionTier.fromRawValue(data["tier"] as? String ?: "") ?: SubscriptionTier.SUPPORTER,
-            coinsPaid = (data["coinsPaid"] as? Number)?.toInt() ?: 0,
-            status = SubscriptionStatus.fromRawValue(data["status"] as? String ?: "") ?: SubscriptionStatus.EXPIRED,
-            startedAt = (data["startedAt"] as? Timestamp)?.toDate() ?: Date(),
-            expiresAt = (data["expiresAt"] as? Timestamp)?.toDate() ?: Date(),
-            renewalEnabled = data["renewalEnabled"] as? Boolean ?: false,
-            renewalCount = (data["renewalCount"] as? Number)?.toInt() ?: 0
-        )
+        return parseSubscription(doc.id, data)
     }
 
     // MARK: - Fetch My Subscriptions
 
     suspend fun fetchMySubscriptions(userID: String): List<ActiveSubscription> {
-        val snapshot = db.collection(Collections.SUBSCRIPTIONS)
-            .whereEqualTo("subscriberID", userID)
-            .whereEqualTo("status", "active")
-            .get().await()
-
-        val subscriptions = snapshot.documents.mapNotNull { doc ->
-            val data = doc.data ?: return@mapNotNull null
-            ActiveSubscription(
-                id = doc.id,
-                subscriberID = data["subscriberID"] as? String ?: userID,
-                creatorID = data["creatorID"] as? String ?: "",
-                tier = SubscriptionTier.fromRawValue(data["tier"] as? String ?: "") ?: SubscriptionTier.SUPPORTER,
-                coinsPaid = (data["coinsPaid"] as? Number)?.toInt() ?: 0,
-                status = SubscriptionStatus.ACTIVE,
-                startedAt = (data["startedAt"] as? Timestamp)?.toDate() ?: Date(),
-                expiresAt = (data["expiresAt"] as? Timestamp)?.toDate() ?: Date(),
-                renewalEnabled = data["renewalEnabled"] as? Boolean ?: false,
-                renewalCount = (data["renewalCount"] as? Number)?.toInt() ?: 0
-            )
+        val fetched = mySubsFetchedAt
+        if (fetched != null && (Date().time - fetched.time) < subsTTL && _mySubscriptions.value.isNotEmpty()) {
+            return _mySubscriptions.value
         }
 
-        _mySubscriptions.value = subscriptions
-        return subscriptions
+        val snapshot = db.collection(Collections.SUBSCRIPTIONS)
+            .whereEqualTo("subscriberID", userID)
+            .whereEqualTo("status", SubscriptionStatus.ACTIVE.value)
+            .get().await()
+
+        val subs = snapshot.documents.mapNotNull { doc ->
+            val data = doc.data ?: return@mapNotNull null
+            parseSubscription(doc.id, data)
+        }
+
+        mySubsFetchedAt = Date()
+        _mySubscriptions.value = subs
+        return subs
     }
 
     // MARK: - Fetch My Subscribers
 
     suspend fun fetchMySubscribers(creatorID: String): List<SubscriberInfo> {
+        val fetched = mySubscribersFetchedAt
+        if (fetched != null && (Date().time - fetched.time) < subsTTL && _mySubscribers.value.isNotEmpty()) {
+            return _mySubscribers.value
+        }
+
         val snapshot = db.collection(Collections.SUBSCRIPTIONS)
             .whereEqualTo("creatorID", creatorID)
-            .whereEqualTo("status", "active")
-            .orderBy("startedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .whereEqualTo("status", SubscriptionStatus.ACTIVE.value)
+            .orderBy("subscribedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .get().await()
 
         val subscribers = snapshot.documents.mapNotNull { doc ->
             val data = doc.data ?: return@mapNotNull null
-            val tier = SubscriptionTier.fromRawValue(data["tier"] as? String ?: "") ?: SubscriptionTier.SUPPORTER
-            val renewalCount = (data["renewalCount"] as? Number)?.toInt() ?: 0
-            val coinsPaid = (data["coinsPaid"] as? Number)?.toInt() ?: 0
+            val tierRaw = toInt(data["coinTier"])
+            val coinTier = CoinPriceTier.fromRawValue(tierRaw) ?: CoinPriceTier.STARTER
+            val renewalCount = toInt(data["renewalCount"])
+            val coinsPaid = toInt(data["coinsPaid"])
 
             SubscriberInfo(
                 id = doc.id,
                 subscriberID = data["subscriberID"] as? String ?: "",
-                username = "",  // Fetch separately
-                displayName = "", // Fetch separately
-                tier = tier,
-                subscribedAt = (data["startedAt"] as? Timestamp)?.toDate() ?: Date(),
-                totalPaid = coinsPaid * (renewalCount + 1),
+                username = "",
+                displayName = "",
+                coinTier = coinTier,
+                subscribedAt = (data["subscribedAt"] as? Timestamp)?.toDate() ?: Date(),
+                totalPaid = coinsPaid * maxOf(1, renewalCount),
                 renewalCount = renewalCount
             )
         }
 
+        mySubscribersFetchedAt = Date()
         _mySubscribers.value = subscribers
         return subscribers
     }
 
     // MARK: - Convenience
 
-    suspend fun getHypeBoost(userID: String, creatorID: String): Double {
-        return checkSubscription(userID, creatorID).hypeBoost
-    }
-
     suspend fun hasPerk(perk: SubscriptionPerk, userID: String, creatorID: String): Boolean {
-        return checkSubscription(userID, creatorID).perks.contains(perk)
+        val result = checkSubscription(userID, creatorID)
+        val tier = result.coinTier ?: return false
+        return SubscriptionPerks.perks(tier).contains(perk)
     }
 
-    fun clearCache() { subscriptionCache.clear() }
+    val isDeveloper: Boolean
+        get() = currentUserEmail?.endsWith("@stitch.dev") == true
+
+    fun clearCache() {
+        subscriptionCache.clear()
+        isSubscribedCache.clear()
+        creatorPlanCache.clear()
+        mySubsFetchedAt = null
+        mySubscribersFetchedAt = null
+    }
 
     fun clearCache(subscriberID: String, creatorID: String) {
         subscriptionCache.remove("${subscriberID}_${creatorID}")
+        isSubscribedCache.remove(creatorID)
     }
-}
 
-// MARK: - Errors
+    // MARK: - Private Helpers
 
-sealed class SubscriptionError(message: String) : Exception(message) {
-    object SubscriptionsNotEnabled : SubscriptionError("This creator hasn't enabled subscriptions")
-    object InvalidPrice : SubscriptionError("Invalid subscription price")
-    object AlreadySubscribed : SubscriptionError("You're already subscribed")
-    object NotSubscribed : SubscriptionError("You're not subscribed to this creator")
-    object InsufficientCoins : SubscriptionError("Not enough Hype Coins")
+    private fun parseSubscription(id: String, data: Map<String, Any>): ActiveSubscription? {
+        val tierRaw = toInt(data["coinTier"])
+        val coinTier = CoinPriceTier.fromRawValue(tierRaw) ?: CoinPriceTier.STARTER
+        val status = SubscriptionStatus.fromRawValue(data["status"] as? String ?: "") ?: SubscriptionStatus.EXPIRED
+        val subscribedAt = (data["subscribedAt"] as? Timestamp)?.toDate() ?: Date()
+        val periodStart = (data["currentPeriodStart"] as? Timestamp)?.toDate() ?: subscribedAt
+        val periodEnd = (data["currentPeriodEnd"] as? Timestamp)?.toDate() ?: Date()
+
+        return ActiveSubscription(
+            id = id,
+            subscriberID = data["subscriberID"] as? String ?: "",
+            creatorID = data["creatorID"] as? String ?: "",
+            coinTier = coinTier,
+            coinsPaid = toInt(data["coinsPaid"]),
+            status = status,
+            subscribedAt = subscribedAt,
+            currentPeriodStart = periodStart,
+            currentPeriodEnd = periodEnd,
+            autoRenew = data["autoRenew"] as? Boolean ?: false,
+            renewalCount = toInt(data["renewalCount"])
+        )
+    }
+
+    private fun toInt(value: Any?): Int {
+        if (value is Long) return value.toInt()
+        if (value is Int) return value
+        if (value is Double) return value.toInt()
+        return 0
+    }
 }
