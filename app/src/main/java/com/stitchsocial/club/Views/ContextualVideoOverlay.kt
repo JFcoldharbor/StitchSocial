@@ -53,6 +53,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.tasks.await
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 // StateFlow collection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -148,8 +167,12 @@ enum class EngagementType {
     REPLY,
     SHARE,
     STITCH,
-    THREAD
+    THREAD,
+    TIP
 }
+
+// Swappable slot: swipe UP → Tip, swipe DOWN → Hype (mirrors iOS SwappableEngagementButton)
+enum class SwappableSlotMode { HYPE, TIP }
 
 // MARK: - Overlay Actions
 
@@ -205,7 +228,7 @@ private object UserDataCache {
 
 // MARK: - Video Engagement Data
 
-private data class ContextualVideoEngagement(
+internal data class ContextualVideoEngagement(
     val videoID: String,
     val creatorID: String,
     var hypeCount: Int,
@@ -298,39 +321,44 @@ fun ContextualVideoOverlay(
         )
     }
 
-    // Track video views - only once per video per user session
-    LaunchedEffect(video.id, currentUserID) {
-        // Only track if we have a current user
-        if (currentUserID != null) {
-            try {
-                // Get user data for viewer record
-                val userData = userService.getUserProfile(currentUserID)
+    // =========================================================================
+    // VIEW TRACKING — EXACT MATCH iOS ContextualVideoOverlay.trackVideoView()
+    //
+    // iOS: waits 5 seconds then calls VideoService.incrementViewCount()
+    // Android: DisposableEffect cancels job if user scrolls away before 5s — no false counts.
+    //
+    // CACHING: recordVideoView() deduplicates via interactions collection.
+    // =========================================================================
+    DisposableEffect(video.id, currentUserID) {
+        val scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+        val job = scope.launch {
+            if (currentUserID != null) {
+                try {
+                    // Wait 5 seconds — matches iOS Task.sleep(nanoseconds: 5_000_000_000)
+                    kotlinx.coroutines.delay(5_000)
 
-                val viewerData = mapOf(
-                    "displayName" to (userData?.displayName ?: "User"),
-                    "username" to (userData?.username ?: ""),
-                    "profileImageURL" to (userData?.profileImageURL ?: ""),
-                    "tier" to (userData?.tier?.name ?: "ROOKIE")
-                )
-
-                // Record the view in database
-                videoService.recordVideoView(video.id, currentUserID, viewerData)
-
-                // Update local engagement data to reflect the new view
-                videoEngagement?.let { currentEngagement ->
-                    videoEngagement = currentEngagement.copy(
-                        viewCount = currentEngagement.viewCount + 1
+                    val userData = userService.getUserProfile(currentUserID)
+                    val viewerData = mapOf(
+                        "displayName"     to (userData?.displayName ?: "User"),
+                        "username"        to (userData?.username ?: ""),
+                        "profileImageURL" to (userData?.profileImageURL ?: ""),
+                        "tier"            to (userData?.tier?.name ?: "ROOKIE")
                     )
-                }
 
-                Log.d("VIEW_TRACKING", "Ã¢Å“â€¦ Recorded view for video ${video.id} by user $currentUserID")
-            } catch (e: Exception) {
-                Log.e("VIEW_TRACKING", "Ã¢ÂÅ’ Failed to record view: ${e.message}")
+                    videoService.recordVideoView(video.id, currentUserID, viewerData, watchTime = 5.0)
+                    Log.d("VIEW_TRACKING", "View recorded after 5s: ${video.id} by $currentUserID")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    Log.d("VIEW_TRACKING", "View cancelled (scrolled away): ${video.id}")
+                } catch (e: Exception) {
+                    Log.e("VIEW_TRACKING", "View record failed: ${e.message}")
+                }
             }
-        } else {
-            Log.d("VIEW_TRACKING", "Ã¢Å¡Â Ã¯Â¸Â No currentUserID - skipping view tracking for video ${video.id}")
         }
+        onDispose { job.cancel() }
     }
+
 
     // =========================================================================
     // FOLLOW STATE - Observe from FollowManager StateFlow for app-wide sync
@@ -387,6 +415,10 @@ fun ContextualVideoOverlay(
     val stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector = if (isUserVideo) Icons.Default.AddCircle else Icons.Default.ContentCut
     val stitchButtonLabel: String = if (isUserVideo) "Continue" else "Stitch"
     val stitchButtonRingColor: Color = if (isUserVideo) Color.Green else Color(0xFF9C27B0)
+
+    // Swappable hype/tip slot state (mirrors iOS SwappableEngagementButton)
+    var slotMode by remember { mutableStateOf(SwappableSlotMode.HYPE) }
+    val isSelfTip = isUserVideo
 
     // Load user data - fetch from service if not cached
     LaunchedEffect(video.creatorID) {
@@ -491,7 +523,6 @@ fun ContextualVideoOverlay(
                 onAction = onAction
             )
         } else if (overlayContext == OverlayContext.CAROUSEL) {
-            // Carousel-specific overlay - just engagement buttons
             CarouselOverlay(
                 video = video,
                 canReply = canReply,
@@ -503,6 +534,9 @@ fun ContextualVideoOverlay(
                 currentUserID = currentUserID,
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
+                slotMode = slotMode,
+                isSelfTip = isSelfTip,
+                onSlotModeChange = { slotMode = it },
                 context = context,
                 hapticFeedback = hapticFeedback,
                 onAction = onAction
@@ -532,20 +566,20 @@ fun ContextualVideoOverlay(
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
                 followManager = followManager,
+                slotMode = slotMode,
+                isSelfTip = isSelfTip,
+                onSlotModeChange = { slotMode = it },
                 bottomPadding = bottomPadding,
                 context = context,
                 hapticFeedback = hapticFeedback,
                 scope = scope,
                 onFollowToggle = {
-                    // FollowManager handles state updates via StateFlow
-                    // No need to manually update local state
                     followManager?.toggleFollow(video.creatorID)
                     Log.d("OVERLAY_FOLLOW", "Toggle follow for ${video.creatorID}, current: $isFollowing")
                 },
                 onViewersTap = { showViewersSheet = true },
                 onAction = onAction,
                 onThreadTap = {
-                    // Let parent handle thread navigation
                     onAction?.invoke(OverlayAction.NavigateToThread)
                 }
             )
@@ -684,12 +718,14 @@ private fun CarouselOverlay(
     currentUserID: String?,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
+    slotMode: SwappableSlotMode,
+    isSelfTip: Boolean,
+    onSlotModeChange: (SwappableSlotMode) -> Unit,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
     onAction: ((OverlayAction) -> Unit)?
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        // Bottom engagement buttons - centered horizontal row
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -720,28 +756,20 @@ private fun CarouselOverlay(
                 )
             }
 
-            // Hype Button
-            if (engagementViewModel != null && iconManager != null) {
-                ProgressiveHypeButton3D(
-                    videoID = video.id,
-                    creatorID = video.creatorID,
-                    userTier = currentUserTier,
-                    hypeCount = videoEngagement?.hypeCount ?: video.hypeCount,
-                    currentUserID = currentUserID ?: "",
-                    viewModel = engagementViewModel,
-                    iconManager = iconManager
-                )
-            } else {
-                OverlayActionButton(
-                    icon = Icons.Default.LocalFireDepartment,
-                    label = "Hype",
-                    ringColor = Color(0xFFFF8C00),
-                    onClick = {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAction?.invoke(OverlayAction.Engagement(EngagementType.HYPE))
-                    }
-                )
-            }
+            // Swappable Hype / Tip slot (swipe UP = tip, DOWN = hype)
+            SwappableEngagementSlot(
+                video = video,
+                videoEngagement = videoEngagement,
+                currentUserID = currentUserID ?: "",
+                currentUserTier = currentUserTier,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                slotMode = slotMode,
+                isSelfTip = isSelfTip,
+                onSlotModeChange = onSlotModeChange,
+                hapticFeedback = hapticFeedback,
+                onAction = onAction
+            )
 
             // Stitch Button
             if (canReply) {
@@ -786,6 +814,9 @@ private fun FullContextualOverlay(
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
     followManager: FollowManager?,
+    slotMode: SwappableSlotMode,
+    isSelfTip: Boolean,
+    onSlotModeChange: (SwappableSlotMode) -> Unit,
     bottomPadding: Dp,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
@@ -828,6 +859,9 @@ private fun FullContextualOverlay(
             currentUserID = currentUserID,
             engagementViewModel = engagementViewModel,
             iconManager = iconManager,
+            slotMode = slotMode,
+            isSelfTip = isSelfTip,
+            onSlotModeChange = onSlotModeChange,
             bottomPadding = bottomPadding,
             context = context,
             hapticFeedback = hapticFeedback,
@@ -923,6 +957,9 @@ private fun BottomSection(
     currentUserID: String?,
     engagementViewModel: EngagementViewModel?,
     iconManager: FloatingIconManager?,
+    slotMode: SwappableSlotMode,
+    isSelfTip: Boolean,
+    onSlotModeChange: (SwappableSlotMode) -> Unit,
     bottomPadding: Dp,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
@@ -1068,33 +1105,25 @@ private fun BottomSection(
             // Gap between groups
             Spacer(modifier = Modifier.width(32.dp))
 
-            // Right group: Hype + Stitch
+            // Right group: Swappable (Hype/Tip) + Stitch
             Row(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Hype Button - Progressive 3D
-                if (engagementViewModel != null && iconManager != null) {
-                    ProgressiveHypeButton3D(
-                        videoID = video.id,
-                        creatorID = video.creatorID,
-                        userTier = currentUserTier,
-                        hypeCount = videoEngagement?.hypeCount ?: video.hypeCount,
-                        currentUserID = currentUserID ?: "",
-                        viewModel = engagementViewModel,
-                        iconManager = iconManager
-                    )
-                } else {
-                    OverlayActionButton(
-                        icon = Icons.Default.LocalFireDepartment,
-                        label = "Hype",
-                        ringColor = Color(0xFFFF8C00),
-                        onClick = {
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAction?.invoke(OverlayAction.Engagement(EngagementType.HYPE))
-                        }
-                    )
-                }
+                // Swappable Hype / Tip slot — swipe UP = tip, DOWN = hype
+                SwappableEngagementSlot(
+                    video = video,
+                    videoEngagement = videoEngagement,
+                    currentUserID = currentUserID ?: "",
+                    currentUserTier = currentUserTier,
+                    engagementViewModel = engagementViewModel,
+                    iconManager = iconManager,
+                    slotMode = slotMode,
+                    isSelfTip = isSelfTip,
+                    onSlotModeChange = onSlotModeChange,
+                    hapticFeedback = hapticFeedback,
+                    onAction = onAction
+                )
 
                 // Stitch Button (conditional)
                 if (canReply) {
@@ -1467,5 +1496,246 @@ private fun formatCount(count: Int): String {
         count < 1_000_000 -> String.format("%.1fK", count / 1000.0).replace(".0", "")
         count < 1_000_000_000 -> String.format("%.1fM", count / 1_000_000.0).replace(".0", "")
         else -> String.format("%.1fB", count / 1_000_000_000.0).replace(".0", "")
+    }
+}
+
+// ============================================================================
+// MARK: - SWAPPABLE ENGAGEMENT SLOT
+// Swipe UP → TipButton, swipe DOWN → HypeButton
+// Mirrors iOS SwappableEngagementButton.swift exactly.
+// CACHING: Balance read from HypeCoinCoordinator cached flow — 0 extra reads.
+// ============================================================================
+
+@androidx.compose.runtime.Composable
+internal fun SwappableEngagementSlot(
+    video: CoreVideoMetadata,
+    videoEngagement: ContextualVideoEngagement?,
+    currentUserID: String,
+    currentUserTier: UserTier,
+    engagementViewModel: EngagementViewModel?,
+    iconManager: FloatingIconManager?,
+    slotMode: SwappableSlotMode,
+    isSelfTip: Boolean,
+    onSlotModeChange: (SwappableSlotMode) -> Unit,
+    hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onAction: ((OverlayAction) -> Unit)?
+) {
+    var dragAccum by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0f) }
+    val switchThreshold = 60f
+
+    androidx.compose.foundation.layout.Box(
+        modifier = androidx.compose.ui.Modifier
+            .pointerInput(slotMode) {
+                detectVerticalDragGestures(
+                    onDragEnd = { dragAccum = 0f },
+                    onDragCancel = { dragAccum = 0f }
+                ) { _, dragAmount ->
+                    dragAccum += dragAmount
+                    if (dragAccum < -switchThreshold && slotMode == SwappableSlotMode.HYPE) {
+                        hapticFeedback.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onSlotModeChange(SwappableSlotMode.TIP)
+                        dragAccum = 0f
+                    } else if (dragAccum > switchThreshold && slotMode == SwappableSlotMode.TIP) {
+                        hapticFeedback.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onSlotModeChange(SwappableSlotMode.HYPE)
+                        dragAccum = 0f
+                    }
+                }
+            },
+        contentAlignment = androidx.compose.ui.Alignment.Center
+    ) {
+        AnimatedContent(
+            targetState = slotMode,
+            transitionSpec = {
+                if (targetState == SwappableSlotMode.TIP) {
+                    (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut())
+                } else {
+                    (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                }
+            },
+            label = "swappable_slot"
+        ) { mode ->
+            when (mode) {
+                SwappableSlotMode.HYPE -> {
+                    if (engagementViewModel != null && iconManager != null) {
+                        ProgressiveHypeButton3D(
+                            videoID = video.id,
+                            creatorID = video.creatorID,
+                            userTier = currentUserTier,
+                            hypeCount = videoEngagement?.hypeCount ?: video.hypeCount,
+                            currentUserID = currentUserID,
+                            viewModel = engagementViewModel,
+                            iconManager = iconManager
+                        )
+                    } else {
+                        OverlayActionButton(
+                            icon = Icons.Default.LocalFireDepartment,
+                            label = "Hype",
+                            ringColor = Color(0xFFFF8C00),
+                            onClick = {
+                                hapticFeedback.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                onAction?.invoke(OverlayAction.Engagement(EngagementType.HYPE))
+                            }
+                        )
+                    }
+                }
+                SwappableSlotMode.TIP -> {
+                    TipButton(
+                        videoID = video.id,
+                        creatorID = video.creatorID,
+                        currentUserID = currentUserID,
+                        tipCount = 0,
+                        isSelfTip = isSelfTip,
+                        onAction = onAction
+                    )
+                }
+            }
+        }
+
+        // Swipe hint arrow
+        androidx.compose.material3.Icon(
+            imageVector = if (slotMode == SwappableSlotMode.HYPE)
+                Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.35f),
+            modifier = androidx.compose.ui.Modifier
+                .align(androidx.compose.ui.Alignment.BottomCenter)
+                .size(10.dp)
+        )
+    }
+}
+
+// ============================================================================
+// MARK: - TIP BUTTON
+// Mirrors TipButton.swift: tap=1 coin, long press=5 coins
+// isSelfTip disabled with PersonOff icon
+// Optimistic sessionTotal over persisted tipCount
+// Writes: debit tipper coin_balances, credit creator pendingCoins, increment tipCount
+// ============================================================================
+
+@androidx.compose.runtime.Composable
+internal fun TipButton(
+    videoID: String,
+    creatorID: String,
+    currentUserID: String,
+    tipCount: Int,
+    isSelfTip: Boolean,
+    onAction: ((OverlayAction) -> Unit)?
+) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val db = androidx.compose.runtime.remember { FirebaseFirestore.getInstance("stitchfin") }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    var sessionTotal by androidx.compose.runtime.remember(videoID) { androidx.compose.runtime.mutableStateOf(0) }
+    val displayCount = tipCount + sessionTotal
+
+    var isPressed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showBurst by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var errorMsg by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var showError by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    val scale by animateFloatAsState(if (isPressed) 0.9f else 1f, label = "tip_scale")
+
+    fun sendTip(amount: Int) {
+        sessionTotal += amount
+        scope.launch {
+            try {
+                db.collection("coin_balances").document(currentUserID)
+                    .update("availableCoins", FieldValue.increment(-amount.toLong())).await()
+                db.collection("coin_balances").document(creatorID)
+                    .update("pendingCoins", FieldValue.increment(amount.toLong())).await()
+                db.collection("videos").document(videoID)
+                    .update("tipCount", FieldValue.increment(amount.toLong())).await()
+                println("💰 TIP: $currentUserID → $creatorID +$amount on $videoID")
+            } catch (e: Exception) {
+                sessionTotal -= amount
+                errorMsg = "Tip failed"
+                showError = true
+                scope.launch { delay(2000); showError = false }
+                println("❌ TIP: ${e.message}")
+            }
+        }
+    }
+
+    androidx.compose.foundation.layout.Column(
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        // Count display (mirrors tipCountDisplay)
+        androidx.compose.material3.Text(
+            "$displayCount",
+            fontSize = 12.fixedSp(),
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
+
+        // Button circle
+        androidx.compose.foundation.layout.Box(
+            modifier = androidx.compose.ui.Modifier
+                .size(42.dp)
+                .scale(scale)
+                .background(
+                    if (isSelfTip) Color.Gray.copy(0.4f) else Color.Black.copy(0.4f),
+                    CircleShape
+                )
+                .border(
+                    width = if (showBurst) 3.dp else 1.5.dp,
+                    brush = when {
+                        isSelfTip -> Brush.linearGradient(listOf(Color.Gray, Color.Gray.copy(0.5f)))
+                        showBurst -> Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00), Color(0xFFFF4500)))
+                        else -> Brush.linearGradient(listOf(Color(0xFFFFD700).copy(0.6f), Color(0xFFFF8C00).copy(0.4f)))
+                    },
+                    shape = CircleShape
+                )
+                .clickable(enabled = !isSelfTip) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    isPressed = true
+                    sendTip(1)
+                    scope.launch { delay(150); isPressed = false }
+                },
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            if (isSelfTip) {
+                androidx.compose.material3.Icon(
+                    Icons.Default.PersonOff,
+                    contentDescription = null,
+                    tint = Color.Gray,
+                    modifier = androidx.compose.ui.Modifier.size(18.dp)
+                )
+            } else {
+                androidx.compose.material3.Text("🪙", fontSize = 20.sp)
+            }
+
+            if (showBurst) {
+                androidx.compose.material3.Text(
+                    "x5",
+                    fontSize = 8.fixedSp(),
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFFFFD700),
+                    modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                )
+            }
+        }
+
+        // Label
+        androidx.compose.material3.Text(
+            if (isSelfTip) "—" else "Tip",
+            fontSize = 10.fixedSp(),
+            fontWeight = FontWeight.Medium,
+            color = if (isSelfTip) Color.Gray else Color.White.copy(0.8f)
+        )
+
+        // Error toast
+        if (showError) {
+            androidx.compose.material3.Text(
+                errorMsg,
+                fontSize = 10.fixedSp(),
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = androidx.compose.ui.Modifier
+                    .background(Color.Black.copy(0.75f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
     }
 }

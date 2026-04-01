@@ -96,7 +96,8 @@ class AuthService {
 
             } catch (e: Exception) {
                 println("AUTH SERVICE: ❌ Sign in failed: ${e.message}")
-                handleAuthError(e)
+                _authState.value = AuthState.SIGNED_OUT
+                _isLoading.value = false
                 throw e
             } finally {
                 _isLoading.value = false
@@ -179,13 +180,31 @@ class AuthService {
                     )
                     println("AUTH SERVICE: ✅ User profile created successfully")
 
-                    // Wait for Firestore propagation across read replicas
-                    println("AUTH SERVICE: ⏳ Waiting 2000ms for Firestore propagation...")
-                    delay(2000)
+                    // Verify the document was actually written — retry once if missing
+                    if (!checkUserProfileExists(user.uid)) {
+                        println("AUTH SERVICE: ⚠️ Profile not found after write — retrying")
+                        createUserProfile(
+                            firebaseUser = user,
+                            username = username,
+                            displayName = displayName,
+                            isSpecialUser = isSpecialUser,
+                            accountType = accountType,
+                            brandName = brandName,
+                            websiteURL = websiteURL,
+                            businessCategory = businessCategory
+                        )
+                        delay(500)
+                    }
+
+                    println("AUTH SERVICE: ⏳ Waiting for Firestore propagation...")
+                    delay(1500)
                     println("AUTH SERVICE: ✅ Firestore propagation delay complete")
 
                 } catch (e: Exception) {
+                    // Profile creation failed — throw so signup fails cleanly
+                    // instead of creating a phantom authenticated user with no profile
                     println("AUTH SERVICE: ❌ Profile creation failed: ${e.message}")
+                    throw e
                 }
 
                 println("AUTH SERVICE: ✅ Sign up completed successfully")
@@ -194,7 +213,8 @@ class AuthService {
 
             } catch (e: Exception) {
                 println("AUTH SERVICE: ❌ Sign up failed: ${e.message}")
-                handleAuthError(e)
+                _authState.value = AuthState.SIGNED_OUT
+                _isLoading.value = false
                 throw e
             } finally {
                 _isLoading.value = false
@@ -257,10 +277,8 @@ class AuthService {
     }
 
     private suspend fun checkUsernameAvailabilityInternal(username: String): Boolean {
-        return withContext(serviceScope.coroutineContext) {
-            val query = db.collection("users").whereEqualTo("username", username).limit(1).get().await()
-            query.isEmpty
-        }
+        val query = db.collection("users").whereEqualTo("username", username).limit(1).get().await()
+        return query.isEmpty
     }
 
     suspend fun checkUsernameAvailability(username: String): Boolean = checkUsernameAvailabilityInternal(username)

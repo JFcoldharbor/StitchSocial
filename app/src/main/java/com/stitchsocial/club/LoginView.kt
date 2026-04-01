@@ -1,21 +1,20 @@
 /*
- * LoginView.kt
+ * LoginView.kt - FULL iOS PARITY
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 8: Views - Authentication interface
- * Matches: LoginView.swift (iOS) — FULL PARITY
- * Features: Animated particles, glassmorphism, account type picker, business fields,
- *           referral code, terms acceptance checkbox, saveTermsAcceptance Firestore write,
- *           processReferralSignup post-auth, auto-join official community
+ * Matches LoginView.swift exactly:
+ *   - Personal / Business account type picker
+ *   - Business: brandName, websiteURL, AdCategory picker
+ *   - Personal: username, displayName
+ *   - Referral code (optional, auto-uppercase)
+ *   - Terms + Safety + Privacy acceptance checkbox (required)
+ *   - saveTermsAcceptance — single merge write post-auth
+ *   - processReferralSignup / processOrganicSignup
+ *   - No authService state observers (fixes race condition)
  *
- * CACHING NOTES (add to CachingOptimization file):
- * - referralCodeValid: debounce + in-memory cache per code string to avoid
- *   Firestore reads on every keystroke. Key: "referral_validated_{code}",
- *   TTL: session-scoped (no persistence needed). 1 read per unique code max.
- * - acceptedTermsVersion: cache in SharedPreferences after first acceptance.
- *   On cold launch, compare cached version to currentTermsVersion constant —
- *   skip Firestore read if versions match. Only write when version changes.
- * - NO caching needed for business category list — static enum, never fetched.
+ * CACHING: acceptedTermsVersion — add to CachingOptimization if force
+ *   re-acceptance is needed; cache version in SharedPreferences to avoid
+ *   Firestore read on cold launch.
  */
 
 package com.stitchsocial.club
@@ -25,6 +24,8 @@ import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -42,89 +43,64 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.stitchsocial.club.services.AuthService
-import com.stitchsocial.club.services.AdCategory
-import com.stitchsocial.club.services.ReferralService
+import com.google.firebase.firestore.SetOptions
 import com.stitchsocial.club.foundation.AccountType
+import com.stitchsocial.club.services.AdCategory
+import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.ReferralService
 import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlin.random.Random
 
-// AccountType and BusinessCategory are defined in BusinessProfile.kt (foundation package)
-// import com.stitchsocial.club.foundation.AccountType
-// import com.stitchsocial.club.foundation.AdCategory (used as BusinessCategory equivalent)
+private const val TERMS_VERSION = "1.0"
+private const val TERMS_URL = "https://stitchsocial.me/privacy"
 
-// MARK: - Auth Mode Enum
+// MARK: - AuthMode
 
-enum class AuthMode(
-    val title: String,
-    val subtitle: String,
-    val buttonText: String
-) {
+enum class AuthMode(val title: String, val subtitle: String, val buttonText: String) {
     SIGN_IN("Welcome Back", "Sign in to continue your creative journey", "Sign In"),
     SIGN_UP("Join Stitch Social", "Create your conversation account", "Create Account")
 }
 
-// MARK: - Floating Particle
+// MARK: - FloatingParticle
 
 @Composable
 fun FloatingParticle(index: Int, screenWidth: Float, screenHeight: Float) {
-    val infiniteTransition = rememberInfiniteTransition(label = "particle_$index")
-    val initialX = remember { Random.nextFloat() * screenWidth }
-    val initialY = remember { Random.nextFloat() * screenHeight }
-    val size = remember { Random.nextFloat() * 6f + 2f }
-    val duration = remember { Random.nextInt(3000, 6000) }
-
-    val offsetX by infiniteTransition.animateFloat(
-        initialValue = initialX,
-        targetValue = initialX + Random.nextFloat() * 100f - 50f,
-        animationSpec = infiniteRepeatable(tween(duration, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pX_$index"
-    )
-    val offsetY by infiniteTransition.animateFloat(
-        initialValue = initialY,
-        targetValue = initialY + Random.nextFloat() * 100f - 50f,
-        animationSpec = infiniteRepeatable(tween(duration, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pY_$index"
-    )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.1f, targetValue = 0.3f,
-        animationSpec = infiniteRepeatable(tween(duration / 2, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pA_$index"
-    )
-
-    Box(
-        modifier = Modifier
-            .offset(x = offsetX.dp, y = offsetY.dp)
-            .size(size.dp)
-            .clip(CircleShape)
-            .background(StitchColors.primary.copy(alpha = alpha))
-    )
+    val t = rememberInfiniteTransition(label = "p$index")
+    val ix = remember { Random.nextFloat() * screenWidth }
+    val iy = remember { Random.nextFloat() * screenHeight }
+    val dur = remember { Random.nextInt(3000, 6000) }
+    val sz = remember { Random.nextFloat() * 6f + 2f }
+    val ox by t.animateFloat(ix, ix + Random.nextFloat() * 100f - 50f,
+        infiniteRepeatable(tween(dur, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "ox$index")
+    val oy by t.animateFloat(iy, iy + Random.nextFloat() * 100f - 50f,
+        infiniteRepeatable(tween(dur, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "oy$index")
+    val al by t.animateFloat(0.1f, 0.3f,
+        infiniteRepeatable(tween(dur / 2, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "al$index")
+    Box(Modifier.offset(ox.dp, oy.dp).size(sz.dp).clip(CircleShape).background(StitchColors.primary.copy(alpha = al)))
 }
 
-// MARK: - Main LoginView
+// MARK: - LoginView
 
 @Composable
 fun LoginView(
@@ -132,352 +108,232 @@ fun LoginView(
     onLoginSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = lifecycleOwner.lifecycleScope
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val configuration = LocalConfiguration.current
-    val screenWidth = configuration.screenWidthDp.toFloat()
-    val screenHeight = configuration.screenHeightDp.toFloat()
-    val prefs = remember { context.getSharedPreferences("stitch_settings", android.content.Context.MODE_PRIVATE) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
-    // Auth mode
-    var currentMode by remember { mutableStateOf(AuthMode.SIGN_IN) }
-
-    // Form fields
+    // Form
+    var mode by remember { mutableStateOf(AuthMode.SIGN_IN) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
-    var referralCode by remember { mutableStateOf("") }
-    var acceptedTerms by remember { mutableStateOf(false) }
+    var pwVisible by remember { mutableStateOf(false) }
+    var cpwVisible by remember { mutableStateOf(false) }
 
-    // Account type
-    var selectedAccountType by remember { mutableStateOf(AccountType.PERSONAL) }
+    // Account type + business
+    var accountType by remember { mutableStateOf(AccountType.PERSONAL) }
     var brandName by remember { mutableStateOf("") }
     var websiteURL by remember { mutableStateOf("") }
-    var selectedBusinessCategory by remember { mutableStateOf(AdCategory.OTHER) }
+    var category by remember { mutableStateOf(AdCategory.OTHER) }
+    var referralCode by remember { mutableStateOf("") }
 
-    // Password visibility
-    var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    // Terms
+    var acceptedTerms by remember { mutableStateOf(false) }
 
-    // UI state
+    // UI
     var isLoading by remember { mutableStateOf(false) }
-    var showingSuccess by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showForgotPasswordDialog by remember { mutableStateOf(false) }
-    var forgotPasswordEmail by remember { mutableStateOf("") }
-    var forgotPasswordSent by remember { mutableStateOf(false) }
-    var forgotPasswordError by remember { mutableStateOf<String?>(null) }
-    var animateWelcome by remember { mutableStateOf(false) }
+    var showSuccess by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var animated by remember { mutableStateOf(false) }
+    var showForgot by remember { mutableStateOf(false) }
+    var forgotEmail by remember { mutableStateOf("") }
+    var forgotSent by remember { mutableStateOf(false) }
+    var forgotError by remember { mutableStateOf<String?>(null) }
 
-    // Current terms version — bump to force re-accept
-    val currentTermsVersion = "1.0"
+    // Focus
+    val fEmail = remember { FocusRequester() }
+    val fUser = remember { FocusRequester() }
+    val fDN = remember { FocusRequester() }
+    val fBrand = remember { FocusRequester() }
+    val fPw = remember { FocusRequester() }
+    val fCpw = remember { FocusRequester() }
 
-    // Focus requesters
-    val emailFocus = remember { FocusRequester() }
-    val usernameFocus = remember { FocusRequester() }
-    val displayNameFocus = remember { FocusRequester() }
-    val brandNameFocus = remember { FocusRequester() }
-    val websiteFocus = remember { FocusRequester() }
-    val passwordFocus = remember { FocusRequester() }
-    val confirmPasswordFocus = remember { FocusRequester() }
-    val referralFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(100); animated = true }
 
-    LaunchedEffect(Unit) {
-        delay(100)
-        animateWelcome = true
-    }
-
-    // Form validation — mirrors iOS isFormValid
-    val isValidEmail = email.contains("@") && email.contains(".")
-    val isValidPassword = password.length >= 6
-    val passwordsMatch = password == confirmPassword
-
-    val isFormValid = when {
-        !acceptedTerms -> false
-        currentMode == AuthMode.SIGN_IN -> isValidEmail && isValidPassword
-        selectedAccountType == AccountType.BUSINESS ->
-            isValidEmail && brandName.isNotBlank() && isValidPassword && passwordsMatch
-        else -> isValidEmail && username.length >= 3 && displayName.isNotBlank() && isValidPassword && passwordsMatch
-    }
-
-    // Auth handler
-    fun handleAuthentication() {
-        keyboardController?.hide()
-        if (!isFormValid) return
-        scope.launch {
-            try {
-                isLoading = true
-                errorMessage = null
-
-                if (currentMode == AuthMode.SIGN_IN) {
-                    val result = authService.signIn(email.trim(), password)
-                    if (result.success) {
-                        // Cache terms version in prefs to avoid re-read on cold launch
-                        prefs.edit().putString("acceptedTermsVersion", currentTermsVersion).apply()
-                        showingSuccess = true
-                        delay(1500)
-                        showingSuccess = false
-                        onLoginSuccess()
-                    } else {
-                        errorMessage = "Sign in failed. Please check your credentials."
-                    }
-                } else {
-                    val resolvedUsername = if (selectedAccountType == AccountType.BUSINESS) brandName else username.trim().lowercase()
-                    val resolvedDisplayName = if (selectedAccountType == AccountType.BUSINESS) brandName else displayName.trim()
-
-                    val result = authService.signUp(
-                        email = email.trim(),
-                        password = password,
-                        displayName = resolvedDisplayName,
-                        username = resolvedUsername,
-                        accountType = selectedAccountType,
-                        brandName = if (selectedAccountType == AccountType.BUSINESS) brandName else null,
-                        websiteURL = if (selectedAccountType == AccountType.BUSINESS && websiteURL.isNotBlank()) websiteURL else null,
-                        businessCategory = if (selectedAccountType == AccountType.BUSINESS) selectedBusinessCategory else null
-                    )
-
-                    if (result.success) {
-                        val userID = result.userId  // ✅ lowercase d — matches AuthResult data class ?: ""
-
-                        // Save terms acceptance — single merge write, no read
-                        saveTermsAcceptance(userID, currentTermsVersion)
-
-                        // Cache version in prefs to skip future Firestore reads
-                        prefs.edit().putString("acceptedTermsVersion", currentTermsVersion).apply()
-
-                        // Process referral code — only on signup, only if provided
-                        val trimmedCode = referralCode.trim().uppercase()
-                        if (trimmedCode.isNotEmpty()) {
-                            try {
-                                val referralResult = ReferralService().processReferralSignup(
-                                    referralCode = trimmedCode,
-                                    newUserID = userID,
-                                    platform = "android",
-                                    sourceType = "manual"
-                                )
-                                if (referralResult.success) {
-                                    println("🎉 REFERRAL: Code redeemed — referred by ${referralResult.referrerID ?: "unknown"}")
-                                } else {
-                                    println("⚠️ REFERRAL: Code failed — ${referralResult.error ?: "unknown error"}")
-                                }
-                            } catch (e: Exception) {
-                                println("⚠️ REFERRAL: Exception — ${e.message}")
-                            }
-                        } else {
-                            // No referral code — track organic signup
-                            try {
-                                ReferralService().processOrganicSignup(userID, "android")
-                            } catch (e: Exception) {
-                                println("⚠️ REFERRAL: Organic tracking failed — ${e.message}")
-                            }
-                        }
-
-                        // Auto-join official community
-                        // TODO: Wire CommunityService.autoJoinOfficialCommunity when ported to Android
-                        println("🏘 COMMUNITY: autoJoinOfficialCommunity — CommunityService not yet on Android")
-
-                        showingSuccess = true
-                        delay(2000)
-                        showingSuccess = false
-                        onLoginSuccess()
-                    } else {
-                        errorMessage = "Sign up failed. Please try again."
-                    }
-                }
-            } catch (e: Exception) {
-                errorMessage = when {
-                    e.message?.contains("email address is already in use") == true ->
-                        "This email is already registered. Please sign in instead."
-                    e.message?.contains("network") == true ->
-                        "Network error. Please check your connection."
-                    e.message?.contains("password") == true ->
-                        "Invalid password. Please try again."
-                    e.message?.contains("Username") == true -> e.message
-                    else -> "Authentication error. Please try again."
-                }
-            } finally {
-                isLoading = false
-            }
+    val validEmail = email.contains("@") && email.contains(".")
+    val validPw = password.length >= 6
+    val pwMatch = password == confirmPassword
+    val formValid = acceptedTerms && when (mode) {
+        AuthMode.SIGN_IN -> validEmail && validPw
+        AuthMode.SIGN_UP -> when (accountType) {
+            AccountType.BUSINESS -> validEmail && brandName.isNotBlank() && validPw && pwMatch
+            else -> validEmail && username.length >= 3 && displayName.isNotBlank() && validPw && pwMatch
         }
     }
 
-    fun switchMode(newMode: AuthMode) {
-        currentMode = newMode
-        email = ""; password = ""; confirmPassword = ""
-        username = ""; displayName = ""; referralCode = ""
-        brandName = ""; websiteURL = ""
-        acceptedTerms = false
-        selectedAccountType = AccountType.PERSONAL
-        errorMessage = null
-    }
-
-    fun handleForgotPassword() {
-        val emailToReset = forgotPasswordEmail.trim()
-        if (emailToReset.isBlank() || !emailToReset.contains("@")) {
-            forgotPasswordError = "Please enter a valid email address"
+    fun doAuth() {
+        keyboard?.hide(); focusManager.clearFocus()
+        if (!formValid) {
+            errorMsg = when {
+                !acceptedTerms -> "Please accept the Terms & Conditions to continue"
+                !validEmail -> "Please enter a valid email address"
+                !validPw -> "Password must be at least 6 characters"
+                mode == AuthMode.SIGN_UP && !pwMatch -> "Passwords do not match"
+                mode == AuthMode.SIGN_UP && accountType == AccountType.PERSONAL && username.length < 3 ->
+                    "Username must be at least 3 characters"
+                mode == AuthMode.SIGN_UP && accountType == AccountType.PERSONAL && displayName.isBlank() ->
+                    "Please enter your display name"
+                mode == AuthMode.SIGN_UP && accountType == AccountType.BUSINESS && brandName.isBlank() ->
+                    "Please enter your brand name"
+                else -> "Please fill in all fields"
+            }
             return
         }
         scope.launch {
             try {
-                isLoading = true
-                forgotPasswordError = null
-                FirebaseAuth.getInstance().sendPasswordResetEmail(emailToReset).await()
-                forgotPasswordSent = true
-            } catch (e: Exception) {
-                forgotPasswordError = when {
-                    e.message?.contains("no user") == true -> "No account found with this email"
-                    e.message?.contains("network") == true -> "Network error. Please check your connection."
-                    else -> "Failed to send reset email. Please try again."
+                isLoading = true; errorMsg = null
+                if (mode == AuthMode.SIGN_IN) {
+                    val r = authService.signIn(email.trim(), password)
+                    if (r.success) { showSuccess = true; delay(1500); showSuccess = false; onLoginSuccess() }
+                } else {
+                    val resolvedUsername = if (accountType == AccountType.BUSINESS) brandName else username.trim().lowercase()
+                    val resolvedDN = if (accountType == AccountType.BUSINESS) brandName else displayName.trim()
+                    val r = authService.signUp(
+                        email = email.trim(), password = password,
+                        displayName = resolvedDN, username = resolvedUsername,
+                        accountType = accountType,
+                        brandName = if (accountType == AccountType.BUSINESS) brandName else null,
+                        websiteURL = if (accountType == AccountType.BUSINESS && websiteURL.isNotBlank()) websiteURL else null,
+                        businessCategory = if (accountType == AccountType.BUSINESS) category else null
+                    )
+                    if (r.success) {
+                        // Save terms acceptance — mirrors iOS saveTermsAcceptance()
+                        try {
+                            FirebaseFirestore.getInstance("stitchfin").collection("users").document(r.userId)
+                                .set(mapOf(
+                                    "acceptedTermsAt" to FieldValue.serverTimestamp(),
+                                    "acceptedTermsVersion" to TERMS_VERSION,
+                                    "acceptedSafetyPolicy" to true,
+                                    "acceptedPrivacyPolicy" to true
+                                ), SetOptions.merge()).await()
+                        } catch (e: Exception) { println("⚠️ TERMS: ${e.message}") }
+
+                        // Process referral — mirrors iOS processReferralSignup / processOrganicSignup
+                        val code = referralCode.trim().uppercase()
+                        try {
+                            val rs = ReferralService()
+                            if (code.isNotEmpty()) {
+                                val ref = rs.processReferralSignup(code, r.userId, "android", "manual")
+                                println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}")
+                            } else {
+                                rs.processOrganicSignup(newUserID = r.userId, platform = "android")
+                            }
+                        } catch (e: Exception) { println("⚠️ REFERRAL: ${e.message}") }
+
+                        showSuccess = true; delay(2000); showSuccess = false; onLoginSuccess()
+                    }
                 }
-            } finally {
-                isLoading = false
-            }
+            } catch (e: Exception) {
+                errorMsg = when {
+                    e.message?.contains("email address is already in use") == true ->
+                        "This email is already registered. Please sign in instead."
+                    e.message?.contains("network") == true -> "Network error. Please check your connection."
+                    e.message?.contains("Username") == true -> e.message
+                    else -> "Authentication error: ${e.message}"
+                }
+            } finally { isLoading = false }
         }
     }
 
-    // MARK: - Root Layout
+    fun switchMode(m: AuthMode) {
+        mode = m; email = ""; password = ""; confirmPassword = ""
+        username = ""; displayName = ""; brandName = ""; websiteURL = ""
+        referralCode = ""; acceptedTerms = false; errorMsg = null
+        accountType = AccountType.PERSONAL
+    }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color.Black, Color(0xFF0A0A1A), Color.Black)))
-    ) {
-        // Floating particles background
-        Box(modifier = Modifier.fillMaxSize()) {
-            repeat(20) { index ->
-                FloatingParticle(index = index, screenWidth = screenWidth, screenHeight = screenHeight)
-            }
-        }
+    Box(modifier = modifier.fillMaxSize().background(
+        Brush.verticalGradient(listOf(Color.Black, Color(0xFF0A0A1A), Color.Black))
+    )) {
+        repeat(20) { i -> FloatingParticle(i, 400f, 800f) }
 
-        // Main scrollable content
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-                .imePadding(),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp).imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(60.dp))
+            Spacer(Modifier.height(60.dp))
 
-            // MARK: - Logo
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .scale(if (animateWelcome) 1f else 0.8f)
-                    .alpha(if (animateWelcome) 1f else 0f)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.stitchsociallogo),
-                    contentDescription = "Stitch Social Logo",
-                    modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
-                    contentScale = ContentScale.Fit
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+            // Logo
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.scale(if (animated) 1f else 0.8f).alpha(if (animated) 1f else 0f)) {
+                Image(painterResource(R.drawable.stitchsociallogo), "Stitch Social",
+                    Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Fit)
+                Spacer(Modifier.height(16.dp))
                 Text("Stitch Social", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(Modifier.height(40.dp))
 
-            // MARK: - Welcome Text
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.alpha(if (animateWelcome) 1f else 0f)
-            ) {
-                Text(currentMode.title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(currentMode.subtitle, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = StitchColors.textSecondary, textAlign = TextAlign.Center)
+            // Welcome
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(if (animated) 1f else 0f)) {
+                Text(mode.title, fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(8.dp))
+                Text(mode.subtitle, fontSize = 16.sp, color = StitchColors.textSecondary, textAlign = TextAlign.Center)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
 
-            // MARK: - Form Card
-            Card(
-                modifier = Modifier.fillMaxWidth().alpha(if (animateWelcome) 1f else 0f),
+            // Form card
+            Card(Modifier.fillMaxWidth().alpha(if (animated) 1f else 0f),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f)),
                 border = BorderStroke(1.dp, StitchColors.glassBorder)
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
                     // Email
-                    LoginTextField(
-                        value = email, onValueChange = { email = it.trim(); errorMessage = null },
-                        label = "Email", placeholder = "Enter your email",
-                        keyboardType = KeyboardType.Email,
-                        imeAction = if (currentMode == AuthMode.SIGN_UP) ImeAction.Next else ImeAction.Next,
-                        onImeAction = { if (currentMode == AuthMode.SIGN_UP) usernameFocus.requestFocus() else passwordFocus.requestFocus() },
-                        focusRequester = emailFocus
-                    )
+                    LTextField(email, { email = it.trim(); errorMsg = null }, "Email", "Enter your email",
+                        KeyboardType.Email, ImeAction.Next,
+                        { if (mode == AuthMode.SIGN_UP) fUser.requestFocus() else fPw.requestFocus() }, fEmail)
 
-                    // Sign Up only fields
-                    if (currentMode == AuthMode.SIGN_UP) {
-
+                    if (mode == AuthMode.SIGN_UP) {
                         // Account Type Picker
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Account Type", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AccountTypeButton(
-                                    modifier = Modifier.weight(1f),
-                                    icon = Icons.Default.Person,
-                                    label = "Personal",
-                                    selected = selectedAccountType == AccountType.PERSONAL,
-                                    onClick = { selectedAccountType = AccountType.PERSONAL }
-                                )
-                                AccountTypeButton(
-                                    modifier = Modifier.weight(1f),
-                                    icon = Icons.Default.Business,
-                                    label = "Business",
-                                    selected = selectedAccountType == AccountType.BUSINESS,
-                                    onClick = { selectedAccountType = AccountType.BUSINESS }
-                                )
+                            Text("Account Type", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(0.8f))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                AccTypeBtn(Icons.Default.Person, "Personal",
+                                    accountType == AccountType.PERSONAL, Modifier.weight(1f)) {
+                                    accountType = AccountType.PERSONAL
+                                }
+                                AccTypeBtn(Icons.Default.Business, "Business",
+                                    accountType == AccountType.BUSINESS, Modifier.weight(1f)) {
+                                    accountType = AccountType.BUSINESS
+                                }
                             }
                         }
 
                         // Business fields
-                        if (selectedAccountType == AccountType.BUSINESS) {
-                            LoginTextField(
-                                value = brandName, onValueChange = { brandName = it; errorMessage = null },
-                                label = "Brand Name", placeholder = "Your company or brand name",
-                                imeAction = ImeAction.Next,
-                                onImeAction = { websiteFocus.requestFocus() },
-                                focusRequester = brandNameFocus
-                            )
-                            LoginTextField(
-                                value = websiteURL, onValueChange = { websiteURL = it; errorMessage = null },
-                                label = "Website (optional)", placeholder = "https://yourbrand.com",
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Next,
-                                onImeAction = { passwordFocus.requestFocus() },
-                                focusRequester = websiteFocus
-                            )
+                        if (accountType == AccountType.BUSINESS) {
+                            LTextField(brandName, { brandName = it; errorMsg = null },
+                                "Brand Name", "Your company or brand name",
+                                KeyboardType.Text, ImeAction.Next, { fPw.requestFocus() }, fBrand)
 
-                            // Business category horizontal scroll
+                            LTextField(websiteURL, { websiteURL = it },
+                                "Website (optional)", "https://yourbrand.com",
+                                KeyboardType.Uri, ImeAction.Next, { fPw.requestFocus() })
+
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Business Category", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f))
-                                Row(
-                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    AdCategory.entries.forEach { category ->
-                                        val selected = selectedBusinessCategory == category
+                                Text("Business Category", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(0.8f))
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(AdCategory.values().toList()) { cat ->
+                                        val sel = category == cat
                                         Surface(
+                                            onClick = { category = cat },
                                             shape = RoundedCornerShape(20.dp),
-                                            color = if (selected) Color.White else Color.White.copy(alpha = 0.1f),
-                                            modifier = Modifier.clickable { selectedBusinessCategory = category }
+                                            color = if (sel) Color.White else Color.White.copy(0.1f)
                                         ) {
-                                            Text(
-                                                text = "${category.icon} ${category.displayName}",
-                                                fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                                                color = if (selected) Color.Black else Color.White.copy(alpha = 0.7f),
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                            )
+                                            Text("${cat.icon} ${cat.displayName}", fontSize = 13.sp,
+                                                color = if (sel) Color.Black else Color.White.copy(0.7f),
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                                         }
                                     }
                                 }
@@ -485,195 +341,174 @@ fun LoginView(
                         }
 
                         // Personal fields
-                        if (selectedAccountType == AccountType.PERSONAL) {
-                            LoginTextField(
-                                value = username,
-                                onValueChange = { username = it.filter { c -> c.isLetterOrDigit() || c == '_' }; errorMessage = null },
-                                label = "Username", placeholder = "Choose a username",
-                                imeAction = ImeAction.Next,
-                                onImeAction = { displayNameFocus.requestFocus() },
-                                focusRequester = usernameFocus
-                            )
-                            LoginTextField(
-                                value = displayName, onValueChange = { displayName = it; errorMessage = null },
-                                label = "Display Name", placeholder = "Your display name",
-                                imeAction = ImeAction.Next,
-                                onImeAction = { passwordFocus.requestFocus() },
-                                focusRequester = displayNameFocus
-                            )
+                        if (accountType == AccountType.PERSONAL) {
+                            LTextField(username,
+                                { username = it.filter { c -> c.isLetterOrDigit() || c == '_' }; errorMsg = null },
+                                "Username", "Choose a username",
+                                KeyboardType.Text, ImeAction.Next, { fDN.requestFocus() }, fUser)
+                            LTextField(displayName, { displayName = it; errorMsg = null },
+                                "Display Name", "Your display name",
+                                KeyboardType.Text, ImeAction.Next, { fPw.requestFocus() }, fDN)
                         }
                     }
 
                     // Password
-                    LoginTextField(
-                        value = password, onValueChange = { password = it; errorMessage = null },
-                        label = "Password", placeholder = "Enter your password",
-                        isPassword = true, passwordVisible = passwordVisible,
-                        onPasswordVisibilityToggle = { passwordVisible = !passwordVisible },
-                        keyboardType = KeyboardType.Password,
-                        imeAction = if (currentMode == AuthMode.SIGN_UP) ImeAction.Next else ImeAction.Done,
-                        onImeAction = { if (currentMode == AuthMode.SIGN_UP) confirmPasswordFocus.requestFocus() else handleAuthentication() },
-                        focusRequester = passwordFocus
-                    )
+                    LTextField(password, { password = it; errorMsg = null }, "Password", "Enter your password",
+                        KeyboardType.Password,
+                        if (mode == AuthMode.SIGN_UP) ImeAction.Next else ImeAction.Done,
+                        { if (mode == AuthMode.SIGN_UP) fCpw.requestFocus() else doAuth() }, fPw,
+                        isPassword = true, pwVisible, { pwVisible = !pwVisible })
 
-                    // Forgot Password (sign in only)
-                    if (currentMode == AuthMode.SIGN_IN) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = {
-                                forgotPasswordEmail = email; forgotPasswordSent = false
-                                forgotPasswordError = null; showForgotPasswordDialog = true
-                            }) {
+                    // Forgot password
+                    if (mode == AuthMode.SIGN_IN) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { forgotEmail = email; forgotSent = false; forgotError = null; showForgot = true }) {
                                 Text("Forgot Password?", fontSize = 14.sp, color = StitchColors.primary)
                             }
                         }
                     }
 
-                    // Password requirements (sign up)
-                    if (currentMode == AuthMode.SIGN_UP && password.isNotEmpty()) {
+                    // Password requirements
+                    if (mode == AuthMode.SIGN_UP && password.isNotEmpty()) {
                         PasswordRequirementRow("At least 6 characters", password.length >= 6)
                     }
 
-                    // Confirm password (sign up)
-                    if (currentMode == AuthMode.SIGN_UP) {
-                        LoginTextField(
-                            value = confirmPassword, onValueChange = { confirmPassword = it; errorMessage = null },
-                            label = "Confirm Password", placeholder = "Confirm your password",
-                            isPassword = true, passwordVisible = confirmPasswordVisible,
-                            onPasswordVisibilityToggle = { confirmPasswordVisible = !confirmPasswordVisible },
-                            keyboardType = KeyboardType.Password,
-                            imeAction = ImeAction.Next,
-                            onImeAction = { referralFocus.requestFocus() },
-                            focusRequester = confirmPasswordFocus
-                        )
+                    // Confirm password + referral
+                    if (mode == AuthMode.SIGN_UP) {
+                        LTextField(confirmPassword, { confirmPassword = it; errorMsg = null },
+                            "Confirm Password", "Confirm your password",
+                            KeyboardType.Password, ImeAction.Done, { doAuth() }, fCpw,
+                            isPassword = true, cpwVisible, { cpwVisible = !cpwVisible })
 
-                        if (confirmPassword.isNotEmpty() && password != confirmPassword) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (confirmPassword.isNotEmpty() && !pwMatch) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Warning, contentDescription = null, tint = StitchColors.error, modifier = Modifier.size(16.dp))
-                                Text("Passwords do not match", color = StitchColors.error, fontSize = 12.sp)
+                                Text("Passwords do not match", fontSize = 12.sp, color = StitchColors.error)
                             }
                         }
 
-                        // Referral Code
+                        // Referral code
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Referral Code (optional)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f))
-                            OutlinedTextField(
-                                value = referralCode,
-                                onValueChange = { referralCode = it.uppercase().filter { c -> c.isLetterOrDigit() } },
-                                placeholder = { Text("Enter referral code", color = StitchColors.placeholder) },
-                                leadingIcon = {
-                                    Text("🎟", fontSize = 16.sp, modifier = Modifier.padding(start = 4.dp))
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().focusRequester(referralFocus),
-                                shape = RoundedCornerShape(12.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                                    focusedBorderColor = if (referralCode.isNotEmpty()) Color(0xFF9C27B0).copy(alpha = 0.6f) else StitchColors.glassBorder,
-                                    unfocusedBorderColor = if (referralCode.isNotEmpty()) Color(0xFF9C27B0).copy(alpha = 0.3f) else StitchColors.glassBorder,
-                                    focusedContainerColor = StitchColors.inputBackground,
-                                    unfocusedContainerColor = StitchColors.inputBackground,
-                                    cursorColor = StitchColors.primary
-                                )
-                            )
+                            Text("Referral Code (optional)", fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold, color = Color.White.copy(0.8f))
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .background(Color.White.copy(0.08f), RoundedCornerShape(12.dp))
+                                    .border(1.dp,
+                                        if (referralCode.isEmpty()) Color.Transparent else Color(0xFF9C27B0).copy(0.3f),
+                                        RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ConfirmationNumber,
+                                    contentDescription = null,
+                                    tint = Color(0xFF9C27B0).copy(0.6f),
+                                    modifier = Modifier.size(16.dp))
+                                Box(Modifier.weight(1f)) {
+                                    if (referralCode.isEmpty()) Text("Enter referral code", fontSize = 15.sp, color = Color.Gray)
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = referralCode,
+                                        onValueChange = { referralCode = it.uppercase().filter { c -> c.isLetterOrDigit() } },
+                                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = Color.White),
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { doAuth() }),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
                             Text("Got a code from a creator? Enter it to connect.", fontSize = 11.sp, color = Color.Gray)
                         }
                     }
 
-                    // Error message
-                    if (errorMessage != null) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = StitchColors.error.copy(alpha = 0.1f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Error
+                    errorMsg?.let {
+                        Card(Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = StitchColors.error.copy(0.1f))) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Default.Error, contentDescription = null, tint = StitchColors.error, modifier = Modifier.size(20.dp))
-                                Text(errorMessage ?: "", color = StitchColors.error, fontSize = 14.sp)
+                                Text(it, color = StitchColors.error, fontSize = 14.sp)
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                    // Primary Action Button
-                    Button(
-                        onClick = { handleAuthentication() },
-                        enabled = isFormValid && !isLoading,
+                    // Submit button
+                    Button(onClick = { doAuth() }, enabled = formValid && !isLoading,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = StitchColors.primary,
-                            disabledContainerColor = StitchColors.buttonDisabled
-                        ),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text(currentMode.buttonText, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        }
+                            disabledContainerColor = StitchColors.buttonDisabled),
+                        shape = RoundedCornerShape(16.dp)) {
+                        if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        else Text(mode.buttonText, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
-            // MARK: - Terms Acceptance
-            if (currentMode == AuthMode.SIGN_UP || true) { // Show on both modes for visibility
-                TermsAcceptanceRow(
-                    accepted = acceptedTerms,
-                    onToggle = { acceptedTerms = !acceptedTerms },
-                    onOpenTerms = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://stitchsocial.me/privacy"))) },
-                    modifier = Modifier.alpha(if (animateWelcome) 1f else 0f)
-                )
-            }
-
-            if (!acceptedTerms) {
-                Text(
-                    "Please accept the Terms & Conditions to continue",
-                    fontSize = 11.sp, color = StitchColors.textSecondary.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // MARK: - Mode Switcher
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.alpha(if (animateWelcome) 1f else 0f)
-            ) {
-                Text(
-                    text = if (currentMode == AuthMode.SIGN_IN) "Don't have an account?" else "Already have an account?",
-                    fontSize = 14.sp, color = StitchColors.textSecondary
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                TextButton(onClick = { switchMode(if (currentMode == AuthMode.SIGN_IN) AuthMode.SIGN_UP else AuthMode.SIGN_IN) }) {
-                    Text(
-                        text = if (currentMode == AuthMode.SIGN_IN) "Sign Up" else "Sign In",
-                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = StitchColors.primary
+            // Terms — always shown, mirrors iOS isFormValid requiring acceptedTerms
+            Column(Modifier.fillMaxWidth().alpha(if (animated) 1f else 0f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth().clickable { acceptedTerms = !acceptedTerms },
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(
+                        if (acceptedTerms) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                        contentDescription = null,
+                        tint = if (acceptedTerms) StitchColors.primary else StitchColors.textSecondary,
+                        modifier = Modifier.size(22.dp)
                     )
+                    Text("I agree to the Terms & Conditions, Safety Policy, and Privacy Policy",
+                        fontSize = 13.sp, color = StitchColors.textSecondary, lineHeight = 18.sp)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    listOf("📄 Terms", "🛡️ Safety", "🔒 Privacy").forEach { label ->
+                        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = StitchColors.primary,
+                            modifier = Modifier.clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(TERMS_URL)))
+                            })
+                    }
+                }
+                if (!acceptedTerms) {
+                    Text("Please accept the Terms & Conditions to continue",
+                        fontSize = 11.sp, color = StitchColors.textSecondary.copy(0.7f),
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // Mode switcher
+            Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.alpha(if (animated) 1f else 0f)) {
+                Text(if (mode == AuthMode.SIGN_IN) "Don't have an account?" else "Already have an account?",
+                    fontSize = 14.sp, color = StitchColors.textSecondary)
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = { switchMode(if (mode == AuthMode.SIGN_IN) AuthMode.SIGN_UP else AuthMode.SIGN_IN) }) {
+                    Text(if (mode == AuthMode.SIGN_IN) "Sign Up" else "Sign In",
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = StitchColors.primary)
                 }
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(Modifier.height(40.dp))
         }
 
-        // MARK: - Success Overlay
-        if (showingSuccess) {
-            Box(modifier = Modifier.fillMaxSize().background(StitchColors.modalOverlay), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Success overlay
+        if (showSuccess) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.8f)), contentAlignment = Alignment.Center) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
                     Box {
-                        Image(
-                            painter = painterResource(id = R.drawable.stitchsociallogo),
-                            contentDescription = null,
-                            modifier = Modifier.size(100.dp).clip(RoundedCornerShape(20.dp)),
-                            contentScale = ContentScale.Fit
-                        )
+                        Image(painterResource(R.drawable.stitchsociallogo), null,
+                            Modifier.size(100.dp).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Fit)
                         Box(
-                            modifier = Modifier.align(Alignment.BottomEnd).offset(x = 8.dp, y = 8.dp)
+                            modifier = Modifier.align(Alignment.BottomEnd).offset(8.dp, 8.dp)
                                 .size(32.dp).clip(CircleShape).background(StitchColors.success),
                             contentAlignment = Alignment.Center
                         ) {
@@ -686,82 +521,90 @@ fun LoginView(
             }
         }
 
-        // MARK: - Loading Overlay
-        if (isLoading && !showingSuccess) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f)),
-                    border = BorderStroke(1.dp, StitchColors.inputBorder)
-                ) {
+        // Loading overlay
+        if (isLoading && !showSuccess) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(0.8f)),
+                    border = BorderStroke(1.dp, StitchColors.inputBorder)) {
                     Column(
                         modifier = Modifier.padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        CircularProgressIndicator(color = StitchColors.primary, modifier = Modifier.size(48.dp), strokeWidth = 3.dp)
+                        CircularProgressIndicator(
+                            color = StitchColors.primary,
+                            modifier = Modifier.size(48.dp),
+                            strokeWidth = 3.dp
+                        )
                         Text("Authenticating...", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.White)
                     }
                 }
             }
         }
 
-        // MARK: - Forgot Password Dialog
-        if (showForgotPasswordDialog) {
+        // Forgot password dialog
+        if (showForgot) {
             AlertDialog(
-                onDismissRequest = { if (!isLoading) showForgotPasswordDialog = false },
+                onDismissRequest = { if (!isLoading) showForgot = false },
                 containerColor = Color(0xFF1A1A1A),
                 titleContentColor = Color.White,
                 textContentColor = StitchColors.textSecondary,
-                title = { Text(if (forgotPasswordSent) "Email Sent!" else "Reset Password", fontWeight = FontWeight.Bold) },
+                title = { Text(if (forgotSent) "Email Sent!" else "Reset Password", fontWeight = FontWeight.Bold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (forgotPasswordSent) {
-                            Text("We've sent a password reset link to:", color = StitchColors.textSecondary)
-                            Text(forgotPasswordEmail, color = StitchColors.primary, fontWeight = FontWeight.Medium)
-                            Text("Please check your inbox and follow the instructions.", color = StitchColors.textSecondary, fontSize = 14.sp)
+                        if (forgotSent) {
+                            Text("We've sent a reset link to:", color = StitchColors.textSecondary)
+                            Text(forgotEmail, color = StitchColors.primary, fontWeight = FontWeight.Medium)
+                            Text("Check your inbox to reset your password.", color = StitchColors.textSecondary, fontSize = 14.sp)
                         } else {
-                            Text("Enter your email address and we'll send you a reset link.", color = StitchColors.textSecondary)
-                            OutlinedTextField(
-                                value = forgotPasswordEmail,
-                                onValueChange = { forgotPasswordEmail = it.trim(); forgotPasswordError = null },
+                            Text("Enter your email and we'll send a reset link.", color = StitchColors.textSecondary)
+                            OutlinedTextField(forgotEmail, { forgotEmail = it.trim(); forgotError = null },
                                 placeholder = { Text("Email address", color = StitchColors.placeholder) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true, modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White, unfocusedTextColor = Color.White,
                                     focusedBorderColor = StitchColors.primary, unfocusedBorderColor = StitchColors.glassBorder,
                                     focusedContainerColor = StitchColors.inputBackground, unfocusedContainerColor = StitchColors.inputBackground,
-                                    cursorColor = StitchColors.primary
-                                ),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { handleForgotPassword() })
-                            )
-                            if (forgotPasswordError != null) {
-                                Text(forgotPasswordError ?: "", color = StitchColors.error, fontSize = 14.sp)
-                            }
+                                    cursorColor = StitchColors.primary),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done))
+                            forgotError?.let { Text(it, color = StitchColors.error, fontSize = 14.sp) }
                         }
                     }
                 },
                 confirmButton = {
-                    if (forgotPasswordSent) {
-                        TextButton(onClick = { showForgotPasswordDialog = false }) {
+                    if (forgotSent) {
+                        TextButton(onClick = { showForgot = false }) {
                             Text("Done", color = StitchColors.primary, fontWeight = FontWeight.SemiBold)
                         }
                     } else {
-                        TextButton(onClick = { handleForgotPassword() }, enabled = !isLoading && forgotPasswordEmail.isNotBlank()) {
-                            if (isLoading) {
-                                CircularProgressIndicator(color = StitchColors.primary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Text("Send Reset Link", color = if (forgotPasswordEmail.isNotBlank()) StitchColors.primary else StitchColors.textSecondary, fontWeight = FontWeight.SemiBold)
+                        TextButton(onClick = {
+                            scope.launch {
+                                try {
+                                    isLoading = true
+                                    authService.resetPassword(forgotEmail)
+                                    forgotSent = true
+                                } catch (e: Exception) {
+                                    forgotError = if (e.message?.contains("no user") == true)
+                                        "No account found with this email"
+                                    else "Failed to send reset email. Please try again."
+                                } finally { isLoading = false }
                             }
+                        }, enabled = !isLoading && forgotEmail.isNotBlank()) {
+                            if (isLoading) CircularProgressIndicator(color = StitchColors.primary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            else Text("Send Reset Link",
+                                color = if (forgotEmail.isNotBlank()) StitchColors.primary else StitchColors.textSecondary,
+                                fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
                 dismissButton = {
-                    if (!forgotPasswordSent) {
-                        TextButton(onClick = { showForgotPasswordDialog = false }, enabled = !isLoading) {
+                    if (!forgotSent) {
+                        TextButton(onClick = { showForgot = false }, enabled = !isLoading) {
                             Text("Cancel", color = StitchColors.textSecondary)
                         }
                     }
@@ -771,106 +614,31 @@ fun LoginView(
     }
 }
 
-// MARK: - saveTermsAcceptance
-// Single merge write — no read. Matches iOS saveTermsAcceptance.
-// CACHING: version stored in SharedPreferences post-write to avoid Firestore read on cold launch.
-private fun saveTermsAcceptance(userID: String, version: String) {
-    val db = FirebaseFirestore.getInstance()
-    val userRef = db.collection("users").document(userID)
-    val termsData = mapOf(
-        "acceptedTermsAt" to FieldValue.serverTimestamp(),
-        "acceptedTermsVersion" to version,
-        "acceptedSafetyPolicy" to true,
-        "acceptedPrivacyPolicy" to true
-    )
-    userRef.set(termsData, com.google.firebase.firestore.SetOptions.merge())
-        .addOnSuccessListener { println("✅ Terms acceptance saved for user: $userID") }
-        .addOnFailureListener { e -> println("❌ Failed to save terms acceptance: ${e.message}") }
-}
-
-// MARK: - Terms Acceptance Row
-
-@Composable
-private fun TermsAcceptanceRow(
-    accepted: Boolean,
-    onToggle: () -> Unit,
-    onOpenTerms: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.clickable { onToggle() }
-        ) {
-            Icon(
-                imageVector = if (accepted) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                contentDescription = "Accept terms",
-                tint = if (accepted) StitchColors.primary else StitchColors.textSecondary,
-                modifier = Modifier.size(22.dp).padding(top = 2.dp)
-            )
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = StitchColors.textSecondary, fontSize = 13.sp)) { append("I agree to the ") }
-                    withStyle(SpanStyle(color = StitchColors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)) { append("Terms & Conditions") }
-                    withStyle(SpanStyle(color = StitchColors.textSecondary, fontSize = 13.sp)) { append(", ") }
-                    withStyle(SpanStyle(color = StitchColors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)) { append("Safety Policy") }
-                    withStyle(SpanStyle(color = StitchColors.textSecondary, fontSize = 13.sp)) { append(", and ") }
-                    withStyle(SpanStyle(color = StitchColors.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)) { append("Privacy Policy") }
-                }
-            )
-        }
-
-        // Legal links row
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            TextButton(onClick = onOpenTerms, contentPadding = PaddingValues(0.dp)) {
-                Icon(Icons.Default.Description, contentDescription = null, tint = StitchColors.primary, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Terms", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = StitchColors.primary)
-            }
-            TextButton(onClick = onOpenTerms, contentPadding = PaddingValues(0.dp)) {
-                Icon(Icons.Default.Shield, contentDescription = null, tint = StitchColors.primary, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Safety", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = StitchColors.primary)
-            }
-            TextButton(onClick = onOpenTerms, contentPadding = PaddingValues(0.dp)) {
-                Icon(Icons.Default.Lock, contentDescription = null, tint = StitchColors.primary, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Privacy", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = StitchColors.primary)
-            }
-        }
-    }
-}
-
 // MARK: - Account Type Button
 
 @Composable
-private fun AccountTypeButton(
-    modifier: Modifier = Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
+private fun AccTypeBtn(icon: ImageVector, label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = modifier.height(70.dp).clickable { onClick() },
+        onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = if (selected) Color.White else Color.White.copy(alpha = 0.08f),
-        border = BorderStroke(1.dp, if (selected) Color.White else Color.White.copy(alpha = 0.2f))
+        color = if (selected) Color.White else Color.White.copy(0.08f),
+        border = BorderStroke(1.dp, if (selected) Color.White else Color.White.copy(0.2f)),
+        modifier = modifier.height(70.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(icon, contentDescription = label, tint = if (selected) Color.Black else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.Black else Color.White.copy(alpha = 0.7f))
+            Icon(icon, contentDescription = null, tint = if (selected) Color.Black else Color.White.copy(0.7f), modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                color = if (selected) Color.Black else Color.White.copy(0.7f))
         }
     }
 }
 
-// MARK: - Login Text Field
+// MARK: - LoginTextField (public — used by other views)
 
 @Composable
 fun LoginTextField(
@@ -878,13 +646,29 @@ fun LoginTextField(
     onValueChange: (String) -> Unit,
     label: String,
     placeholder: String,
-    isPassword: Boolean = false,
-    passwordVisible: Boolean = false,
-    onPasswordVisibilityToggle: (() -> Unit)? = null,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
     onImeAction: () -> Unit = {},
-    focusRequester: FocusRequester = remember { FocusRequester() }
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    isPassword: Boolean = false,
+    passwordVisible: Boolean = false,
+    onPasswordVisibilityToggle: (() -> Unit)? = null
+) = LTextField(value, onValueChange, label, placeholder, keyboardType, imeAction, onImeAction,
+    focusRequester, isPassword, passwordVisible, onPasswordVisibilityToggle)
+
+@Composable
+private fun LTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    imeAction: ImeAction = ImeAction.Next,
+    onImeAction: () -> Unit = {},
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    isPassword: Boolean = false,
+    passwordVisible: Boolean = false,
+    onPasswordToggle: (() -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = StitchColors.textSecondary)
@@ -893,15 +677,10 @@ fun LoginTextField(
             placeholder = { Text(placeholder, color = StitchColors.placeholder) },
             visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
             trailingIcon = if (isPassword) {
-                {
-                    IconButton(onClick = { onPasswordVisibilityToggle?.invoke() }) {
-                        Icon(
-                            if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                            tint = StitchColors.textSecondary
-                        )
-                    }
-                }
+                { IconButton(onClick = { onPasswordToggle?.invoke() }) {
+                    Icon(if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = null, tint = StitchColors.textSecondary)
+                }}
             } else null,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
             keyboardActions = KeyboardActions(onNext = { onImeAction() }, onDone = { onImeAction() }),
@@ -912,13 +691,12 @@ fun LoginTextField(
                 focusedTextColor = Color.White, unfocusedTextColor = Color.White,
                 focusedBorderColor = StitchColors.primary, unfocusedBorderColor = StitchColors.glassBorder,
                 focusedContainerColor = StitchColors.inputBackground, unfocusedContainerColor = StitchColors.inputBackground,
-                cursorColor = StitchColors.primary
-            )
+                cursorColor = StitchColors.primary)
         )
     }
 }
 
-// MARK: - Password Requirement Row
+// MARK: - PasswordRequirementRow (public)
 
 @Composable
 fun PasswordRequirementRow(text: String, isMet: Boolean) {

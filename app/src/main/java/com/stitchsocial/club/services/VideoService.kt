@@ -587,90 +587,162 @@ class VideoServiceImpl {
     // ===== ANALYTICS =====
 
     /**
-     * Record a video view - stores viewer data for the viewers list
+     * Record a video view — EXACT MATCH iOS VideoService.incrementViewCount()
+     *
+     * FLOW (matches iOS):
+     *   1. Check interactions/{videoID}_{userID}_view — prevent double-count on recompose
+     *   2. Batch: write interaction doc + increment viewCount on first view only
+     *   3. Write/merge viewer profile to views subcollection for WhoViewed sheet
+     *
+     * Called by ContextualVideoOverlay AFTER a 5-second delay (matches iOS trackVideoView).
+     * watchTime defaults to 5.0 to match iOS hardcoded value.
+     *
+     * CACHING: interactionID is deterministic — idempotent set() won't double-write.
+     * BATCHING: batch commit for interaction + viewCount — atomic, one round trip.
      */
-    suspend fun recordVideoView(videoID: String, userID: String, userData: Map<String, Any>? = null) {
+    suspend fun recordVideoView(
+        videoID: String,
+        userID: String,
+        userData: Map<String, Any>? = null,
+        watchTime: Double = 5.0
+    ) {
         try {
-            // Increment view count on video document
-            val viewUpdates = hashMapOf<String, Any>(
-                "viewCount" to (com.google.firebase.firestore.FieldValue.increment(1) as Any)
-            )
-            db.collection("videos").document(videoID).update(viewUpdates).await()
+            val interactionID = "${videoID}_${userID}_view"
+            val interactionRef = db.collection("interactions").document(interactionID)
 
-            // Store viewer record in subcollection (for viewers list)
+            // Dedup: only increment viewCount on first view
+            val existing = interactionRef.get().await()
+            val isFirstView = !existing.exists()
+
+            val batch = db.batch()
+
+            // Always refresh interaction timestamp
+            batch.set(interactionRef, hashMapOf(
+                "userID"         to userID,
+                "videoID"        to videoID,
+                "engagementType" to "view",
+                "watchTime"      to watchTime,
+                "timestamp"      to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "isCompleted"    to true
+            ))
+
+            // Increment only on first view — matches iOS updateVideoEngagement
+            if (isFirstView) {
+                batch.update(
+                    db.collection("videos").document(videoID),
+                    "viewCount", com.google.firebase.firestore.FieldValue.increment(1)
+                )
+            }
+
+            batch.commit().await()
+
+            // Viewer profile for WhoViewed sheet — merge so re-views update timestamp
             val viewerData = hashMapOf<String, Any>(
-                "userID" to userID,
-                "displayName" to (userData?.get("displayName") ?: "User"),
-                "username" to (userData?.get("username") ?: ""),
+                "userID"          to userID,
+                "displayName"     to (userData?.get("displayName") ?: "User"),
+                "username"        to (userData?.get("username") ?: ""),
                 "profileImageURL" to (userData?.get("profileImageURL") ?: ""),
-                "tier" to (userData?.get("tier") ?: "ROOKIE"),
-                "viewedAt" to (com.google.firebase.firestore.FieldValue.serverTimestamp() as Any)
+                "tier"            to (userData?.get("tier") ?: "ROOKIE"),
+                "viewedAt"        to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "watchTime"       to watchTime
             )
-
-            // Use userID as document ID to prevent duplicate entries per user
-            db.collection("videos")
-                .document(videoID)
-                .collection("views")
-                .document(userID)
-                .set(viewerData)
+            db.collection("videos").document(videoID)
+                .collection("views").document(userID)
+                .set(viewerData, com.google.firebase.firestore.SetOptions.merge())
                 .await()
 
-            println("VIDEO SERVICE: âœ… Recorded view for video $videoID by user $userID")
+            println("VIDEO SERVICE: View recorded $videoID by $userID (first=$isFirstView, watch=${watchTime}s)")
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to record view: ${e.message}")
+            println("VIDEO SERVICE: Failed to record view: ${e.message}")
         }
     }
 
     /**
-     * Simple view count increment (without storing viewer data)
+     * Anonymous view increment — no userID available.
      */
     suspend fun incrementViewCount(videoID: String) {
         try {
-            val viewUpdates = hashMapOf<String, Any>(
-                "viewCount" to (com.google.firebase.firestore.FieldValue.increment(1) as Any)
-            )
-            db.collection("videos").document(videoID).update(viewUpdates).await()
+            db.collection("videos").document(videoID)
+                .update("viewCount", com.google.firebase.firestore.FieldValue.increment(1))
+                .await()
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to increment view: ${e.message}")
+            println("VIDEO SERVICE: Failed to increment view: ${e.message}")
         }
     }
 
     /**
-     * Get viewers for a video
-     * Returns list of viewer data for display in viewers sheet
+     * Get viewers for WhoViewed sheet.
+     * Reads views subcollection (Android) + interactions collection (iOS) and merges.
+     *
+     * BATCHING: One query per source. iOS viewer profiles batch-fetched in chunks of 10.
+     * CACHING: Add 60s TTL in ViewModel if called on every sheet open.
      */
     suspend fun getViewers(videoID: String): List<ViewerData> {
         return try {
-            println("VIDEO SERVICE: ðŸ‘ï¸ Loading viewers for video $videoID")
+            println("VIDEO SERVICE: Loading viewers for $videoID")
 
-            val snapshot = db.collection("videos")
-                .document(videoID)
+            // Android-written viewers (full profile in views subcollection)
+            val viewsSnapshot = db.collection("videos").document(videoID)
                 .collection("views")
                 .orderBy("viewedAt", Query.Direction.DESCENDING)
-                .limit(50)
-                .get()
-                .await()
+                .limit(50).get().await()
 
-            val viewers = snapshot.documents.mapNotNull { doc ->
-                try {
-                    val data = doc.data ?: return@mapNotNull null
-                    ViewerData(
-                        userID = data["userID"] as? String ?: doc.id,
-                        displayName = data["displayName"] as? String ?: "Unknown",
-                        username = data["username"] as? String ?: "",
-                        profileImageURL = data["profileImageURL"] as? String,
-                        tier = data["tier"] as? String ?: "ROOKIE",
-                        viewedAt = (data["viewedAt"] as? Timestamp)?.toDate() ?: Date()
-                    )
-                } catch (e: Exception) {
-                    null
+            val viewers = viewsSnapshot.documents.mapNotNull { doc ->
+                val data = doc.data ?: return@mapNotNull null
+                ViewerData(
+                    userID          = data["userID"] as? String ?: doc.id,
+                    displayName     = data["displayName"] as? String ?: "Unknown",
+                    username        = data["username"] as? String ?: "",
+                    profileImageURL = data["profileImageURL"] as? String,
+                    tier            = data["tier"] as? String ?: "ROOKIE",
+                    viewedAt        = (data["viewedAt"] as? Timestamp)?.toDate() ?: Date()
+                )
+            }.toMutableList()
+
+            // iOS-written viewers (interactions collection, no stored profile data)
+            val existingIDs = viewers.map { it.userID }.toSet()
+            val interactionsSnapshot = db.collection("interactions")
+                .whereEqualTo("videoID", videoID)
+                .whereEqualTo("engagementType", "view")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(50).get().await()
+
+            val iosOnlyIDs = interactionsSnapshot.documents
+                .mapNotNull { it.data?.get("userID") as? String }
+                .filter { it !in existingIDs }
+                .distinct().take(20)
+
+            // Batch-fetch profiles for iOS-only viewers in chunks of 10
+            if (iosOnlyIDs.isNotEmpty()) {
+                iosOnlyIDs.chunked(10).forEach { chunk ->
+                    try {
+                        db.collection("users")
+                            .whereIn(com.google.firebase.firestore.FieldPath.documentId(), chunk)
+                            .get().await().documents.forEach { doc ->
+                                val data = doc.data ?: return@forEach
+                                val ts = interactionsSnapshot.documents
+                                    .firstOrNull { it.data?.get("userID") == doc.id }
+                                    ?.data?.get("timestamp") as? Timestamp
+                                viewers.add(ViewerData(
+                                    userID          = doc.id,
+                                    displayName     = data["displayName"] as? String ?: "Unknown",
+                                    username        = data["username"] as? String ?: "",
+                                    profileImageURL = data["profileImageURL"] as? String,
+                                    tier            = data["tier"] as? String ?: "rookie",
+                                    viewedAt        = ts?.toDate() ?: Date()
+                                ))
+                            }
+                    } catch (e: Exception) {
+                        println("VIDEO SERVICE: Batch profile fetch failed: ${e.message}")
+                    }
                 }
             }
 
-            println("VIDEO SERVICE: âœ… Found ${viewers.size} viewers")
-            viewers
+            val sorted = viewers.sortedByDescending { it.viewedAt }
+            println("VIDEO SERVICE: ${sorted.size} total viewers")
+            sorted
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Viewers query failed: ${e.message}")
+            println("VIDEO SERVICE: Viewers query failed: ${e.message}")
             emptyList()
         }
     }
