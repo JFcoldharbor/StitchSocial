@@ -44,6 +44,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.stitchsocial.club.foundation.InteractionType
@@ -76,58 +77,67 @@ fun VideoPlayerComposable(
 
     // Create ExoPlayer instance
     val exoPlayer = remember(videoURL) {
-        ExoPlayer.Builder(context)
-            .build()
-            .apply {
-                // Configure for seamless looping
-                repeatMode = Player.REPEAT_MODE_ONE
-                playWhenReady = false
+        // Use CacheDataSource if VideoDiskCache is initialised — falls back to default
+        val playerBuilder = try {
+            val cacheFactory = com.stitchsocial.club.services.VideoDiskCache.buildCacheDataSourceFactory()
+            ExoPlayer.Builder(context)
+                .setMediaSourceFactory(
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheFactory)
+                )
+        } catch (_: Exception) {
+            ExoPlayer.Builder(context)
+        }
 
-                try {
-                    if (videoURL.isNotEmpty()) {
-                        val mediaItem = MediaItem.fromUri(videoURL)
-                        setMediaItem(mediaItem)
-                        prepare()
-                        Log.d("VIDEO_PLAYER", "📺 Loading video $videoId from $videoURL")
-                    } else {
-                        isError = true
-                        Log.w("VIDEO_PLAYER", "⚠️ No video URL for $videoId")
-                    }
-                } catch (e: Exception) {
-                    Log.e("VIDEO_PLAYER", "❌ Error loading video $videoId - ${e.message}")
+        playerBuilder.build().apply {
+            // Configure for seamless looping
+            repeatMode = Player.REPEAT_MODE_ONE
+            playWhenReady = false
+
+            try {
+                if (videoURL.isNotEmpty()) {
+                    val mediaItem = MediaItem.fromUri(videoURL)
+                    setMediaItem(mediaItem)
+                    prepare()
+                    Log.d("VIDEO_PLAYER", "📺 Loading video $videoId from $videoURL")
+                } else {
                     isError = true
+                    Log.w("VIDEO_PLAYER", "⚠️ No video URL for $videoId")
+                }
+            } catch (e: Exception) {
+                Log.e("VIDEO_PLAYER", "❌ Error loading video $videoId - ${e.message}")
+                isError = true
+            }
+
+            // Add listener for play state
+            addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
+                    showPlayButton = !playing && !isError && !isActive
+                    Log.d("VIDEO_PLAYER", "▶️ $videoId playing = $playing, isActive = $isActive")
                 }
 
-                // Add listener for play state
-                addListener(object : Player.Listener {
-                    override fun onIsPlayingChanged(playing: Boolean) {
-                        isPlaying = playing
-                        showPlayButton = !playing && !isError && !isActive
-                        Log.d("VIDEO_PLAYER", "▶️ $videoId playing = $playing, isActive = $isActive")
-                    }
+                override fun onPlayerError(error: PlaybackException) {
+                    isError = true
+                    showPlayButton = false
+                    Log.e("VIDEO_PLAYER", "❌ Playback error for $videoId - ${error.message}")
+                }
 
-                    override fun onPlayerError(error: PlaybackException) {
-                        isError = true
-                        showPlayButton = false
-                        Log.e("VIDEO_PLAYER", "❌ Playback error for $videoId - ${error.message}")
-                    }
-
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        when (playbackState) {
-                            Player.STATE_READY -> {
-                                Log.d("VIDEO_PLAYER", "✅ $videoId ready to play")
-                                isError = false
-                            }
-                            Player.STATE_BUFFERING -> {
-                                Log.d("VIDEO_PLAYER", "⏳ $videoId buffering")
-                            }
-                            Player.STATE_ENDED -> {
-                                Log.d("VIDEO_PLAYER", "🔄 $videoId ended, looping")
-                            }
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_READY -> {
+                            Log.d("VIDEO_PLAYER", "✅ $videoId ready to play")
+                            isError = false
+                        }
+                        Player.STATE_BUFFERING -> {
+                            Log.d("VIDEO_PLAYER", "⏳ $videoId buffering")
+                        }
+                        Player.STATE_ENDED -> {
+                            Log.d("VIDEO_PLAYER", "🔄 $videoId ended, looping")
                         }
                     }
-                })
-            }
+                }
+            })
+        }
     }
 
     // ✅ Track if this video was paused by broadcast (not by normal navigation)

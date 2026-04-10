@@ -430,13 +430,31 @@ class HomeFeedService(
 
     suspend fun preloadChildrenAround(currentIndex: Int, threads: List<ThreadData>) {
         val range = maxOf(0, currentIndex - 1)..minOf(threads.size - 1, currentIndex + 2)
+
+        // Collect video URLs to prefetch to disk — stops re-streaming on every play
+        val urlsToPrefetch = mutableListOf<String>()
+
         for (i in range) {
             val thread = threads[i]
+            // Prefetch parent video URL
+            if (thread.parentVideo.videoURL.isNotEmpty()) {
+                urlsToPrefetch.add(thread.parentVideo.videoURL)
+            }
+            // Preload children metadata (existing behaviour)
             if (!childrenCache.containsKey(thread.id) && thread.parentVideo.replyCount > 0) {
                 try {
-                    loadThreadChildren(thread.id)
+                    val children = loadThreadChildren(thread.id)
+                    // Also prefetch child video URLs
+                    children.take(3).forEach { child ->
+                        if (child.videoURL.isNotEmpty()) urlsToPrefetch.add(child.videoURL)
+                    }
                 } catch (_: Exception) {}
             }
+        }
+
+        // Fire-and-forget disk prefetch — matches Swift VideoDiskCache.prefetchVideos()
+        if (urlsToPrefetch.isNotEmpty()) {
+            com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(urlsToPrefetch)
         }
     }
 

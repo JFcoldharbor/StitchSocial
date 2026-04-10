@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -75,6 +76,9 @@ import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.CollectionService
+import com.stitchsocial.club.services.ShowService
+import com.stitchsocial.club.foundation.VideoCollection
 
 // Coordination
 import com.stitchsocial.club.coordination.NavigationCoordinator
@@ -269,6 +273,7 @@ fun ProfileView(
     val authService = remember { AuthService() }
     val followManager = remember { FollowManager(context) }
 
+    val collectionService = remember { CollectionService() }
     val viewModel = engagementViewModel ?: remember {
         EngagementViewModel(authService, videoService, userService)
     }
@@ -312,6 +317,15 @@ fun ProfileView(
 
     // Stitchers sheet state
     var showStitchersSheet by remember { mutableStateOf(false) }
+
+    // Collections state
+    var userCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
+    var showCollectionPlayer by remember { mutableStateOf(false) }
+    var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
+    var showingAllCollections by remember { mutableStateOf(false) }
+    var selectedShowId by remember { mutableStateOf<String?>(null) }
+    var selectedShowEpisodes by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
+    var showingShowDetail by remember { mutableStateOf(false) }
 
     val scrollState = rememberLazyListState()
 
@@ -383,9 +397,37 @@ fun ProfileView(
     }
 
     LaunchedEffect(userID) {
-        loadUser()
-        loadVideos()
-        loadPinnedVideos()
+        // Launch all in parallel — collections no longer blocked by user/video load
+        launch { loadUser() }
+        launch { loadVideos() }
+        launch { loadPinnedVideos() }
+        launch {
+            try {
+                val showService = ShowService.shared
+                // Mirror iOS: load via shows first (no composite index needed)
+                val shows = showService.getCreatorShows(userID)
+                val showEpisodes = mutableListOf<VideoCollection>()
+                for (show in shows) {
+                    val eps = showService.getAllEpisodes(show.id)
+                    showEpisodes.addAll(eps)
+                }
+                // Also load standalone collections (legacy / no showId)
+                val standalone = try {
+                    collectionService.getUserCollections(userID)
+                } catch (e: Exception) { emptyList() }
+
+                // Merge deduped by id
+                val seen = mutableSetOf<String>()
+                val merged = mutableListOf<VideoCollection>()
+                for (ep in showEpisodes) { if (seen.add(ep.id)) merged.add(ep) }
+                for (col in standalone) { if (seen.add(col.id)) merged.add(col) }
+
+                userCollections = merged
+                println("📚 PROFILE: Loaded ${merged.size} collections (${showEpisodes.size} from shows, ${standalone.size} standalone) for $userID")
+            } catch (e: Exception) {
+                println("❌ PROFILE: Collections load failed for $userID: ${e.message}")
+            }
+        }
     }
 
     // Swipe-to-dismiss
@@ -445,8 +487,34 @@ fun ProfileView(
                         )
                     }
 
-                    // Collections row
-                    item { CollectionsRowPlaceholder(isOwnProfile = isOwnProfile, tier = currentUser?.tier ?: UserTier.ROOKIE) }
+                    // Collections row — contextual, show-grouped, mirrors iOS ProfileCollectionsRow
+                    item {
+                        ProfileCollectionsRow(
+                            collections = userCollections,
+                            isOwnProfile = isOwnProfile,
+                            onAddTap = { /* TODO: navigate to ShowEditorView */ },
+                            onShowTap = { showId: String, eps: List<VideoCollection> ->
+                                selectedShowId = showId
+                                selectedShowEpisodes = eps
+                                showingShowDetail = true
+                            },
+                            onCollectionTap = { collection: VideoCollection ->
+                                selectedCollection = collection
+                                showCollectionPlayer = true
+                            },
+                            onSeeAllTap = { showingAllCollections = true },
+                            onCollectionDelete = if (isOwnProfile) ({ collection: VideoCollection ->
+                                scope.launch {
+                                    try {
+                                        collectionService.deleteCollection(collection.id)
+                                        userCollections = userCollections.filter { it.id != collection.id }
+                                    } catch (e: Exception) {
+                                        println("❌ PROFILE: Delete failed: ${e.message}")
+                                    }
+                                }
+                            }) else null
+                        )
+                    }
 
                     // Pinned videos section
                     if (pinnedVideos.isNotEmpty()) {
@@ -578,6 +646,16 @@ fun ProfileView(
         }
     }
 
+
+    // ===== COLLECTION PLAYER FULLSCREEN =====
+    if (showCollectionPlayer && selectedCollection != null) {
+        val coll: VideoCollection = selectedCollection!!
+        CollectionPlayerView(
+            collection = coll,
+            userID = currentAuthUserID ?: userID,
+            onDismiss = { showCollectionPlayer = false }
+        )
+    }
 
     // ===== VIDEO PLAYER FULLSCREEN =====
     if (showingVideoPlayer && selectedVideo != null) {
@@ -732,7 +810,85 @@ fun ProfileView(
         }
     }
 
+    // ===== SHOW DETAIL FULLSCREEN =====
+    if (showingShowDetail && selectedShowId != null) {
+        ShowDetailView(
+            showId = selectedShowId!!,
+            currentUserID = currentAuthUserID ?: "",
+            onDismiss = { showingShowDetail = false },
+            onPlayEpisode = { episode ->
+                showingShowDetail = false
+                selectedCollection = episode
+                showCollectionPlayer = true
+            }
+        )
+    }
+
+    // ===== ALL COLLECTIONS (See All) =====
+    if (showingAllCollections) {
+        Dialog(
+            onDismissRequest = { showingAllCollections = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    // Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Shows",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { showingAllCollections = false }) {
+                            Icon(Icons.Default.Close, "Close", tint = Color.White)
+                        }
+                    }
+                    // Show grid grouped by showId
+                    val groups = remember(userCollections) {
+                        userCollections.filter { !it.showId.isNullOrEmpty() }
+                            .groupBy { it.showId!! }
+                            .map { (showId, eps) -> Pair(showId, eps.sortedBy { it.episodeNumber ?: 0 }) }
+                            .sortedByDescending { it.second.firstOrNull()?.createdAt }
+                    }
+                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                        contentPadding = PaddingValues(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(groups.size) { idx ->
+                            val (showId, eps) = groups[idx]
+                            ShowCard(
+                                episodes = eps,
+                                onTap = {
+                                    showingAllCollections = false
+                                    selectedShowId = showId
+                                    selectedShowEpisodes = eps
+                                    showingShowDetail = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ===== EDIT PROFILE =====
+    // EditProfileView now owns the full save flow (image upload + Firestore write).
+    // onSave just refreshes profile data and dismisses.
     if (showingEditProfile && currentUser != null) {
         EditProfileView(
             userID = userID,
@@ -740,9 +896,9 @@ fun ProfileView(
             currentUsername = currentUser!!.username,
             currentUserImage = currentUser!!.profileImageURL,
             currentBio = currentUser!!.bio ?: "",
-            onSave = { displayName, bio, username, imageUri ->
+            currentIsPrivate = currentUser!!.isPrivate ?: false,
+            onSave = { _, _, _, _ ->
                 scope.launch {
-                    userService.updateProfile(userID = userID, displayName = displayName, bio = bio, username = username)
                     loadUser()
                     showingEditProfile = false
                 }
@@ -750,6 +906,7 @@ fun ProfileView(
             onCancel = { showingEditProfile = false }
         )
     }
+
 
     // ===== SETTINGS =====
     if (showingSettings && currentUser != null) {

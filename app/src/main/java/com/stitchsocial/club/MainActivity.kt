@@ -75,6 +75,7 @@ import com.stitchsocial.club.models.Announcement
 import com.stitchsocial.club.services.AnnouncementService
 import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.views.AnnouncementOverlayView
+import com.stitchsocial.club.community.CommunityListItem
 
 
 class MainActivity : ComponentActivity() {
@@ -82,6 +83,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         // ✅ FIXED: Store pending notification intent for Compose processing
         var pendingNotificationIntent: Intent? = null
+
+        // ✅ FIX: Incremented on every onNewIntent so the routing LaunchedEffect
+        // re-runs when the app is already open and a notification is tapped.
+        var notificationTrigger = androidx.compose.runtime.mutableIntStateOf(0)
 
         // ✅ NEW: Broadcast action for pausing videos
         const val ACTION_PAUSE_ALL_VIDEOS = "com.stitchsocial.club.PAUSE_ALL_VIDEOS"
@@ -131,6 +136,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+        // ✅ FIX: Signal Compose to re-run the routing LaunchedEffect
+        notificationTrigger.intValue++
     }
 
     /**
@@ -258,10 +265,6 @@ fun MainScreen() {
     var threadViewThreadID by remember { mutableStateOf<String?>(null) }
     var threadViewTargetVideoID by remember { mutableStateOf<String?>(null) }
 
-    // ✅ NEW: Track when CommunityDetailView is active — hides tab bar, full screen
-    var isShowingCommunity by remember { mutableStateOf(false) }
-    var communityItem by remember { mutableStateOf<com.stitchsocial.club.community.CommunityListItem?>(null) }
-
     // Debug logging for ThreadView state
     LaunchedEffect(isShowingThreadView) {
         Log.d("STITCH_MAIN", "🧵 isShowingThreadView changed to: $isShowingThreadView")
@@ -270,6 +273,10 @@ fun MainScreen() {
     // ✅ NEW: Track when ProfileView is active (renders on top of tab bar)
     var isShowingProfileView by remember { mutableStateOf(false) }
     var profileViewUserID by remember { mutableStateOf<String?>(null) }
+
+    // Community overlay state
+    var isShowingCommunity by remember { mutableStateOf(false) }
+    var selectedCommunityItem by remember { mutableStateOf<CommunityListItem?>(null) }
 
     val authService = remember { AuthService() }
     val videoService = remember { VideoServiceImpl() }
@@ -292,7 +299,9 @@ fun MainScreen() {
     }
 
     // ✅ FIXED: Process pending notification intent
-    LaunchedEffect(navigationCoordinator) {
+    // Keys on notificationTrigger so foreground taps (onNewIntent) re-run this block.
+    val notificationTrigger by MainActivity.notificationTrigger
+    LaunchedEffect(navigationCoordinator, notificationTrigger) {
         MainActivity.pendingNotificationIntent?.let { intent ->
             Log.d("STITCH_MAIN", "📱 Processing pending notification intent")
 
@@ -525,6 +534,8 @@ fun MainScreen() {
             currentUser != null -> {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Tab content with explicit lower z-index
+                    var isShowingCollectionPlayer by remember { mutableStateOf(false) }
+
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -547,9 +558,12 @@ fun MainScreen() {
                                 profileViewUserID = userId
                                 isShowingProfileView = true
                             },
-                            onShowCommunity = { item ->
-                                communityItem = item
+                            onShowCommunity = { community ->
+                                selectedCommunityItem = community
                                 isShowingCommunity = true
+                            },
+                            onTabBarVisibilityChange = { visible ->
+                                isShowingCollectionPlayer = !visible
                             }
                         )
 
@@ -598,33 +612,8 @@ fun MainScreen() {
                         }
                     }
 
-                    // ✅ CommunityDetailView Overlay — full screen, hides tab bar (mirrors iOS)
-                    if (isShowingCommunity) {
-                        val user = currentUser
-                        val item = communityItem
-                        if (user != null && item != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .zIndex(1000f)
-                                    .background(Color.Black)
-                                    .pointerInput(Unit) { detectTapGestures { /* consume */ } }
-                            ) {
-                                com.stitchsocial.club.views.CommunityDetailView(
-                                    userID = user.id,
-                                    communityID = item.id,
-                                    communityItem = item,
-                                    onDismiss = {
-                                        isShowingCommunity = false
-                                        communityItem = null
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView AND no Community
-                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView && !isShowingCommunity
+                    // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
+                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView && !isShowingCollectionPlayer
                     LaunchedEffect(currentModal, isShowingAnnouncement, isShowingThreadView) {
                         Log.d("STITCH_MAIN", "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | announcement: $isShowingAnnouncement | threadView: $isShowingThreadView")
                     }
@@ -754,6 +743,27 @@ fun MainScreen() {
                                 profileViewUserID = null
                             },
                             modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                // ✅ NEW: CommunityDetailView Overlay
+                val community = selectedCommunityItem
+                if (isShowingCommunity && community != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)
+                            .background(Color.Black)
+                    ) {
+                        CommunityDetailView(
+                            userID = currentUser?.id ?: "",
+                            communityID = community.id,
+                            communityItem = community,
+                            onDismiss = {
+                                isShowingCommunity = false
+                                selectedCommunityItem = null
+                            }
                         )
                     }
                 }
@@ -972,7 +982,8 @@ private fun TabContent(
     isAnnouncementShowing: Boolean = false,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
     onShowProfileView: (userId: String) -> Unit,
-    onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {}
+    onShowCommunity: (CommunityListItem) -> Unit = {},
+    onTabBarVisibilityChange: (Boolean) -> Unit = {}
 ) {
     when (selectedTab) {
         MainAppTab.HOME -> {
@@ -997,7 +1008,10 @@ private fun TabContent(
                     Log.d("NAVIGATION", "🔍 SEARCH NAVIGATION TRIGGERED")
                 },
                 onShowThreadView = onShowThreadView,
-                onShowCommunity = onShowCommunity,
+                onShowCommunity = { community ->
+                    onShowCommunity(community)
+                },
+                onTabBarVisibilityChange = onTabBarVisibilityChange,
                 isAnnouncementShowing = isAnnouncementShowing,
                 navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()

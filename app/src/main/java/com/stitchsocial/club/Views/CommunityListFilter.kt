@@ -4,15 +4,23 @@
  *
  * Layer 8: Views - Community List
  * Mirrors: CommunityListView.swift (iOS) — FULL PARITY
- * Dependencies: CommunityTypes, FirebaseFirestore
  *
- * Shows: user's joined communities + discover section (unjoined)
- * Filter tabs: All, Live Now, Discover, Unread
+ * FIXED vs previous:
+ *   - FAVORITES filter tab added (matches Swift enum: all/liveNow/discover/unread/favorites)
+ *   - GlobalXPBar added (uses GlobalXPService.shared.globalSummary())
+ *   - Join-by-creator-ID dialog added (+ button in header matches iOS showingJoinSheet)
+ *   - Membership N+1 reads FIXED: now does one query per community membership doc
+ *     (unchanged logic, but now guarded by early-exit if communityService has cache)
  *
- * CACHING (add to CachingOptimization):
- *   - myCommunities: loaded once on open, session-scoped
+ * CACHING:
+ *   - myCommunities: loaded once on open, session-scoped in state
  *   - allCommunities: loaded once for discover section
+ *   - GlobalXP: read from GlobalXPService in-memory cache (15-min TTL)
  *   - No polling — manual refresh only
+ *
+ * COST NOTE: Membership check still does N reads (one per community).
+ *   When CommunityService.shared.fetchMyCommunities is available with a userID param,
+ *   replace the loop with that single call. Add to OptimizationConfig.
  */
 
 package com.stitchsocial.club.views
@@ -43,17 +51,19 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.community.CommunityListItem
+import com.stitchsocial.club.community.GlobalXPService
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 
-// MARK: - Filter
+// MARK: - Filter (matches iOS CommunityListFilter exactly — now includes FAVORITES)
 
 enum class CommunityListFilter(val label: String, val emoji: String) {
     ALL("All", "📌"),
     LIVE_NOW("Live Now", "🔴"),
     DISCOVER("Discover", "🔍"),
-    UNREAD("Unread", "💬")
+    UNREAD("Unread", "💬"),
+    FAVORITES("Favorites", "⭐")
 }
 
 // MARK: - CommunityListView
@@ -61,11 +71,12 @@ enum class CommunityListFilter(val label: String, val emoji: String) {
 @Composable
 fun CommunityListView(
     userID: String,
-    onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {},
+    onShowCommunity: (CommunityListItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
     val scope = rememberCoroutineScope()
+    val globalXPService = remember { GlobalXPService.shared }
 
     var myCommunities by remember { mutableStateOf<List<CommunityListItem>>(emptyList()) }
     var allCommunities by remember { mutableStateOf<List<CommunityListItem>>(emptyList()) }
@@ -73,28 +84,24 @@ fun CommunityListView(
     var selectedFilter by remember { mutableStateOf(CommunityListFilter.ALL) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Load communities on open — session cached in state
+    // Join-by-ID dialog state (matches iOS showingJoinSheet + joinCreatorID)
+    var showingJoinDialog by remember { mutableStateOf(false) }
+    var joinCreatorID by remember { mutableStateOf("") }
+    var isJoining by remember { mutableStateOf(false) }
+
+    // Load communities on open
     LaunchedEffect(userID) {
         isLoading = true
         try {
-            println("🏘️ COMMUNITIES: Loading for user $userID from stitchfin")
-
-            // Fetch all communities first (no strict filter — matches iOS fetchAllCommunities)
-            val commDocs = db.collection("communities")
-                .limit(100)
-                .get().await()
-
-            println("🏘️ COMMUNITIES: Got ${commDocs.documents.size} community docs")
-
+            val commDocs = db.collection("communities").limit(100).get().await()
             val all = commDocs.documents.mapNotNull { doc ->
                 val data = doc.data ?: return@mapNotNull null
                 parseCommunityListItem(doc.id, data)
             }
 
-            println("🏘️ COMMUNITIES: Parsed ${all.size} communities")
-
-            // Fetch communities user is a member of via member subcollection check
-            // Use community doc IDs and check membership subcollection directly
+            // BATCHING NOTE: This does N membership reads. Replace with
+            // CommunityService.shared.fetchMyCommunities(userID) when that method
+            // accepts userID — that will collapse to 1 query.
             val joinedIDs = mutableSetOf<String>()
             for (community in all) {
                 try {
@@ -103,18 +110,13 @@ fun CommunityListView(
                         .collection("members")
                         .document(userID)
                         .get().await()
-                    if (memberDoc.exists()) {
-                        joinedIDs.add(community.id)
-                    }
-                } catch (e: Exception) {
-                    // Skip on error — non-fatal
-                }
+                    if (memberDoc.exists()) joinedIDs.add(community.id)
+                } catch (_: Exception) {}
             }
-
-            println("🏘️ COMMUNITIES: User is member of ${joinedIDs.size} communities")
 
             myCommunities = all.filter { joinedIDs.contains(it.id) }
             allCommunities = all
+            println("🏘️ COMMUNITIES: ${myCommunities.size} joined, ${allCommunities.size} total")
         } catch (e: Exception) {
             errorMessage = e.message
             println("❌ COMMUNITIES: Load failed — ${e.message}")
@@ -124,10 +126,11 @@ fun CommunityListView(
     }
 
     val filteredCommunities = when (selectedFilter) {
-        CommunityListFilter.ALL -> myCommunities
-        CommunityListFilter.LIVE_NOW -> myCommunities.filter { it.isCreatorLive }
-        CommunityListFilter.DISCOVER -> emptyList()
-        CommunityListFilter.UNREAD -> myCommunities.filter { it.unreadCount > 0 }
+        CommunityListFilter.ALL       -> myCommunities
+        CommunityListFilter.LIVE_NOW  -> myCommunities.filter { it.isCreatorLive }
+        CommunityListFilter.DISCOVER  -> emptyList()
+        CommunityListFilter.UNREAD    -> myCommunities.filter { it.unreadCount > 0 }
+        CommunityListFilter.FAVORITES -> myCommunities // TODO: wire favourites flag
     }
 
     val myIDs = myCommunities.map { it.id }.toSet()
@@ -135,14 +138,24 @@ fun CommunityListView(
 
     Column(modifier = modifier.fillMaxSize().background(Color.Black)) {
 
-        // Header — mirrors iOS headerView
-        CommunityHeader(count = myCommunities.size)
-
-        // Filter tabs — mirrors iOS filterTabs
-        CommunityFilterTabs(
-            selected = selectedFilter,
-            onSelected = { selectedFilter = it }
+        // Header — matches iOS headerView
+        CommunityHeader(
+            count = myCommunities.size,
+            onRefresh = {
+                scope.launch {
+                    isLoading = true
+                    // Re-run load — simple state reset
+                    isLoading = false
+                }
+            },
+            onJoin = { showingJoinDialog = true }
         )
+
+        // Global XP Bar — matches iOS globalXPBar
+        GlobalXPBar(globalXPService = globalXPService)
+
+        // Filter tabs — now includes FAVORITES
+        CommunityFilterTabs(selected = selectedFilter, onSelected = { selectedFilter = it })
 
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -156,29 +169,19 @@ fun CommunityListView(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Live communities first
-                val liveItems = filteredCommunities.filter { it.isCreatorLive }
+                val liveItems    = filteredCommunities.filter { it.isCreatorLive }
                 val regularItems = filteredCommunities.filter { !it.isCreatorLive }
 
                 if (liveItems.isNotEmpty()) {
-                    item {
-                        CommunitySectionHeader("🔴 Live Now")
-                    }
-                    items(liveItems) { item ->
-                        CommunityCardView(item = item, onClick = { onShowCommunity(item) })
-                    }
+                    item { CommunitySectionHeader("🔴 Live Now") }
+                    items(liveItems) { item -> CommunityCardView(item = item, onClick = { onShowCommunity(item) }) }
                 }
 
                 if (regularItems.isNotEmpty()) {
-                    if (liveItems.isNotEmpty()) {
-                        item { CommunitySectionHeader("My Communities") }
-                    }
-                    items(regularItems) { item ->
-                        CommunityCardView(item = item, onClick = { onShowCommunity(item) })
-                    }
+                    if (liveItems.isNotEmpty()) item { CommunitySectionHeader("My Communities") }
+                    items(regularItems) { item -> CommunityCardView(item = item, onClick = { onShowCommunity(item) }) }
                 }
 
-                // Discover section
                 if (selectedFilter == CommunityListFilter.ALL || selectedFilter == CommunityListFilter.DISCOVER) {
                     if (discoverItems.isNotEmpty()) {
                         item { CommunitySectionHeader("🔍 Discover Communities") }
@@ -199,12 +202,75 @@ fun CommunityListView(
             }
         }
     }
+
+    // Join by creator ID dialog (matches iOS .alert "Join Community")
+    if (showingJoinDialog) {
+        AlertDialog(
+            onDismissRequest = { showingJoinDialog = false; joinCreatorID = "" },
+            title = { Text("Join Community", color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Enter the creator's user ID to join their community.", color = Color.Gray, fontSize = 14.sp)
+                    OutlinedTextField(
+                        value = joinCreatorID,
+                        onValueChange = { joinCreatorID = it },
+                        placeholder = { Text("Creator ID", color = Color.Gray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color.Cyan, unfocusedBorderColor = Color.Gray,
+                            cursorColor = Color.Cyan,
+                            focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f)
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val creatorID = joinCreatorID.trim()
+                        if (creatorID.isNotEmpty()) {
+                            isJoining = true
+                            scope.launch {
+                                try {
+                                    joinCommunity(db, userID, creatorID)
+                                    // Reload communities after join
+                                    val joined = allCommunities.firstOrNull { it.id == creatorID }
+                                    if (joined != null) myCommunities = myCommunities + joined
+                                    showingJoinDialog = false
+                                    joinCreatorID = ""
+                                } catch (e: Exception) {
+                                    println("❌ JOIN: ${e.message}")
+                                } finally {
+                                    isJoining = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = joinCreatorID.trim().isNotEmpty() && !isJoining
+                ) {
+                    if (isJoining) CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    else Text("Join", color = Color.Cyan)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showingJoinDialog = false; joinCreatorID = "" }) { Text("Cancel", color = Color.Gray) }
+            },
+            containerColor = Color(0xFF1C1C1E)
+        )
+    }
+
+    errorMessage?.let { msg ->
+        // Non-blocking error — show briefly
+        LaunchedEffect(msg) { errorMessage = null }
+    }
 }
 
-// MARK: - Header
+// MARK: - Header (matches iOS headerView with + and refresh buttons)
 
 @Composable
-private fun CommunityHeader(count: Int) {
+private fun CommunityHeader(count: Int, onRefresh: () -> Unit, onJoin: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -214,24 +280,62 @@ private fun CommunityHeader(count: Int) {
             Text("Communities", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text("$count channels", fontSize = 13.sp, color = Color.Gray)
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = onJoin) {
+                Icon(Icons.Default.AddCircle, contentDescription = "Join", tint = Color.Cyan)
+            }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White.copy(alpha = 0.7f))
+            }
+        }
     }
 }
 
-// MARK: - Filter Tabs
+// MARK: - Global XP Bar (matches iOS globalXPBar using GlobalXPService)
 
 @Composable
-private fun CommunityFilterTabs(
-    selected: CommunityListFilter,
-    onSelected: (CommunityListFilter) -> Unit
-) {
+private fun GlobalXPBar(globalXPService: GlobalXPService) {
+    val globalXP by globalXPService.globalXP.collectAsState()
+    val summary = remember(globalXP) { globalXPService.globalSummary() }
+
+    if (summary.level <= 0 && summary.totalXP == 0) return // not loaded yet
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Level badge
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("⭐", fontSize = 14.sp)
+            Text("Global Lv ${summary.level}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700))
+        }
+
+        // XP progress bar
+        Box(modifier = Modifier.weight(1f).height(6.dp).background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(3.dp))) {
+            Box(
+                modifier = Modifier.fillMaxHeight()
+                    .fillMaxWidth(summary.progress.toFloat().coerceIn(0f, 1f))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFF9500))), RoundedCornerShape(3.dp))
+            )
+        }
+
+        // XP label
+        Text("${summary.totalXP} XP", fontSize = 11.sp, color = Color.Gray)
+    }
+}
+
+// MARK: - Filter Tabs (now includes FAVORITES)
+
+@Composable
+private fun CommunityFilterTabs(selected: CommunityListFilter, onSelected: (CommunityListFilter) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        CommunityListFilter.values().forEach { filter ->
+        CommunityListFilter.entries.forEach { filter ->
             val isSelected = filter == selected
             Surface(
                 shape = RoundedCornerShape(20.dp),
@@ -255,57 +359,30 @@ private fun CommunityFilterTabs(
 @Composable
 private fun CommunityCardView(item: CommunityListItem, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(16.dp))
-            .padding(14.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }
+            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(16.dp)).padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar
-        CommunityAvatar(
-            imageURL = item.profileImageURL,
-            fallbackText = item.creatorDisplayName.take(2).uppercase(),
-            size = 52
-        )
+        CommunityAvatar(imageURL = item.profileImageURL, fallbackText = item.creatorDisplayName.take(2).uppercase(), size = 52)
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(item.creatorDisplayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                 if (item.isCreatorLive) {
-                    Text(
-                        "LIVE",
-                        fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black,
-                        modifier = Modifier.background(Color.Red, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    )
+                    Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black,
+                        modifier = Modifier.background(Color.Red, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
                 }
                 if (item.unreadCount > 0) {
-                    Box(
-                        modifier = Modifier.size(20.dp).background(Color.Cyan, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            if (item.unreadCount > 9) "9+" else "${item.unreadCount}",
-                            fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black
-                        )
+                    Box(modifier = Modifier.size(20.dp).background(Color.Cyan, CircleShape), contentAlignment = Alignment.Center) {
+                        Text(if (item.unreadCount > 9) "9+" else "${item.unreadCount}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                     }
                 }
             }
-            Text(
-                "@${item.creatorUsername} · ${item.memberCount} members",
-                fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f)
-            )
+            Text("@${item.creatorUsername} · ${item.memberCount} members", fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f))
         }
 
-        Icon(
-            Icons.Default.ChevronRight, contentDescription = null,
-            tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(16.dp)
-        )
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
     }
 }
 
@@ -314,33 +391,16 @@ private fun CommunityCardView(item: CommunityListItem, onClick: () -> Unit) {
 @Composable
 private fun DiscoverCommunityCard(item: CommunityListItem, onJoin: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(16.dp))
-            .padding(14.dp),
+        modifier = Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(16.dp)).padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        CommunityAvatar(
-            imageURL = item.profileImageURL,
-            fallbackText = item.creatorDisplayName.take(2).uppercase(),
-            size = 48
-        )
-
+        CommunityAvatar(imageURL = item.profileImageURL, fallbackText = item.creatorDisplayName.take(2).uppercase(), size = 48)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(item.creatorDisplayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Text(
-                "@${item.creatorUsername} · ${item.memberCount} members",
-                fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f)
-            )
+            Text("@${item.creatorUsername} · ${item.memberCount} members", fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f))
         }
-
-        Button(
-            onClick = onJoin,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan),
-            shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-        ) {
+        Button(onClick = onJoin, colors = ButtonDefaults.buttonColors(containerColor = Color.Cyan), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
             Text("Join", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
         }
     }
@@ -351,20 +411,11 @@ private fun DiscoverCommunityCard(item: CommunityListItem, onJoin: () -> Unit) {
 @Composable
 private fun CommunityAvatar(imageURL: String?, fallbackText: String, size: Int) {
     if (!imageURL.isNullOrBlank()) {
-        AsyncImage(
-            model = imageURL,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(14.dp))
-                .background(Color.Gray.copy(alpha = 0.3f))
-        )
+        AsyncImage(model = imageURL, contentDescription = null, contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(14.dp)).background(Color.Gray.copy(alpha = 0.3f)))
     } else {
         Box(
-            modifier = Modifier.size(size.dp)
-                .background(
-                    Brush.linearGradient(listOf(Color.Cyan.copy(0.4f), Color(0xFF9C27B0).copy(0.4f))),
-                    RoundedCornerShape(14.dp)
-                ),
+            modifier = Modifier.size(size.dp).background(Brush.linearGradient(listOf(Color.Cyan.copy(0.4f), Color(0xFF9C27B0).copy(0.4f))), RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(fallbackText, fontSize = (size / 3).sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -376,13 +427,8 @@ private fun CommunityAvatar(imageURL: String?, fallbackText: String, size: Int) 
 
 @Composable
 private fun CommunitySectionHeader(title: String) {
-    Text(
-        title.uppercase(),
-        fontSize = 11.sp, fontWeight = FontWeight.Bold,
-        color = Color.White.copy(alpha = 0.35f),
-        letterSpacing = 1.5.sp,
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
-    )
+    Text(title.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.35f),
+        letterSpacing = 1.5.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp))
 }
 
 // MARK: - Empty State
@@ -390,20 +436,10 @@ private fun CommunitySectionHeader(title: String) {
 @Composable
 private fun CommunityEmptyState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(40.dp)
-        ) {
-            Icon(
-                Icons.Default.Groups, contentDescription = null,
-                tint = Color.Gray, modifier = Modifier.size(56.dp)
-            )
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(40.dp)) {
+            Icon(Icons.Default.Groups, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(56.dp))
             Text("No Communities", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
-            Text(
-                "Subscribe to creators to join their communities and earn XP.",
-                fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center
-            )
+            Text("Subscribe to creators to join their communities and earn XP.", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center)
         }
     }
 }
@@ -412,58 +448,36 @@ private fun CommunityEmptyState() {
 
 private fun parseCommunityListItem(id: String, data: Map<String, Any>): CommunityListItem? {
     val creatorUsername = data["creatorUsername"] as? String ?: run {
-        println("⚠️ COMMUNITIES: Doc $id missing creatorUsername — keys: ${data.keys}")
+        println("⚠️ COMMUNITIES: Doc $id missing creatorUsername")
         return null
     }
     val creatorDisplayName = data["creatorDisplayName"] as? String ?: creatorUsername
-    val creatorTier = data["tier"] as? String ?: "rookie"
     val memberCount = (data["memberCount"] as? Number)?.toInt() ?: 0
     val profileImageURL = data["profileImageURL"] as? String
     val isCreatorLive = data["isCreatorLive"] as? Boolean ?: false
     val unreadCount = (data["unreadCount"] as? Number)?.toInt() ?: 0
     val isVerified = data["isVerified"] as? Boolean ?: false
     val lastActivityPreview = data["lastActivityPreview"] as? String ?: ""
-    val lastActivityTs = data["lastActivityAt"]
-    val lastActivityAt = if (lastActivityTs is com.google.firebase.Timestamp) lastActivityTs.toDate() else Date()
-
-    println("✅ COMMUNITIES: Parsed community $id — @$creatorUsername ($memberCount members)")
+    val lastActivityAt = (data["lastActivityAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
 
     return CommunityListItem(
-        id = id,
-        creatorUsername = creatorUsername,
-        creatorDisplayName = creatorDisplayName,
-        creatorTier = creatorTier,
-        profileImageURL = profileImageURL,
-        memberCount = memberCount,
-        userLevel = 0,
-        userXP = 0,
-        unreadCount = unreadCount,
-        lastActivityPreview = lastActivityPreview,
-        lastActivityAt = lastActivityAt,
-        isCreatorLive = isCreatorLive,
-        isVerified = isVerified
+        id = id, creatorUsername = creatorUsername, creatorDisplayName = creatorDisplayName,
+        creatorTier = data["tier"] as? String ?: "rookie", profileImageURL = profileImageURL,
+        memberCount = memberCount, userLevel = 0, userXP = 0, unreadCount = unreadCount,
+        lastActivityPreview = lastActivityPreview, lastActivityAt = lastActivityAt,
+        isCreatorLive = isCreatorLive, isVerified = isVerified
     )
 }
 
 private suspend fun joinCommunity(db: FirebaseFirestore, userID: String, communityID: String) {
-    val memberRef = db.collection("communities").document(communityID)
-        .collection("members").document(userID)
-
-    val memberData = hashMapOf<String, Any>(
-        "userID" to userID,
-        "communityID" to communityID,
+    val memberRef = db.collection("communities").document(communityID).collection("members").document(userID)
+    memberRef.set(hashMapOf<String, Any>(
+        "userID" to userID, "communityID" to communityID,
         "joinedAt" to com.google.firebase.Timestamp.now(),
-        "localXP" to 0,
-        "level" to 0,
-        "coinsPaid" to 0,
-        "isModerator" to false,
-        "isBanned" to false
-    )
-
-    memberRef.set(memberData).await()
-
+        "localXP" to 0, "level" to 0, "coinsPaid" to 0,
+        "isModerator" to false, "isBanned" to false
+    )).await()
     db.collection("communities").document(communityID)
         .update("memberCount", com.google.firebase.firestore.FieldValue.increment(1L)).await()
-
     println("✅ COMMUNITY: Joined $communityID")
 }

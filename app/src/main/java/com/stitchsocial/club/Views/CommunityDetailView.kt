@@ -5,16 +5,15 @@
  * Layer 8: Views - Community Detail Screen
  * Mirrors: CommunityDetailView.swift (iOS) — FULL PARITY
  *
- * Cards:
- *  1. Creator Header (avatar, verified, stats)
- *  2. XP Progress Bar
- *  3. Discussion + Upper Flow (2-col)
- *  4. Highlight Reel + Top Supporters (2-col)
- *  5. Live Now Banner
- *  6. Super Hype Stats + Badge Holders (2-col)
- *  7. Recent Posts feed
+ * FIXED vs previous:
+ *   - Discussion card: shows pinned/creator post first; "Start One" CTA when empty
+ *   - Upper Flow card: onTap opens MemberLeaderboardView sheet (sort by level)
+ *   - Top Supporters: onTap opens MemberLeaderboardView (sort by hypeGiven)
+ *   - Badge Holders: onTap opens BadgeGalleryView sheet
+ *   - Creator header: Go Live FAB for isCreator
+ *   - leaderboardSort state added
  *
- * CACHING (add to CachingOptimization):
+ * CACHING:
  *   - topMembers: fetched once (limit 10), session-scoped
  *   - posts: fetched once (limit 20), session-scoped
  *   - membership: fetched once on open
@@ -27,6 +26,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,17 +52,27 @@ import kotlinx.coroutines.tasks.await
 import java.util.Date
 
 // MARK: - Colors (matches iOS mockup exactly)
-private val darkBg      = Color(0xFF0D0F1A)
-private val cardBg      = Color(0xFF161929)
-private val cardBorder  = Color(0xFF2A2F4A)
-private val accentCyan  = Color(0xFF00D4FF)
+private val darkBg       = Color(0xFF0D0F1A)
+private val cardBg       = Color(0xFF161929)
+private val cardBorder   = Color(0xFF2A2F4A)
+private val accentCyan   = Color(0xFF00D4FF)
 private val accentOrange = Color(0xFFFF8C42)
 private val accentPurple = Color(0xFF9C5FFF)
-private val accentGold  = Color(0xFFFFD700)
-private val accentPink  = Color(0xFFFF4F9A)
-private val textPrimary = Color.White
+private val accentGold   = Color(0xFFFFD700)
+private val accentPink   = Color(0xFFFF4F9A)
+private val textPrimary  = Color.White
 private val textSecondary = Color(0xFF8B8FA3)
-private val textMuted   = Color(0xFF5A5E72)
+private val textMuted    = Color(0xFF5A5E72)
+
+// MARK: - Leaderboard Sort (matches iOS LeaderboardSort)
+
+enum class LeaderboardSort(val label: String) {
+    LEVEL("Level"),
+    HYPES_GIVEN("Hype Given"),
+    HYPES_RECEIVED("Hype Received"),
+    POSTS("Posts"),
+    STREAMS("Streams Attended")
+}
 
 // MARK: - CommunityDetailView
 
@@ -83,20 +93,23 @@ fun CommunityDetailView(
     var showingComposer by remember { mutableStateOf(false) }
     var selectedPost by remember { mutableStateOf<CommunityPost?>(null) }
 
+    // Drill-down sheets — matches iOS @State vars
+    var showingLeaderboard by remember { mutableStateOf(false) }
+    var showingSupporters by remember { mutableStateOf(false) }
+    var showingBadges by remember { mutableStateOf(false) }
+    var showingHighlight by remember { mutableStateOf(false) }
+    var leaderboardSort by remember { mutableStateOf(LeaderboardSort.LEVEL) }
+
     val isCreator = userID == communityID
 
     // Load data — single batch: membership + top members + posts
     LaunchedEffect(communityID) {
         isLoading = true
         try {
-            // Membership
             val memDoc = db.collection("communities").document(communityID)
                 .collection("members").document(userID).get().await()
-            if (memDoc.exists()) {
-                membership = parseMembership(memDoc.id, memDoc.data ?: emptyMap())
-            }
+            if (memDoc.exists()) membership = parseMembership(memDoc.id, memDoc.data ?: emptyMap())
 
-            // Top members (1 query powers leaderboard + supporters + badge cards)
             val membersSnap = db.collection("communities").document(communityID)
                 .collection("members")
                 .orderBy("localXP", Query.Direction.DESCENDING)
@@ -105,7 +118,6 @@ fun CommunityDetailView(
                 parseMembership(doc.id, doc.data ?: emptyMap())
             }
 
-            // Posts feed
             val postsSnap = db.collection("communities").document(communityID)
                 .collection("posts")
                 .orderBy("createdAt", Query.Direction.DESCENDING)
@@ -133,7 +145,7 @@ fun CommunityDetailView(
                 contentPadding = PaddingValues(bottom = 100.dp)
             ) {
                 // 1. Creator Header
-                item { CreatorHeaderCard(communityItem = communityItem, memberCount = topMembers.size, onBack = onDismiss) }
+                item { CreatorHeaderCard(communityItem = communityItem, memberCount = topMembers.size, isCreator = isCreator, onBack = onDismiss) }
 
                 // 2. XP Progress
                 item { XPProgressCard(membership = membership, communityItem = communityItem) }
@@ -144,8 +156,16 @@ fun CommunityDetailView(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        DiscussionCard(posts = posts, modifier = Modifier.weight(1f))
-                        UpperFlowCard(topMembers = topMembers, modifier = Modifier.weight(1f))
+                        DiscussionCard(
+                            posts = posts,
+                            modifier = Modifier.weight(1f),
+                            onStartPost = { showingComposer = true }
+                        )
+                        UpperFlowCard(
+                            topMembers = topMembers,
+                            modifier = Modifier.weight(1f),
+                            onTap = { leaderboardSort = LeaderboardSort.LEVEL; showingLeaderboard = true }
+                        )
                     }
                 }
 
@@ -155,8 +175,12 @@ fun CommunityDetailView(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        HighlightReelCard(modifier = Modifier.weight(1f))
-                        TopSupportersCard(topMembers = topMembers, modifier = Modifier.weight(1f))
+                        HighlightReelCard(modifier = Modifier.weight(1f), onTap = { showingHighlight = true })
+                        TopSupportersCard(
+                            topMembers = topMembers,
+                            modifier = Modifier.weight(1f),
+                            onTap = { leaderboardSort = LeaderboardSort.HYPES_GIVEN; showingSupporters = true }
+                        )
                     }
                 }
 
@@ -170,11 +194,15 @@ fun CommunityDetailView(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         SuperHypeCard(topMembers = topMembers, modifier = Modifier.weight(1f))
-                        BadgeHoldersCard(topMembers = topMembers, modifier = Modifier.weight(1f))
+                        BadgeHoldersCard(
+                            topMembers = topMembers,
+                            modifier = Modifier.weight(1f),
+                            onTap = { showingBadges = true }
+                        )
                     }
                 }
 
-                // 7. Recent Posts section label
+                // 7. Recent Posts label
                 item {
                     Text(
                         "RECENT POSTS",
@@ -221,18 +249,30 @@ fun CommunityDetailView(
             }
         }
 
-        // FAB — compose post
+        // FAB — compose post (+ Go Live for creator)
         Box(
             modifier = Modifier.fillMaxSize().padding(20.dp),
             contentAlignment = Alignment.BottomEnd
         ) {
-            FloatingActionButton(
-                onClick = { showingComposer = true },
-                containerColor = accentCyan,
-                shape = CircleShape,
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(Icons.Default.Edit, contentDescription = "Post", tint = Color.Black, modifier = Modifier.size(24.dp))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (isCreator) {
+                    FloatingActionButton(
+                        onClick = { /* TODO: showingGoLive = true */ },
+                        containerColor = accentOrange,
+                        shape = CircleShape,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Text("🎙️", fontSize = 20.sp)
+                    }
+                }
+                FloatingActionButton(
+                    onClick = { showingComposer = true },
+                    containerColor = accentCyan,
+                    shape = CircleShape,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Post", tint = Color.Black, modifier = Modifier.size(24.dp))
+                }
             }
         }
     }
@@ -272,13 +312,33 @@ fun CommunityDetailView(
                             body = body, createdAt = Date()
                         )
                         posts = listOf(newPost) + posts
-                        println("✅ POST: Created in $communityID")
                     } catch (e: Exception) {
                         println("❌ POST: Failed — ${e.message}")
                     }
                 }
             },
             onDismiss = { showingComposer = false }
+        )
+    }
+
+    // Leaderboard / Supporters drill-down sheet
+    if (showingLeaderboard || showingSupporters) {
+        MemberLeaderboardView(
+            communityID = communityID,
+            members = if (showingSupporters)
+                topMembers.sortedByDescending { it.totalHypesGiven }
+            else
+                topMembers.sortedByDescending { it.level },
+            sort = leaderboardSort,
+            onDismiss = { showingLeaderboard = false; showingSupporters = false }
+        )
+    }
+
+    // Badge gallery sheet
+    if (showingBadges) {
+        BadgeGalleryView(
+            membership = membership,
+            onDismiss = { showingBadges = false }
         )
     }
 }
@@ -289,6 +349,7 @@ fun CommunityDetailView(
 private fun CreatorHeaderCard(
     communityItem: CommunityListItem,
     memberCount: Int,
+    isCreator: Boolean,
     onBack: () -> Unit
 ) {
     Box(
@@ -296,7 +357,6 @@ private fun CreatorHeaderCard(
             .background(Brush.verticalGradient(listOf(accentPurple.copy(alpha = 0.2f), Color.Transparent)))
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 16.dp)) {
-            // Back button
             Box(
                 modifier = Modifier.size(36.dp)
                     .background(Color.White.copy(alpha = 0.1f), CircleShape)
@@ -309,7 +369,6 @@ private fun CreatorHeaderCard(
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Avatar
                 if (!communityItem.profileImageURL.isNullOrBlank()) {
                     AsyncImage(
                         model = communityItem.profileImageURL,
@@ -324,9 +383,7 @@ private fun CreatorHeaderCard(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(communityItem.creatorDisplayName, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = textPrimary)
-                        if (communityItem.isVerified) {
-                            Text("✓", fontSize = 14.sp, color = accentCyan)
-                        }
+                        if (communityItem.isVerified) Text("✓", fontSize = 14.sp, color = accentCyan)
                     }
                     Text("@${communityItem.creatorUsername}", fontSize = 13.sp, color = textSecondary)
                 }
@@ -334,7 +391,6 @@ private fun CreatorHeaderCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Stats row
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StatItem("MEMBERS:", "${communityItem.memberCount}", accentCyan)
                 StatItem("LIVE NOW:", if (communityItem.isCreatorLive) "🔴" else "—", accentOrange)
@@ -354,11 +410,7 @@ private fun XPProgressCard(membership: CommunityMembership?, communityItem: Comm
     val progress = if (xpForNext > 0) (currentXP.toFloat() / xpForNext.toFloat()).coerceIn(0f, 1f) else 0f
 
     ModuleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("⭐", fontSize = 16.sp)
             Text("Lv $level", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = accentGold)
             Box(modifier = Modifier.weight(1f).height(8.dp).background(cardBorder, RoundedCornerShape(4.dp))) {
@@ -372,47 +424,66 @@ private fun XPProgressCard(membership: CommunityMembership?, communityItem: Comm
     }
 }
 
-// MARK: - Card 3: Discussion
+// MARK: - Card 3a: Discussion — shows creator/pinned post first, "Start One" CTA when empty
 
 @Composable
-private fun DiscussionCard(posts: List<CommunityPost>, modifier: Modifier) {
+private fun DiscussionCard(posts: List<CommunityPost>, modifier: Modifier, onStartPost: () -> Unit) {
+    // Prioritise creator post (matches iOS: feedService.currentFeed.first(where: isCreatorPost))
+    val pinnedPost = posts.firstOrNull { it.isCreatorPost } ?: posts.firstOrNull()
+
     ModuleCard(modifier = modifier) {
         CardHeader("💬", "Discussion", accentCyan)
         Spacer(modifier = Modifier.height(10.dp))
-        if (posts.isEmpty()) {
-            Text("No posts yet", fontSize = 12.sp, color = textMuted)
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                posts.take(3).forEach { post ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                        MemberAvatar(name = post.authorDisplayName, size = 24)
-                        Column {
-                            Text("@${post.authorUsername}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textPrimary)
-                            Text(post.body.take(60) + if (post.body.length > 60) "..." else "", fontSize = 11.sp, color = textSecondary)
-                        }
-                    }
+
+        if (pinnedPost != null) {
+            Text("@${pinnedPost.authorUsername}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentOrange)
+            Spacer(Modifier.height(4.dp))
+            val preview = if (pinnedPost.body.length > 80) pinnedPost.body.take(80) + "…" else pinnedPost.body
+            Text(preview, fontSize = 12.sp, color = textSecondary, lineHeight = 17.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("🔥", fontSize = 12.sp)
+                    Text("${pinnedPost.hypeCount}", fontSize = 11.sp, color = textMuted)
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("💬", fontSize = 12.sp)
+                    Text("${pinnedPost.replyCount}", fontSize = 11.sp, color = textMuted)
+                }
+            }
+        } else {
+            Text("No active discussions", fontSize = 12.sp, color = textMuted)
+            Spacer(Modifier.height(8.dp))
+            // "Start One" CTA — matches iOS smallButton
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = accentCyan.copy(alpha = 0.15f),
+                modifier = Modifier.clickable { onStartPost() }
+            ) {
+                Text("Start One", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = accentCyan,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
             }
         }
     }
 }
 
-// MARK: - Card 3: Upper Flow Leaderboard
+// MARK: - Card 3b: Upper Flow Leaderboard — tappable
 
 @Composable
-private fun UpperFlowCard(topMembers: List<CommunityMembership>, modifier: Modifier) {
-    ModuleCard(modifier = modifier) {
-        CardHeader("⬆️", "Upper Flow", accentPurple)
+private fun UpperFlowCard(topMembers: List<CommunityMembership>, modifier: Modifier, onTap: () -> Unit) {
+    ModuleCard(modifier = modifier.clickable { onTap() }) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            CardHeader("⬆️", "Upper Flow", accentPurple)
+            Icon(Icons.Default.ChevronRight, null, tint = textMuted, modifier = Modifier.size(14.dp))
+        }
+        Text("Community Level Leaders", fontSize = 10.sp, color = textMuted)
         Spacer(modifier = Modifier.height(10.dp))
         if (topMembers.isEmpty()) {
             Text("No members yet", fontSize = 12.sp, color = textMuted)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 topMembers.take(4).forEachIndexed { i, member ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textMuted, modifier = Modifier.width(14.dp))
                         MemberAvatar(name = member.displayName, size = 24)
                         Column(modifier = Modifier.weight(1f)) {
@@ -426,11 +497,11 @@ private fun UpperFlowCard(topMembers: List<CommunityMembership>, modifier: Modif
     }
 }
 
-// MARK: - Card 4: Highlight Reel
+// MARK: - Card 4a: Highlight Reel — tappable
 
 @Composable
-private fun HighlightReelCard(modifier: Modifier) {
-    ModuleCard(modifier = modifier) {
+private fun HighlightReelCard(modifier: Modifier, onTap: () -> Unit) {
+    ModuleCard(modifier = modifier.clickable { onTap() }) {
         CardHeader("🎬", "Highlights", accentOrange)
         Spacer(modifier = Modifier.height(10.dp))
         Box(
@@ -446,13 +517,16 @@ private fun HighlightReelCard(modifier: Modifier) {
     }
 }
 
-// MARK: - Card 4: Top Supporters
+// MARK: - Card 4b: Top Supporters — tappable
 
 @Composable
-private fun TopSupportersCard(topMembers: List<CommunityMembership>, modifier: Modifier) {
+private fun TopSupportersCard(topMembers: List<CommunityMembership>, modifier: Modifier, onTap: () -> Unit) {
     val supporters = topMembers.sortedByDescending { it.totalHypesGiven }.take(4)
-    ModuleCard(modifier = modifier) {
-        CardHeader("🏅", "Supporters", accentPink)
+    ModuleCard(modifier = modifier.clickable { onTap() }) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            CardHeader("🏅", "Supporters", accentPink)
+            Icon(Icons.Default.ChevronRight, null, tint = textMuted, modifier = Modifier.size(14.dp))
+        }
         Spacer(modifier = Modifier.height(10.dp))
         if (supporters.isEmpty()) {
             Text("No supporters yet", fontSize = 12.sp, color = textMuted)
@@ -472,24 +546,16 @@ private fun TopSupportersCard(topMembers: List<CommunityMembership>, modifier: M
     }
 }
 
-// MARK: - Card 5: Live Now
-
+// MARK: - Card 5: Live Now Banner
 @Composable
 private fun LiveNowCard(communityItem: CommunityListItem) {
     ModuleCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         gradient = listOf(accentPurple.copy(0.15f), accentCyan.copy(0.08f))
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(36.dp).background(accentOrange.copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.size(36.dp).background(accentOrange.copy(alpha = 0.2f), CircleShape), contentAlignment = Alignment.Center) {
                     Text("🎙️", fontSize = 18.sp)
                 }
                 Column {
@@ -501,7 +567,6 @@ private fun LiveNowCard(communityItem: CommunityListItem) {
                     )
                 }
             }
-
             if (communityItem.isCreatorLive) {
                 Surface(shape = RoundedCornerShape(10.dp), color = accentOrange) {
                     Text("WATCH", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black,
@@ -512,13 +577,11 @@ private fun LiveNowCard(communityItem: CommunityListItem) {
     }
 }
 
-// MARK: - Card 6: Super Hype Stats
-
+// MARK: - Card 6a: Super Hype Stats
 @Composable
 private fun SuperHypeCard(topMembers: List<CommunityMembership>, modifier: Modifier) {
     val totalHypes = topMembers.sumOf { it.totalHypesReceived }
     val topGiver = topMembers.maxByOrNull { it.totalHypesGiven }
-
     ModuleCard(modifier = modifier) {
         CardHeader("🔥", "Super Hype", accentOrange)
         Spacer(modifier = Modifier.height(10.dp))
@@ -530,12 +593,14 @@ private fun SuperHypeCard(topMembers: List<CommunityMembership>, modifier: Modif
     }
 }
 
-// MARK: - Card 6: Badge Holders
-
+// MARK: - Card 6b: Badge Holders — tappable
 @Composable
-private fun BadgeHoldersCard(topMembers: List<CommunityMembership>, modifier: Modifier) {
-    ModuleCard(modifier = modifier) {
-        CardHeader("🏆", "Badges", accentGold)
+private fun BadgeHoldersCard(topMembers: List<CommunityMembership>, modifier: Modifier, onTap: () -> Unit) {
+    ModuleCard(modifier = modifier.clickable { onTap() }) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            CardHeader("🏆", "Badges", accentGold)
+            Icon(Icons.Default.ChevronRight, null, tint = textMuted, modifier = Modifier.size(14.dp))
+        }
         Spacer(modifier = Modifier.height(10.dp))
         if (topMembers.isEmpty()) {
             Text("No members yet", fontSize = 12.sp, color = textMuted)
@@ -544,10 +609,9 @@ private fun BadgeHoldersCard(topMembers: List<CommunityMembership>, modifier: Mo
                 topMembers.take(3).forEach { member ->
                     val badge = badgeForLevel(member.level)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(28.dp).background(accentPurple.copy(0.2f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) { Text(badge.first, fontSize = 14.sp) }
+                        Box(Modifier.size(28.dp).background(accentPurple.copy(0.2f), CircleShape), contentAlignment = Alignment.Center) {
+                            Text(badge.first, fontSize = 14.sp)
+                        }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(badge.second, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = textPrimary)
                             Text("${member.localXP} XP", fontSize = 9.sp, color = accentOrange)
@@ -559,17 +623,11 @@ private fun BadgeHoldersCard(topMembers: List<CommunityMembership>, modifier: Mo
     }
 }
 
-// MARK: - Post Card (Card 7)
-
+// MARK: - Post Card
 @Composable
 private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit, onTap: () -> Unit) {
     ModuleCard(modifier = modifier.clickable { onTap() }) {
-        // Author row
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             MemberAvatar(name = post.authorDisplayName, size = 32)
             Column(modifier = Modifier.weight(1f)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -585,18 +643,11 @@ private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit
             }
             if (post.isPinned) Text("📌", fontSize = 14.sp)
         }
-
         Spacer(modifier = Modifier.height(8.dp))
         Text(post.body, fontSize = 13.sp, color = textSecondary, lineHeight = 19.sp)
         Spacer(modifier = Modifier.height(8.dp))
-
-        // Actions
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(
-                modifier = Modifier.clickable { onHype() },
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(modifier = Modifier.clickable { onHype() }, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("🔥", fontSize = 14.sp)
                 Text("${post.hypeCount}", fontSize = 12.sp, color = textMuted)
             }
@@ -609,79 +660,104 @@ private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit
 }
 
 // MARK: - Compose Sheet
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ComposePostSheet(
-    userID: String,
-    communityID: String,
-    membership: CommunityMembership?,
-    isCreator: Boolean,
-    onPost: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
+private fun ComposePostSheet(userID: String, communityID: String, membership: CommunityMembership?, isCreator: Boolean, onPost: (String) -> Unit, onDismiss: () -> Unit) {
     var postBody by remember { mutableStateOf("") }
     val isValid = postBody.trim().isNotEmpty()
-
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = darkBg) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("New Post", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = textPrimary)
                 TextButton(onClick = onDismiss) { Text("Cancel", color = textSecondary) }
             }
-
             OutlinedTextField(
-                value = postBody,
-                onValueChange = { postBody = it },
+                value = postBody, onValueChange = { postBody = it },
                 placeholder = { Text("What's on your mind?", color = textMuted) },
                 modifier = Modifier.fillMaxWidth().height(140.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = accentCyan,
-                    unfocusedBorderColor = cardBorder,
-                    focusedTextColor = textPrimary,
-                    unfocusedTextColor = textPrimary,
-                    cursorColor = accentCyan
-                )
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = accentCyan, unfocusedBorderColor = cardBorder, focusedTextColor = textPrimary, unfocusedTextColor = textPrimary, cursorColor = accentCyan)
             )
-
-            Button(
-                onClick = { onPost(postBody.trim()); onDismiss() },
-                enabled = isValid,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = accentCyan, disabledContainerColor = cardBorder),
-                shape = RoundedCornerShape(14.dp)
-            ) {
+            Button(onClick = { onPost(postBody.trim()); onDismiss() }, enabled = isValid, modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = accentCyan, disabledContainerColor = cardBorder), shape = RoundedCornerShape(14.dp)) {
                 Text("Post", fontWeight = FontWeight.Bold, color = if (isValid) Color.Black else textMuted)
             }
-
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
 
-// MARK: - Shared Components
-
+// MARK: - Member Leaderboard View (drill-down for Upper Flow + Supporters)
 @Composable
-private fun ModuleCard(
-    modifier: Modifier = Modifier,
-    gradient: List<Color>? = null,
-    content: @Composable ColumnScope.() -> Unit
-) {
+fun MemberLeaderboardView(communityID: String, members: List<CommunityMembership>, sort: LeaderboardSort, onDismiss: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(darkBg)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, null, tint = accentCyan) }
+            Text(sort.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = textPrimary, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.size(48.dp))
+        }
+        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(members) { idx, member ->
+                Row(Modifier.fillMaxWidth().background(cardBg, RoundedCornerShape(12.dp)).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${idx + 1}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (idx < 3) accentGold else textMuted, modifier = Modifier.width(24.dp))
+                    MemberAvatar(name = member.displayName, size = 36)
+                    Column(Modifier.weight(1f)) {
+                        Text(member.username, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = textPrimary)
+                        Text("Lv ${member.level} · ${formatXP(member.localXP)} XP", fontSize = 11.sp, color = textSecondary)
+                    }
+                    val value = when (sort) {
+                        LeaderboardSort.HYPES_GIVEN -> "${member.totalHypesGiven} 🔥"
+                        LeaderboardSort.HYPES_RECEIVED -> "${member.totalHypesReceived} 💎"
+                        else -> "Lv ${member.level}"
+                    }
+                    Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = accentCyan)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Badge Gallery View
+@Composable
+fun BadgeGalleryView(membership: CommunityMembership?, onDismiss: () -> Unit) {
+    val userLevel = membership?.level ?: 0
+    Column(Modifier.fillMaxSize().background(darkBg)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, null, tint = accentCyan) }
+            Text("Badges", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = textPrimary, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Spacer(Modifier.size(48.dp))
+        }
+        data class BadgeDef(val level: Int, val emoji: String, val name: String)
+        val badges = listOf(
+            BadgeDef(5, "🏅", "Member"), BadgeDef(10, "⚔️", "Veteran"),
+            BadgeDef(25, "🦅", "Eagle"), BadgeDef(50, "💎", "Diamond"),
+            BadgeDef(100, "👑", "Centurion")
+        )
+        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(badges) { b ->
+                val earned = userLevel >= b.level
+                Row(Modifier.fillMaxWidth().background(if (earned) accentPurple.copy(0.1f) else cardBg, RoundedCornerShape(12.dp)).padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(b.emoji, fontSize = 28.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text(b.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = if (earned) textPrimary else textMuted)
+                        Text("Level ${b.level} required", fontSize = 12.sp, color = textMuted)
+                    }
+                    if (earned) Text("✓", fontSize = 18.sp, color = accentCyan)
+                    else Text("🔒", fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shared Components
+@Composable
+private fun ModuleCard(modifier: Modifier = Modifier, gradient: List<Color>? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = modifier
-            .background(
-                if (gradient != null) Brush.linearGradient(gradient) else Brush.linearGradient(listOf(cardBg, cardBg)),
-                RoundedCornerShape(16.dp)
-            )
-            .border(1.dp, cardBorder, RoundedCornerShape(16.dp))
-            .padding(14.dp),
+        modifier = modifier.background(
+            if (gradient != null) Brush.linearGradient(gradient) else Brush.linearGradient(listOf(cardBg, cardBg)),
+            RoundedCornerShape(16.dp)
+        ).border(1.dp, cardBorder, RoundedCornerShape(16.dp)).padding(14.dp),
         content = content
     )
 }
@@ -696,22 +772,11 @@ private fun CardHeader(emoji: String, title: String, color: Color) {
 
 @Composable
 private fun MemberAvatar(name: String, size: Int) {
-    val gradients = listOf(
-        listOf(accentCyan, accentPurple),
-        listOf(accentPink, accentOrange),
-        listOf(accentPurple, accentPink),
-        listOf(accentOrange, accentGold)
-    )
+    val gradients = listOf(listOf(accentCyan, accentPurple), listOf(accentPink, accentOrange), listOf(accentPurple, accentPink), listOf(accentOrange, accentGold))
     val parts = name.trim().split(" ")
-    val initials = ((parts.firstOrNull()?.firstOrNull()?.toString() ?: "") +
-            (if (parts.size > 1) parts[1].firstOrNull()?.toString() ?: "" else "")).uppercase()
+    val initials = ((parts.firstOrNull()?.firstOrNull()?.toString() ?: "") + (if (parts.size > 1) parts[1].firstOrNull()?.toString() ?: "" else "")).uppercase()
     val gradient = gradients[kotlin.math.abs(name.hashCode()) % gradients.size]
-
-    Box(
-        modifier = Modifier.size(size.dp)
-            .background(Brush.linearGradient(gradient), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = Modifier.size(size.dp).background(Brush.linearGradient(gradient), CircleShape), contentAlignment = Alignment.Center) {
         Text(initials, fontSize = (size * 0.38f).sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
 }
@@ -738,12 +803,7 @@ private fun HypeStatRow(emoji: String, label: String, sub: String, value: String
 }
 
 // MARK: - Helpers
-
-private fun xpForLevel(level: Int): Int {
-    if (level <= 0) return 0
-    return level * level * 10
-}
-
+private fun xpForLevel(level: Int): Int = if (level <= 0) 0 else level * level * 10
 private fun badgeForLevel(level: Int): Pair<String, String> = when {
     level >= 100 -> "👑" to "Centurion"
     level >= 50  -> "💎" to "Diamond"
@@ -752,15 +812,12 @@ private fun badgeForLevel(level: Int): Pair<String, String> = when {
     level >= 5   -> "🌟" to "Rising"
     else         -> "🏅" to "Member"
 }
-
 private fun formatXP(xp: Int): String = when {
     xp >= 1_000_000 -> String.format("%.1fM", xp / 1_000_000.0)
     xp >= 1_000     -> String.format("%.1fK", xp / 1_000.0)
     else            -> "$xp"
 }
-
 private fun formatCount(count: Int): String = formatXP(count)
-
 private fun timeAgo(date: Date): String {
     val diff = (System.currentTimeMillis() - date.time) / 1000
     return when {
@@ -770,21 +827,5 @@ private fun timeAgo(date: Date): String {
         else         -> "${diff / 86400}d"
     }
 }
-
-// MARK: - Data Parsers
-
-private fun parseMembership(id: String, data: Map<String, Any>): CommunityMembership? {
-    return try {
-        CommunityMembership.fromFirestore(data.toMutableMap().apply { put("id", id) })
-    } catch (e: Exception) {
-        null
-    }
-}
-
-private fun parsePost(id: String, data: Map<String, Any>): CommunityPost? {
-    return try {
-        CommunityPost.fromFirestore(id, data)
-    } catch (e: Exception) {
-        null
-    }
-}
+private fun parseMembership(id: String, data: Map<String, Any>): CommunityMembership? = try { CommunityMembership.fromFirestore(data.toMutableMap().apply { put("id", id) }) } catch (_: Exception) { null }
+private fun parsePost(id: String, data: Map<String, Any>): CommunityPost? = try { CommunityPost.fromFirestore(id, data) } catch (_: Exception) { null }

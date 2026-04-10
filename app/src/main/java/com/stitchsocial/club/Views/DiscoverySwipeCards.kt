@@ -27,6 +27,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,7 +49,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.stitchsocial.club.foundation.CoreVideoMetadata
+import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.foundation.CollectionContentType
 import com.stitchsocial.club.foundation.Temperature
+import com.stitchsocial.club.coordination.DiscoveryEngagementTracker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -65,6 +71,7 @@ fun DiscoverySwipeCards(
     onNavigateToThread: (String) -> Unit = {},
     isAnnouncementShowing: Boolean = false,
     isFullscreenActive: Boolean = false,
+    collectionCardMap: Map<String, VideoCollection> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     if (videos.isEmpty()) {
@@ -96,8 +103,24 @@ fun DiscoverySwipeCards(
     val targetLoops = 2
     val dragMultiplier = 1.2f
 
-    // Reset drag offset when index changes with spring animation
+    // Discovery engagement tracker — mirrors Swift @ObservedObject discoveryTracker
+    val tracker = DiscoveryEngagementTracker
+
+    // Start session on appear — mirrors Swift .onAppear { discoveryTracker.startNewSession() }
+    LaunchedEffect(Unit) {
+        tracker.startNewSession()
+        val video = videos.getOrNull(currentIndex)
+        if (video != null) {
+            tracker.cardBecameActive(videoID = video.id, creatorID = video.creatorID)
+        }
+    }
+
+    // Reset drag offset + notify tracker when index changes
     LaunchedEffect(currentIndex) {
+        val video = videos.getOrNull(currentIndex)
+        if (video != null) {
+            tracker.cardBecameActive(videoID = video.id, creatorID = video.creatorID)
+        }
         launch {
             dragOffsetX.animateTo(
                 0f,
@@ -119,7 +142,8 @@ fun DiscoverySwipeCards(
     }
 
     // Navigation functions
-    val nextCard: () -> Unit = {
+    val nextCard: (isManualSwipe: Boolean) -> Unit = { isManualSwipe ->
+        if (isManualSwipe) tracker.cardSwipedAway(wasSwipeBack = false)
         if (currentIndex + 1 < videos.size) {
             onIndexChange(currentIndex + 1)
         }
@@ -130,6 +154,7 @@ fun DiscoverySwipeCards(
     }
 
     val previousCard: () -> Unit = {
+        tracker.cardSwipedAway(wasSwipeBack = true)
         if (currentIndex > 0) {
             onIndexChange(currentIndex - 1)
         }
@@ -149,7 +174,8 @@ fun DiscoverySwipeCards(
 
                 if (currentLoops >= targetLoops && !isSwipeInProgress) {
                     isSwipeInProgress = true
-                    nextCard()
+                    tracker.cardAutoAdvanced()
+                    nextCard(false)
                     scope.launch {
                         delay(200)
                         isSwipeInProgress = false
@@ -178,7 +204,8 @@ fun DiscoverySwipeCards(
                     dragRotation = 0f,
                     onVideoLoop = { },
                     isAnnouncementShowing = isAnnouncementShowing,
-                    isFullscreenActive = isFullscreenActive
+                    isFullscreenActive = isFullscreenActive,
+                    collectionCardMap = collectionCardMap
                 )
             }
         }
@@ -197,7 +224,8 @@ fun DiscoverySwipeCards(
                     dragRotation = 0f,
                     onVideoLoop = { },
                     isAnnouncementShowing = isAnnouncementShowing,
-                    isFullscreenActive = isFullscreenActive
+                    isFullscreenActive = isFullscreenActive,
+                    collectionCardMap = collectionCardMap
                 )
             }
         }
@@ -224,7 +252,12 @@ fun DiscoverySwipeCards(
                                     val currentTime = System.currentTimeMillis()
                                     if (currentTime - lastTapTime > 300) {
                                         lastTapTime = currentTime
-                                        onVideoTap(videos[currentIndex])
+                                        val tappedVideo = videos[currentIndex]
+                                        tracker.cardTappedFullscreen(
+                                            videoID = tappedVideo.id,
+                                            creatorID = tappedVideo.creatorID
+                                        )
+                                        onVideoTap(tappedVideo)
                                     }
                                 }
                             )
@@ -252,16 +285,16 @@ fun DiscoverySwipeCards(
                                         isSwipeInProgress = true
 
                                         if (translationX > 0) {
-                                            // SWIPE RIGHT = Previous
+                                            // SWIPE RIGHT = Previous (swipe back)
                                             scope.launch {
                                                 previousCard()
                                                 delay(200)
                                                 isSwipeInProgress = false
                                             }
                                         } else {
-                                            // SWIPE LEFT = Next
+                                            // SWIPE LEFT = Next (manual)
                                             scope.launch {
-                                                nextCard()
+                                                nextCard(true)
                                                 delay(200)
                                                 isSwipeInProgress = false
                                             }
@@ -303,7 +336,8 @@ fun DiscoverySwipeCards(
                         dragRotation = 0f,
                         onVideoLoop = handleVideoLoop,
                         isAnnouncementShowing = isAnnouncementShowing,
-                        isFullscreenActive = isFullscreenActive
+                        isFullscreenActive = isFullscreenActive,
+                        collectionCardMap = collectionCardMap
                     )
                 }
             }
@@ -345,7 +379,8 @@ private fun CardLayer(
     dragRotation: Float,
     onVideoLoop: (String) -> Unit,
     isAnnouncementShowing: Boolean,
-    isFullscreenActive: Boolean = false
+    isFullscreenActive: Boolean = false,
+    collectionCardMap: Map<String, VideoCollection> = emptyMap()
 ) {
     key(video.id) {
         Box(
@@ -365,7 +400,8 @@ private fun CardLayer(
                 video = video,
                 shouldAutoPlay = isTopCard && !isFullscreenActive,
                 onVideoLoop = onVideoLoop,
-                isAnnouncementShowing = isAnnouncementShowing || isFullscreenActive
+                isAnnouncementShowing = isAnnouncementShowing || isFullscreenActive,
+                collection = collectionCardMap.get(video.id),
             )
         }
     }
@@ -380,16 +416,8 @@ fun DiscoveryCard(
     shouldAutoPlay: Boolean,
     onVideoLoop: (String) -> Unit,
     isAnnouncementShowing: Boolean,
+    collection: VideoCollection? = null,
 ) {
-    // Force layout recalculation after composition
-    var layoutTrigger by remember { mutableStateOf(0) }
-
-    LaunchedEffect(video.id) {
-        // Trigger a layout pass after brief delay to ensure proper sizing
-        kotlinx.coroutines.delay(16) // One frame delay
-        layoutTrigger++
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -398,12 +426,14 @@ fun DiscoveryCard(
     ) {
         // CRITICAL: Completely prevent video rendering when announcement showing
         // Video content or thumbnail - fills completely
-        if (shouldAutoPlay && !isAnnouncementShowing) {
-            // Play video - key includes layoutTrigger to force remount after layout
-            key(video.id, "video-player", layoutTrigger) {
+        // Collection card — cover image + info panel, no video player
+        if (collection != null) {
+            CollectionSwipeCard(collection = collection)
+        } else if (shouldAutoPlay && !isAnnouncementShowing) {
+            key(video.id) {
                 VideoPlayerComposable(
                     video = video,
-                    isActive = true,  // Always active when rendering (controlled by shouldAutoPlay check)
+                    isActive = true,
                     onEngagement = { },
                     onVideoClick = { },
                     modifier = Modifier
@@ -582,4 +612,165 @@ private fun formatDuration(durationSeconds: Double): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "${minutes}:${String.format("%02d", seconds)}"
+}
+
+// ─────────────────────────────────────────────
+// MARK: - CollectionSwipeCard
+// ─────────────────────────────────────────────
+
+/**
+ * Static collection card for the swipe feed — no video player.
+ * Mirrors Swift DiscoverySwipeCards.collectionCardContent exactly:
+ *   - Cover image fills card
+ *   - Dark gradient overlay at bottom
+ *   - Cyan "SERIES" badge (or PODCAST / FILM / COURSE)
+ *   - Title (bold, large)
+ *   - Creator + segment count row
+ */
+@Composable
+fun CollectionSwipeCard(
+    collection: VideoCollection,
+    modifier: Modifier = Modifier
+) {
+    val badgeLabel = when (collection.contentType) {
+        CollectionContentType.PODCAST -> "PODCAST"
+        CollectionContentType.FILM    -> "FILM"
+        CollectionContentType.SERIES  -> "SERIES"
+        CollectionContentType.COURSE  -> "COURSE"
+        CollectionContentType.EVENT   -> "EVENT"
+        else                          -> "SERIES"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF1A1A2E))
+    ) {
+        // Cover image fills card
+        val coverURL = collection.coverImageURL
+        if (!coverURL.isNullOrEmpty()) {
+            AsyncImage(
+                model = coverURL,
+                contentDescription = collection.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Placeholder gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFF0D3B66), Color(0xFF1A1A2E))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Default.Layers,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+        }
+
+        // Dark gradient overlay at bottom — matches Swift
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.65f)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.3f), Color.Black.copy(alpha = 0.92f))
+                    )
+                )
+        )
+
+        // Bottom info panel
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // "SERIES" badge — cyan-to-purple gradient, matches Swift
+            Row(
+                modifier = Modifier
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF00D9F2), Color(0xFF9966F2))
+                        ),
+                        shape = RoundedCornerShape(50)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Default.Layers,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(10.dp)
+                )
+                Text(
+                    text = badgeLabel,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black,
+                    letterSpacing = 1.5.sp
+                )
+            }
+
+            // Title
+            Text(
+                text = collection.title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 26.sp
+            )
+
+            // Creator + segment count
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "@${collection.creatorName}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (collection.segmentCount > 0) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        val count = collection.segmentCount
+                        Text(
+                            text = "$count ${if (count == 1) "part" else "parts"}",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

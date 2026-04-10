@@ -60,12 +60,21 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.Timestamp
+import kotlinx.coroutines.tasks.await
 
 // Foundation imports
 import com.stitchsocial.club.foundation.*
 
 // Service imports
 import com.stitchsocial.club.services.VideoServiceImpl
+import com.stitchsocial.club.services.CollectionService
+import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.coordination.DiscoveryEngagementTracker
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.SearchService
@@ -95,6 +104,7 @@ enum class DiscoveryCategory(
 ) {
     ALL("All", Icons.Default.Apps),
     COMMUNITIES("Communities", Icons.Default.Groups),
+    COLLECTIONS("Collections", Icons.Default.VideoLibrary),
     TRENDING("Trending", Icons.Default.LocalFireDepartment),
     RECENT("Recent", Icons.Default.Schedule),
     POPULAR("Popular", Icons.Default.Star),
@@ -121,7 +131,8 @@ enum class DiscoveryMode(
 class DiscoveryViewModel(
     private val videoService: VideoServiceImpl,
     private val searchService: SearchService,
-    private val hashtagService: HashtagService = HashtagService()
+    private val hashtagService: HashtagService = HashtagService(),
+    private val collectionService: CollectionService = CollectionService()
 ) : ViewModel() {
 
     private val _isLoading = MutableStateFlow(false)
@@ -135,6 +146,9 @@ class DiscoveryViewModel(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    // Collection card map — videoID → VideoCollection for collection cards injected into swipe feed
+    val collectionCardMap = mutableMapOf<String, VideoCollection>()
 
     private val _currentCategory = MutableStateFlow(DiscoveryCategory.ALL)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
@@ -154,92 +168,168 @@ class DiscoveryViewModel(
 
     init {
         loadInitialContent()
+        // Load persisted creator preferences — mirrors Swift .task { await loadPreferences() }
+        viewModelScope.launch {
+            DiscoveryEngagementTracker.loadPreferences()
+        }
     }
 
-    // MARK: - Load Initial Content - PARENT THREADS ONLY
+    // MARK: - Load All Videos (mirrors iOS — one query, full catalog, shuffle on exhaust)
+
+    private val db = FirebaseFirestore.getInstance("stitchfin")
+    private var hasLoaded = false
 
     fun loadInitialContent() {
         viewModelScope.launch {
-            if (_isLoading.value) return@launch
-
+            if (_isLoading.value || hasLoaded) return@launch
             _isLoading.value = true
             _errorMessage.value = null
-
             try {
-                println("DISCOVERY: Loading parent threads only (no replies)")
+                // TWO QUERIES — mirrors Swift shuffleWithRecencyPin bucket split:
+                //   Query 1: fresh  — createdAt >= 48hr ago, limit 50, no index needed
+                //   Query 2: rest   — createdAt < 48hr ago, limit 100, ordered DESC
+                // Parallel via async/await. Client-side filters applied to both.
+                // No composite index required — single field orderBy/whereGreaterThan only.
 
-                val result = searchService.getRecentVideos(100)
+                val cutoff = com.google.firebase.Timestamp(
+                    java.util.Date(System.currentTimeMillis() - 48L * 60 * 60 * 1000)
+                )
 
-                // FIX: Filter for parent videos only (conversationDepth == 0)
-                val parentVideos = result.filter {
-                    it.id.isNotEmpty() && it.conversationDepth == 0
+                val (freshSnap, restSnap) = coroutineScope {
+                    val fresh = async {
+                        db.collection("videos")
+                            .whereGreaterThanOrEqualTo("createdAt", cutoff)
+                            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                            .limit(50)
+                            .get().await()
+                    }
+                    val rest = async {
+                        db.collection("videos")
+                            .whereLessThan("createdAt", cutoff)
+                            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                            .limit(100)
+                            .get().await()
+                    }
+                    fresh.await() to rest.await()
                 }
 
-                println("DISCOVERY: Filtered ${result.size} -> ${parentVideos.size} (parents only)")
+                fun filterDocs(snap: com.google.firebase.firestore.QuerySnapshot): List<CoreVideoMetadata> =
+                    snap.documents.mapNotNull { doc ->
+                        val data = doc.data ?: return@mapNotNull null
+                        if (data["isDeleted"] as? Boolean == true) return@mapNotNull null
+                        if (data["isCollectionSegment"] as? Boolean == true) return@mapNotNull null
+                        val depth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
+                        if (depth > 0) return@mapNotNull null
+                        val vis = data["visibility"] as? String ?: "public"
+                        if (vis == "private" || vis == "followersOnly") return@mapNotNull null
+                        val url = data["videoURL"] as? String ?: return@mapNotNull null
+                        if (url.isBlank()) return@mapNotNull null
+                        decodeVideo(data, doc.id)
+                    }
 
-                _videos.value = parentVideos
+                val fresh = filterDocs(freshSnap).shuffled()
+                val rest  = filterDocs(restSnap).shuffled()
+
+                // Combine: fresh pinned first, rest shuffled behind — matches Swift
+                val combined = fresh + rest
+
+                hasLoaded = true
+                _videos.value = combined
                 applyFilterAndShuffle()
+                println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total")
 
-                println("DISCOVERY: Loaded ${_filteredVideos.value.size} parent threads")
+                loadFeaturedCollectionsForSwipeFeed()
 
+                val prefetchUrls = combined.take(3).map { it.videoURL }.filter { it.isNotEmpty() }
+                if (prefetchUrls.isNotEmpty()) {
+                    com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(prefetchUrls)
+                }
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to load discovery content"
-                _videos.value = emptyList()
-                _filteredVideos.value = emptyList()
-                println("DISCOVERY: Load failed: ${e.message}")
-
+                _errorMessage.value = "Failed to load videos"
+                println("❌ DISCOVERY: Load failed: ${e.message}")
+                delay(2000)
+                hasLoaded = false
+                _isLoading.value = false
+                loadInitialContent()
+                return@launch
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
-
-    // MARK: - Load More Content - PARENT THREADS ONLY
-
-    fun loadMoreContent() {
-        viewModelScope.launch {
-            if (_isLoading.value) return@launch
-
-            _isLoading.value = true
-
-            try {
-                println("DISCOVERY: Loading more parent threads")
-
-                val newVideos = searchService.getRecentVideos(50)
-
-                // FIX: Filter for parent videos only (conversationDepth == 0)
-                val parentVideos = newVideos.filter {
-                    it.id.isNotEmpty() && it.conversationDepth == 0
-                }
-
-                // Add to existing videos, avoiding duplicates
-                val currentIds = _videos.value.map { it.id }.toSet()
-                val uniqueNewVideos = parentVideos.filter { it.id !in currentIds }
-
-                val currentVideos = _videos.value.toMutableList()
-                currentVideos.addAll(uniqueNewVideos)
-                _videos.value = currentVideos
-
-                applyFilterAndShuffle()
-
-                println("DISCOVERY: Added ${uniqueNewVideos.size} more parent threads, total: ${_filteredVideos.value.size}")
-
-            } catch (e: Exception) {
-                println("DISCOVERY: Failed to load more: ${e.message}")
-
-            } finally {
-                _isLoading.value = false
-            }
-        }
+    private fun decodeVideo(data: Map<String, Any>, id: String): CoreVideoMetadata {
+        val hype = (data["hypeCount"] as? Long)?.toInt() ?: 0
+        val cool = (data["coolCount"] as? Long)?.toInt() ?: 0
+        return CoreVideoMetadata(
+            id = id,
+            title = data["title"] as? String ?: "",
+            description = data["description"] as? String ?: "",
+            videoURL = data["videoURL"] as? String ?: "",
+            thumbnailURL = data["thumbnailURL"] as? String ?: "",
+            creatorID = data["creatorID"] as? String ?: "",
+            creatorName = data["creatorName"] as? String ?: "",
+            hashtags = @Suppress("UNCHECKED_CAST") (data["hashtags"] as? List<String>) ?: emptyList(),
+            taggedUserIDs = emptyList(),
+            createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: java.util.Date(),
+            threadID = data["threadID"] as? String,
+            replyToVideoID = null,
+            conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0,
+            viewCount = (data["viewCount"] as? Long)?.toInt() ?: 0,
+            hypeCount = hype,
+            coolCount = cool,
+            replyCount = (data["replyCount"] as? Long)?.toInt() ?: 0,
+            shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0,
+            lastEngagementAt = (data["lastEngagementAt"] as? Timestamp)?.toDate(),
+            duration = (data["duration"] as? Number)?.toDouble() ?: 0.0,
+            aspectRatio = (data["aspectRatio"] as? Number)?.toDouble() ?: (9.0 / 16.0),
+            fileSize = (data["fileSize"] as? Long) ?: 0L,
+            contentType = ContentType.THREAD,
+            temperature = Temperature.COOL,
+            qualityScore = (data["qualityScore"] as? Long)?.toInt() ?: 50,
+            engagementRatio = if (hype + cool > 0) hype.toDouble() / (hype + cool) else 0.5,
+            velocityScore = 0.0,
+            trendingScore = 0.0,
+            discoverabilityScore = (data["discoverabilityScore"] as? Number)?.toDouble() ?: 0.5,
+            isPromoted = data["isPromoted"] as? Boolean ?: false,
+            isProcessing = false,
+            isDeleted = data["isDeleted"] as? Boolean ?: false,
+            recordingSource = data["recordingSource"] as? String ?: "unknown",
+            collectionID = data["collectionID"] as? String,
+            segmentNumber = (data["segmentNumber"] as? Long)?.toInt(),
+            segmentTitle = data["segmentTitle"] as? String,
+            isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false
+        )
     }
+
+
+    // MARK: - Reshuffle at end (mirrors iOS reshuffleAndRestart)
+
+    fun reshuffleAndRestart() {
+        // Re-apply recency pin on reshuffle — same bucket logic as load
+        val cutoffMs = System.currentTimeMillis() - 48L * 60 * 60 * 1000
+        val current = _videos.value
+        val fresh = current.filter { it.createdAt.time >= cutoffMs }.shuffled()
+        val rest  = current.filter { it.createdAt.time < cutoffMs  }.shuffled()
+        _videos.value = fresh + rest
+        applyFilterAndShuffle()
+        println("🔀 DISCOVERY: Reshuffled — ${fresh.size} fresh + ${rest.size} rest")
+    }
+
+    fun loadMoreContent() { reshuffleAndRestart() }
 
 
     // MARK: - Refresh Content
 
     fun refreshContent() {
+        hasLoaded = false
         _videos.value = emptyList()
+        _filteredVideos.value = emptyList()
         loadInitialContent()
+        // Load persisted creator preferences — mirrors Swift .task { await loadPreferences() }
+        viewModelScope.launch {
+            DiscoveryEngagementTracker.loadPreferences()
+        }
     }
 
     // MARK: - Randomize Content (shuffle button)
@@ -300,6 +390,7 @@ class DiscoveryViewModel(
             DiscoveryCategory.RECENT -> allVideos.sortedByDescending { it.createdAt }
             DiscoveryCategory.POPULAR -> allVideos.sortedByDescending { it.hypeCount }
             DiscoveryCategory.FOLLOWING -> allVideos // TODO: Filter by followed creators
+            DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
         }
 
         _filteredVideos.value = diversifyShuffle(filtered)
@@ -309,7 +400,77 @@ class DiscoveryViewModel(
 
     // MARK: - Filtering and Shuffling
 
+    /**
+     * Fetches up to 6 featured collections, builds placeholder CoreVideoMetadata cards,
+     * stores in collectionCardMap, and injects into filteredVideos at evenly-spaced positions.
+     * Mirrors Swift DiscoveryViewModel.loadFeaturedCollectionsForSwipeFeed exactly.
+     * CACHING: session-scoped — one Firestore read, zero repeats on swipe.
+     */
+    private fun loadFeaturedCollectionsForSwipeFeed() {
+        viewModelScope.launch {
+            try {
+                val collections = collectionService.getDiscoveryCollections(6)
+                if (collections.isEmpty()) return@launch
+
+                val currentVideos = _videos.value.toMutableList()
+                val injected = mutableListOf<CoreVideoMetadata>()
+
+                for (collection in collections) {
+                    // Placeholder card — videoURL empty so DiscoveryCard renders cover image not player
+                    // isPromoted=true is the isCollectionCard signal read by DiscoveryCard
+                    val card = CoreVideoMetadata(
+                        id = collection.id,
+                        title = collection.title,
+                        description = "",
+                        videoURL = "",  // empty = no video player
+                        thumbnailURL = collection.coverImageURL ?: "",
+                        creatorID = collection.creatorID,
+                        creatorName = collection.creatorName,
+                        createdAt = java.util.Date(),
+                        threadID = collection.id,
+                        replyToVideoID = null,
+                        conversationDepth = 0,
+                        viewCount = 0, hypeCount = 0, coolCount = 0,
+                        replyCount = 0, shareCount = 0,
+                        temperature = com.stitchsocial.club.foundation.Temperature.WARM,
+                        qualityScore = 75,
+                        engagementRatio = 0.5,
+                        velocityScore = 0.0, trendingScore = 0.0,
+                        duration = 0.0, aspectRatio = 9.0 / 16.0, fileSize = 0L,
+                        discoverabilityScore = 0.8,
+                        isPromoted = true,  // isCollectionCard signal
+                        lastEngagementAt = null,
+                        collectionID = collection.id,
+                        segmentNumber = null, segmentTitle = null,
+                        isCollectionSegment = false,
+                        contentType = com.stitchsocial.club.foundation.ContentType.THREAD,
+                        isProcessing = false, isDeleted = false,
+                        recordingSource = ""
+                    )
+                    collectionCardMap[collection.id] = collection
+                    injected.add(card)
+                }
+
+                // Inject: first card at position 10, then every 15 — matches Swift
+                val firstPosition = minOf(10, currentVideos.size)
+                val spacing = 15
+                injected.forEachIndexed { i, card ->
+                    val insertAt = minOf(firstPosition + (i * spacing), currentVideos.size)
+                    currentVideos.add(insertAt, card)
+                }
+
+                _videos.value = currentVideos
+                applyFilterAndShuffle()
+                println("🎬 DISCOVERY: Injected ${injected.size} collection cards into swipe feed")
+            } catch (e: Exception) {
+                println("⚠️ DISCOVERY: Collection card load failed — ${e.message}")
+            }
+        }
+    }
+
     private fun applyFilterAndShuffle() {
+        // Filter blocked creators — mirrors Swift applyBlockedCreatorFilter
+        val blocked = DiscoveryEngagementTracker.blockedCreatorIDs()
         _filteredVideos.value = diversifyShuffle(_videos.value)
     }
 
@@ -369,6 +530,7 @@ fun DiscoveryView(
     onNavigateToSearch: () -> Unit = {},
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
     onShowCommunity: (com.stitchsocial.club.community.CommunityListItem) -> Unit = {},
+    onTabBarVisibilityChange: ((Boolean) -> Unit)? = null,
     navigationCoordinator: NavigationCoordinator? = null,
     isAnnouncementShowing: Boolean = false,
     modifier: Modifier = Modifier
@@ -381,6 +543,7 @@ fun DiscoveryView(
     val videoService = remember { VideoServiceImpl() }
     val userService = remember { UserService(context) }
     val searchService = remember { SearchService() }
+    val collectionService = remember { CollectionService() }
 
     // ViewModels
     val viewModel = remember {
@@ -429,14 +592,47 @@ fun DiscoveryView(
     // Search sheet state
     var showSearchSheet by remember { mutableStateOf(false) }
 
+    // Collection state
+    var discoveryCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
+    var showCollectionPlayer by remember { mutableStateOf(false) }
+    var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
+
+    // Hide tab bar when collection player is open — matches iOS fullScreenCover behavior
+    LaunchedEffect(showCollectionPlayer) {
+        onTabBarVisibilityChange?.invoke(!showCollectionPlayer)
+    }
+
+    // Preload collections on first composition so COLLECTIONS tab is instant
+    LaunchedEffect(Unit) {
+        try { discoveryCollections = collectionService.getDiscoveryCollections(30) } catch (e: Exception) { println("Collections preload failed: ${e.message}") }
+    }
+
+    // Reload when explicitly switching to COLLECTIONS tab (cache hit — free)
+    LaunchedEffect(selectedCategory) {
+        if (selectedCategory == DiscoveryCategory.COLLECTIONS && discoveryCollections.isEmpty()) {
+            try { discoveryCollections = collectionService.getDiscoveryCollections(30) } catch (e: Exception) { println("Collections load failed: ${e.message}") }
+        }
+    }
+
     // Get current user info
     val currentUserID = authService.getCurrentUserId()
     val currentUserTier = UserTier.ROOKIE // TODO: Load from user profile
 
-    // Load more when nearing end of swipe cards
+    // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
     LaunchedEffect(currentSwipeIndex, videos.size) {
-        if (currentSwipeIndex >= videos.size - 10 && videos.isNotEmpty()) {
-            viewModel.loadMoreContent()
+        if (videos.isNotEmpty() && currentSwipeIndex >= videos.size - 1) {
+            viewModel.reshuffleAndRestart()
+        }
+        // Prefetch next 3 videos ahead of current swipe position
+        if (videos.isNotEmpty()) {
+            val nextUrls = videos
+                .drop(currentSwipeIndex + 1)
+                .take(3)
+                .map { it.videoURL }
+                .filter { it.isNotEmpty() }
+            if (nextUrls.isNotEmpty()) {
+                com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(nextUrls)
+            }
         }
     }
 
@@ -490,6 +686,22 @@ fun DiscoveryView(
             )
     ) {
 
+        // Collection player fullscreen overlay
+        if (showCollectionPlayer && selectedCollection != null) {
+            val coll: VideoCollection = selectedCollection!!
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(200f)
+            ) {
+                CollectionPlayerView(
+                    collection = coll,
+                    userID = currentUserID ?: "",
+                    onDismiss = { showCollectionPlayer = false }
+                )
+            }
+        }
+
         // Main Discovery Content
         if (!showVideoPlayer) {
             Column(
@@ -497,7 +709,6 @@ fun DiscoveryView(
             ) {
                 // Header with shuffle and mode toggle
                 DiscoveryHeader(
-                    videoCount = videos.size,
                     isLoading = isLoading,
                     discoveryMode = discoveryMode,
                     onShuffleTapped = {
@@ -564,6 +775,17 @@ fun DiscoveryView(
                             }
                         }
                     }
+                    selectedCategory == DiscoveryCategory.COLLECTIONS -> {
+                        CollectionsDiscoveryRow(
+                            collections = discoveryCollections,
+                            title = "Collections",
+                            userID = currentUserID ?: "",
+                            onCollectionTap = { collection: VideoCollection ->
+                                selectedCollection = collection
+                                showCollectionPlayer = true
+                            }
+                        )
+                    }
                     isLoading && videos.isEmpty() -> {
                         DiscoveryLoadingView()
                     }
@@ -581,10 +803,18 @@ fun DiscoveryView(
                                     DiscoverySwipeCards(
                                         videos = videos,
                                         currentIndex = currentSwipeIndex,
+                                        collectionCardMap = viewModel.collectionCardMap,
                                         onIndexChange = { newIndex ->
                                             currentSwipeIndex = newIndex
                                         },
                                         onVideoTap = { video ->
+                                            // Check if this is a collection card first — matches Swift
+                                            val collection = viewModel.collectionCardMap[video.id]
+                                            if (collection != null) {
+                                                selectedCollection = collection
+                                                showCollectionPlayer = true
+                                                return@DiscoverySwipeCards
+                                            }
                                             println("DISCOVERY: Video tapped - ${video.title}")
                                             currentPlayingVideo = video
 
@@ -967,7 +1197,6 @@ fun DiscoveryView(
 
 @Composable
 private fun DiscoveryHeader(
-    videoCount: Int,
     isLoading: Boolean,
     discoveryMode: DiscoveryMode,
     onShuffleTapped: () -> Unit,
@@ -988,27 +1217,17 @@ private fun DiscoveryHeader(
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "$videoCount videos",
-                    fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
-
-                if (isLoading) {
+            if (isLoading) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
                         strokeWidth = 2.dp,
                         color = Color.Cyan
                     )
-                    Text(
-                        text = "Loading...",
-                        fontSize = 12.sp,
-                        color = Color.Cyan
-                    )
+                    Text(text = "Loading...", fontSize = 12.sp, color = Color.Cyan)
                 }
             }
         }
