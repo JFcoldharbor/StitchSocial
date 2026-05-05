@@ -39,7 +39,8 @@ sealed class NavigationDestination(val route: String) {
 enum class ModalState {
     NONE,
     RECORDING,
-    VIDEO_REVIEW,           // ← NEW: Video editing (trim, filters, captions)
+    REACTION,               // ← Split-canvas reaction recorder (camera + content zone)
+    VIDEO_REVIEW,           // Video editing (trim, captions)
     PARALLEL_PROCESSING,
     THREAD_COMPOSER,
     SETTINGS,

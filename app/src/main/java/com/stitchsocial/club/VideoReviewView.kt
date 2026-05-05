@@ -13,6 +13,7 @@ package com.stitchsocial.club
 
 import android.net.Uri
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -53,7 +54,10 @@ fun VideoReviewView(
 
     // State management
     var editState by remember { mutableStateOf(initialState) }
-    var selectedTab by remember { mutableStateOf(EditTab.TRIM) }
+    // null = no panel open. Tapping a tool-rail icon opens its panel; tapping
+    // the dimmed area outside (or the icon again) closes it. Mirrors iOS
+    // EditPanel? activePanel pattern.
+    var activePanel by remember { mutableStateOf<EditTab?>(null) }
     var isPlaying by remember { mutableStateOf(true) }
     var showingCancelAlert by remember { mutableStateOf(false) }
     var showingExportError by remember { mutableStateOf(false) }
@@ -81,6 +85,26 @@ fun VideoReviewView(
         }
     }
 
+    // Auto-generate captions on entry (mirrors iOS VideoReviewView).
+    // Skips if captions already exist (don't overwrite manual edits or a
+    // resumed draft). Failures fall through silently — the user can still
+    // post without captions.
+    LaunchedEffect(initialState.videoUri) {
+        if (editState.captions.isNotEmpty()) return@LaunchedEffect
+        try {
+            val captions = AutoCaptionService.getInstance(context)
+                .generateCaptions(initialState.videoUri)
+            if (captions.isNotEmpty()) {
+                editState = editState.copy(
+                    captions = captions.toMutableList()
+                )
+                println("✅ REVIEW: Auto-generated ${captions.size} caption(s)")
+            }
+        } catch (e: Exception) {
+            println("⚠️ REVIEW: Auto-caption failed — ${e.message}")
+        }
+    }
+
     // Auto-save draft periodically
     LaunchedEffect(Unit) {
         while (true) {
@@ -101,7 +125,7 @@ fun VideoReviewView(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Full-screen video preview
+        // ── Full-screen video preview ──────────────────────────────
         VideoPreviewLayer(
             exoPlayer = exoPlayer,
             isPlaying = isPlaying,
@@ -111,7 +135,7 @@ fun VideoReviewView(
             }
         )
 
-        // Overlaid top toolbar
+        // ── Top bar: cancel left, save right ───────────────────────
         TopToolbar(
             onClose = { showingCancelAlert = true },
             onSave = {
@@ -125,59 +149,70 @@ fun VideoReviewView(
                 .padding(top = 8.dp)
         )
 
-        // Bottom edit panel
-        Column(
+        // ── Right-side tool rail (vertical, mirrors iOS) ───────────
+        ToolRail(
+            activePanel = activePanel,
+            onTabSelect = { tab ->
+                activePanel = if (activePanel == tab) null else tab
+                // Pause playback while editing — iOS does the same on
+                // panel-open so the timeline doesn't scrub away under you.
+                if (activePanel != null) {
+                    exoPlayer.pause(); isPlaying = false
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp, bottom = 120.dp)
+        )
+
+        // ── Bottom Next button (no tab bar — iOS doesn't have one) ─
+        NextButtonBar(
+            duration = editState.trimmedDuration,
+            isProcessing = editState.isProcessing,
+            onContinue = {
+                coroutineScope.launch {
+                    if (editState.hasEdits && !editState.isProcessingComplete) {
+                        editState.startProcessing()
+                        try {
+                            val result = VideoExportService.getInstance(context)
+                                .exportVideo(editState)
+                            editState.finishProcessing(result.videoUri, result.thumbnailUri)
+                        } catch (e: Exception) {
+                            exportError = e.message
+                            showingExportError = true
+                            return@launch
+                        }
+                    }
+                    onContinueToThread(editState)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp, start = 20.dp, end = 20.dp)
+        )
+
+        // ── Panel overlay (slides up from bottom when a tool tapped) ─
+        AnimatedVisibility(
+            visible = activePanel != null,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = tween(durationMillis = 220)
+            ) + fadeIn(animationSpec = tween(220)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(durationMillis = 220)
+            ) + fadeOut(animationSpec = tween(220)),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            // Edit content area with gradient background
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.8f),
-                                Color.Black
-                            )
-                        )
-                    )
-            ) {
-                EditContentArea(
-                    selectedTab = selectedTab,
-                    editState = editState,
-                    exoPlayer = exoPlayer,
-                    onEditStateChange = { editState = it }
-                )
-            }
-
-            // Edit tab bar
-            EditTabBar(
-                selectedTab = selectedTab,
-                onTabSelect = { selectedTab = it }
-            )
-
-            // Bottom action bar
-            BottomActionBar(
-                duration = editState.trimmedDuration,
-                isProcessing = editState.isProcessing,
-                onContinue = {
-                    coroutineScope.launch {
-                        if (editState.hasEdits && !editState.isProcessingComplete) {
-                            editState.startProcessing()
-                            try {
-                                val result = VideoExportService.getInstance(context)
-                                    .exportVideo(editState)
-                                editState.finishProcessing(result.videoUri, result.thumbnailUri)
-                            } catch (e: Exception) {
-                                exportError = e.message
-                                showingExportError = true
-                                return@launch
-                            }
-                        }
-                        onContinueToThread(editState)
-                    }
+            PanelOverlay(
+                panel = activePanel ?: EditTab.TRIM,
+                editState = editState,
+                exoPlayer = exoPlayer,
+                onEditStateChange = { editState = it },
+                onDismiss = {
+                    activePanel = null
+                    exoPlayer.play(); isPlaying = true
                 }
             )
         }
@@ -250,6 +285,11 @@ private fun VideoPreviewLayer(
                     player = exoPlayer
                     useController = false
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                    // Edge-to-edge fill — matches iOS .resizeAspectFill.
+                    // RESIZE_MODE_FIT (default) letterboxes; RESIZE_MODE_ZOOM
+                    // crops to fill the whole frame.
+                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    setBackgroundColor(android.graphics.Color.BLACK)
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -322,148 +362,196 @@ private fun TopToolbar(
     }
 }
 
-// MARK: - Edit Content Area
+// MARK: - Tool Rail (right side, mirrors iOS toolRail)
 
 @Composable
-private fun EditContentArea(
-    selectedTab: EditTab,
-    editState: VideoEditState,
-    exoPlayer: ExoPlayer,
-    onEditStateChange: (VideoEditState) -> Unit
+private fun ToolRail(
+    activePanel: EditTab?,
+    onTabSelect: (EditTab) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    when (selectedTab) {
-        EditTab.TRIM -> VideoTrimmerView(
-            editState = editState,
-            exoPlayer = exoPlayer,
-            onEditStateChange = onEditStateChange
-        )
-        EditTab.FILTERS -> FilterPickerView(
-            editState = editState,
-            onEditStateChange = onEditStateChange
-        )
-        EditTab.CAPTIONS -> CaptionEditorView(
-            editState = editState,
-            exoPlayer = exoPlayer,
-            onEditStateChange = onEditStateChange
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        EditTab.allCases.forEach { tab ->
+            val isActive = activePanel == tab
+            ToolRailButton(
+                icon = when (tab) {
+                    EditTab.TRIM -> Icons.Filled.ContentCut
+                    EditTab.CAPTIONS -> Icons.Filled.Subtitles
+                },
+                label = tab.title,
+                isActive = isActive,
+                onClick = { onTabSelect(tab) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolRailButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .padding(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isActive) Color.White.copy(alpha = 0.95f)
+                    else Color.Black.copy(alpha = 0.55f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isActive) Color.Black else Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Text(
+            text = label,
+            color = if (isActive) Color.White else Color.White.copy(alpha = 0.85f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
 
-// MARK: - Edit Tab Bar
+// MARK: - Panel Overlay (slides up from bottom, mirrors iOS panelOverlay)
 
 @Composable
-private fun EditTabBar(
-    selectedTab: EditTab,
-    onTabSelect: (EditTab) -> Unit
+private fun PanelOverlay(
+    panel: EditTab,
+    editState: VideoEditState,
+    exoPlayer: ExoPlayer,
+    onEditStateChange: (VideoEditState) -> Unit,
+    onDismiss: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.9f))
+            .height(360.dp)
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(Color(0xFF1A1A1A).copy(alpha = 0.96f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { /* swallow taps so they don't fall through to the video */ }
     ) {
-        EditTab.allCases.forEach { tab ->
-            val isSelected = selectedTab == tab
-
-            Column(
+        // Drag handle
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp, bottom = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .clickable { onTabSelect(tab) }
-                    .background(
-                        if (isSelected) Color.Cyan.copy(alpha = 0.2f) else Color.Transparent
-                    )
-                    .padding(vertical = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = when (tab) {
-                        EditTab.TRIM -> Icons.Filled.ContentCut
-                        EditTab.FILTERS -> Icons.Filled.FilterAlt
-                        EditTab.CAPTIONS -> Icons.Filled.Subtitles
-                    },
-                    contentDescription = tab.title,
-                    tint = if (isSelected) Color.Cyan else Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.size(20.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.3f))
+                    .clickable { onDismiss() }
+            )
+        }
+
+        // Panel content
+        Box(modifier = Modifier.weight(1f)) {
+            when (panel) {
+                EditTab.TRIM -> VideoTrimmerView(
+                    editState = editState,
+                    exoPlayer = exoPlayer,
+                    onEditStateChange = onEditStateChange
                 )
-                Text(
-                    text = tab.title,
-                    color = if (isSelected) Color.Cyan else Color.White.copy(alpha = 0.6f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                EditTab.CAPTIONS -> CaptionEditorView(
+                    editState = editState,
+                    exoPlayer = exoPlayer,
+                    onEditStateChange = onEditStateChange
                 )
             }
         }
     }
 }
 
-// MARK: - Bottom Action Bar
+// MARK: - Next Button Bar (mirrors iOS bottomBar)
 
 @Composable
-private fun BottomActionBar(
+private fun NextButtonBar(
     duration: Double,
     isProcessing: Boolean,
-    onContinue: () -> Unit
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.9f))
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Duration display
+        // Subtle duration chip on the left (small, glassy, matches iOS look)
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = Color.Black.copy(alpha = 0.5f)
+            color = Color.Black.copy(alpha = 0.4f)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.Schedule,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(14.dp)
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(13.dp)
                 )
                 Text(
                     text = formatDuration(duration),
                     color = Color.White,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
         }
 
-        // Continue button
+        // Prominent Next pill — white background, dark text, chevron
         Button(
             onClick = onContinue,
             enabled = !isProcessing,
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Cyan
+                containerColor = Color.White,
+                disabledContainerColor = Color.White.copy(alpha = 0.4f)
             ),
-            contentPadding = PaddingValues(horizontal = 32.dp, vertical = 14.dp),
+            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp),
             modifier = Modifier.shadow(
                 elevation = 12.dp,
                 shape = RoundedCornerShape(50),
-                ambientColor = Color.Cyan.copy(alpha = 0.4f)
+                ambientColor = Color.White.copy(alpha = 0.3f)
             )
         ) {
             Text(
-                text = "Continue",
-                color = Color.White,
+                text = "Next",
+                color = Color.Black,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Icon(
-                imageVector = Icons.Filled.ArrowForward,
+                imageVector = Icons.Filled.ChevronRight,
                 contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(14.dp)
+                tint = Color.Black,
+                modifier = Modifier.size(16.dp)
             )
         }
     }

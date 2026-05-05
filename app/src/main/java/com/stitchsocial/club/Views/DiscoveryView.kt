@@ -559,6 +559,17 @@ fun DiscoveryView(
             userService = userService
         )
     }
+    // Sync current user once we know who they are. Without this the
+    // viewModel's currentUserID stays at "anonymous" (its default) and
+    // every hype/cool tap from Discovery writes to Firestore with the
+    // wrong user — same bug ProfileView had.
+    LaunchedEffect(authService.getCurrentUserId()) {
+        val uid = authService.getCurrentUserId()
+        if (!uid.isNullOrEmpty()) {
+            engagementViewModel.setCurrentUser(uid)
+            println("DISCOVERY: EngagementViewModel.setCurrentUser($uid)")
+        }
+    }
     val iconManager = remember { FloatingIconManager() }
 
     // Follow manager for search (needs context)

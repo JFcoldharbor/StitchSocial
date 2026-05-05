@@ -33,6 +33,7 @@ import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.ModalState
 import com.stitchsocial.club.camera.RecordingContextFactory
+import com.stitchsocial.club.FollowManager
 
 // ViewModel imports
 import com.stitchsocial.club.viewmodels.EngagementViewModel
@@ -74,7 +75,13 @@ fun FullscreenVideoPlayer(
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
     navigationCoordinator: NavigationCoordinator? = null,
+    followManager: FollowManager? = null,
     onShowThreadView: ((threadID: String, targetVideoID: String?) -> Unit)? = null,
+    // Tells the contextual overlay where it's mounted so canReply / button
+    // visibility logic resolves correctly. Default HOME_FEED for backwards
+    // compat with existing call sites; ProfileView should pass PROFILE_OWN
+    // or PROFILE_OTHER explicitly.
+    overlayContext: OverlayContext = OverlayContext.HOME_FEED,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -110,75 +117,83 @@ fun FullscreenVideoPlayer(
         // ContextualVideoOverlay with all required parameters
         ContextualVideoOverlay(
             video = convertToMetadata(video),
-            overlayContext = OverlayContext.HOME_FEED,
+            overlayContext = overlayContext,
             currentUserID = currentUserID,
             threadVideo = null,
             isVisible = true,
             currentUserTier = currentUserTier,
-            followManager = null,
+            followManager = followManager,
             engagementViewModel = viewModel,
             iconManager = iconMgr,
             onAction = { action ->
+                println("FULLSCREEN: action received: $action")
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {
+                        // Route through the navigation coordinator's modal
+                        // system so MainActivity can switch to USER_PROFILE.
+                        // We dismiss this player so the new profile is on top.
                         println("FULLSCREEN: Navigate to profile ${video.creatorID}")
+                        navigationCoordinator?.showModal(
+                            ModalState.USER_PROFILE,
+                            mapOf("userID" to video.creatorID)
+                        )
+                        onDismiss()
                     }
                     is OverlayAction.NavigateToThread -> {
                         val threadID = video.threadID ?: video.id
-                        onShowThreadView?.invoke(threadID, video.id)
-                            ?: println("FULLSCREEN: Navigate to thread (no handler)")
+                        // ThreadView lives at the MainActivity level via the
+                        // isShowingThreadView boolean (not the ModalState
+                        // system), so the only way in is the onShowThreadView
+                        // callback. Callers (ProfileView) MUST pass a real
+                        // handler — MainActivity now does this since the
+                        // recent fix.
+                        if (onShowThreadView != null) {
+                            onShowThreadView.invoke(threadID, video.id)
+                        } else {
+                            println("FULLSCREEN: ⚠️ Navigate to thread but no onShowThreadView handler wired — caller forgot to pass it")
+                        }
                     }
                     is OverlayAction.Follow -> {
                         println("FULLSCREEN: Follow user ${video.creatorID}")
+                        followManager?.toggleFollow(video.creatorID)
+                            ?: println("FULLSCREEN: ⚠️ followManager is null — Follow ignored")
                     }
                     is OverlayAction.Unfollow -> {
                         println("FULLSCREEN: Unfollow user ${video.creatorID}")
+                        followManager?.toggleFollow(video.creatorID)
+                            ?: println("FULLSCREEN: ⚠️ followManager is null — Unfollow ignored")
                     }
                     is OverlayAction.Engagement -> {
-                        if (engagementCoordinator != null && currentUserID != null) {
-                            scope.launch {
-                                // ✅ FIXED: processHype/processCool return Unit, not Boolean
-                                // Just call them without expecting a return value
-                                when (action.type) {
-                                    EngagementType.HYPE -> {
-                                        println("🔥 FULLSCREEN: Processing HYPE")
-                                        engagementCoordinator.processHype(
-                                            videoID = video.id,
-                                            userID = currentUserID,
-                                            userTier = currentUserTier
-                                        )
-                                        println("✅ FULLSCREEN: Hype engagement complete!")
-                                    }
-                                    EngagementType.COOL -> {
-                                        println("❄️ FULLSCREEN: Processing COOL")
-                                        engagementCoordinator.processCool(
-                                            videoID = video.id,
-                                            userID = currentUserID,
-                                            userTier = currentUserTier
-                                        )
-                                        println("✅ FULLSCREEN: Cool engagement complete!")
-                                    }
-                                    else -> {
-                                        println("⚠️ FULLSCREEN: Unknown engagement type")
-                                    }
-                                }
-                            }
-                        }
+                        // INTENTIONAL NO-OP. ContextualVideoOverlay processes
+                        // hype/cool internally via the engagementViewModel we
+                        // already passed in (same pattern as HomeFeedView,
+                        // line 464-473). Calling processHype/processCool here
+                        // again would DOUBLE-PROCESS each tap — combined with
+                        // the FOUNDER tier 20x visual multiplier this caused
+                        // the "20x maxed" symptom you saw on profile videos.
+                        // Leave it to the overlay; do not duplicate.
                     }
                     is OverlayAction.Share -> {
                         println("FULLSCREEN: Share video ${video.id}")
                     }
                     is OverlayAction.StitchRecording -> {
                         val isOwn = video.creatorID == currentUserID
+                        // Use the thread root's ID, not this video's id. When
+                        // the user opens a REPLY from a profile grid (depth>=1)
+                        // and taps Stitch, we need to attach the new clip under
+                        // the original thread, not under the reply itself.
+                        // HomeFeedView uses the same `threadID ?: id` pattern.
+                        val threadParentID = video.threadID ?: video.id
                         val ctx = if (isOwn) {
                             RecordingContextFactory.createContinueThread(
-                                video.id, video.creatorName, video.title
+                                threadParentID, video.creatorName, video.title
                             )
                         } else {
                             RecordingContextFactory.createStitchToThread(
-                                video.id, video.creatorName, video.title
+                                threadParentID, video.creatorName, video.title
                             )
                         }
+                        println("FULLSCREEN: Stitch from profile-launched video — threadParent=$threadParentID, isOwn=$isOwn")
                         navigationCoordinator?.showModal(
                             ModalState.RECORDING,
                             mapOf(
@@ -186,6 +201,14 @@ fun FullscreenVideoPlayer(
                                 "parentVideo" to convertToMetadata(video)
                             )
                         )
+                        // CRITICAL: dismiss the fullscreen player so the
+                        // recording modal (which lives one layer up in
+                        // MainActivity) is actually visible. Without this,
+                        // showModal updates state and PAUSE_ALL_VIDEOS fires
+                        // (video freezes) but the recording UI is hidden
+                        // behind this player. Same pattern as onShowThreadView
+                        // in the parent (ProfileView).
+                        onDismiss()
                     }
                 }
             }

@@ -17,14 +17,29 @@ import android.graphics.*
 import android.media.*
 import android.net.Uri
 import android.os.Build
+import androidx.annotation.OptIn
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult as TransformerExportResult
+import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.UUID
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Handles video export with all edits applied
@@ -276,13 +291,28 @@ class VideoExportService private constructor(private val context: Context) {
     }
     
     // MARK: - Full Process Export
-    
+
     private suspend fun fullProcessExport(editState: VideoEditState): Uri = withContext(Dispatchers.IO) {
-        println("🎨 EXPORT: Full process mode - re-encoding with edits")
-        
+        println("🎨 EXPORT: Full process mode")
+
+        val hasCaptions = editState.captions.isNotEmpty() && editState.captions.any { it.text.isNotBlank() }
+
+        // No captions to burn in → fall back to compressor (with trim if needed).
+        // Filter rendering is intentionally NOT implemented (broken on iOS too,
+        // UI hidden from Android picker — see VideoEditState.EditTab).
+        if (!hasCaptions) {
+            return@withContext compressOnly(editState)
+        }
+
+        // Captions present → use AndroidX media3 Transformer with a BitmapOverlay
+        // per caption, time-bound to its [startTime, endTime] window. This bakes
+        // the caption pixels into the MP4 frame-by-frame and is far simpler than
+        // rolling our own GL pipeline.
+        return@withContext transformWithCaptions(editState)
+    }
+
+    private suspend fun compressOnly(editState: VideoEditState): Uri = withContext(Dispatchers.IO) {
         val compressor = FastVideoCompressor.getInstance(context)
-        
-        // Use compressor with trim if needed
         val result = if (editState.hasTrimEdits) {
             compressor.compressWithTrim(
                 sourceUri = editState.videoUri,
@@ -296,28 +326,113 @@ class VideoExportService private constructor(private val context: Context) {
                 targetSizeMB = 50.0,
                 preserveResolution = true
             ) { progress ->
-                _exportProgress.value = progress * 0.9  // Reserve 10% for finalization
+                _exportProgress.value = progress * 0.9
             }
         }
-        
-        _exportProgress.value = 0.95
-        
-        // If we have filters or captions, we would apply them here
-        // For now, just return the compressed video
-        // TODO: Implement filter and caption rendering
-        
-        if (editState.hasFilterEdits) {
-            println("⚠️ EXPORT: Filter application not yet implemented")
-        }
-        
-        if (editState.hasCaptionEdits) {
-            println("⚠️ EXPORT: Caption burning not yet implemented")
-        }
-        
         _exportProgress.value = 1.0
-        
-        println("✅ EXPORT: Full process complete")
+        println("✅ EXPORT: Compress-only complete")
         result.outputUri
+    }
+
+    @OptIn(UnstableApi::class)
+    private suspend fun transformWithCaptions(editState: VideoEditState): Uri = withContext(Dispatchers.IO) {
+        println("🎨 EXPORT: Transformer with ${editState.captions.size} caption overlay(s)")
+
+        // Resolve the rendered video size so caption bitmaps scale correctly.
+        // VideoEditState.videoSize is the displayed (post-rotation) size, so
+        // it can be used directly without re-applying preferredTransform.
+        val width = editState.videoSize.width.toInt().coerceAtLeast(1)
+        val height = editState.videoSize.height.toInt().coerceAtLeast(1)
+
+        val overlays = CaptionBurnIn.buildOverlays(
+            captions = editState.captions,
+            videoWidthPx = width,
+            videoHeightPx = height
+        )
+        if (overlays.isEmpty()) {
+            return@withContext compressOnly(editState)
+        }
+
+        val overlayEffect = OverlayEffect(ImmutableList.copyOf(overlays))
+        val effects = Effects(/* audioProcessors */ emptyList(), /* videoEffects */ listOf<Effect>(overlayEffect))
+
+        val mediaItemBuilder = MediaItem.Builder().setUri(editState.videoUri)
+        if (editState.hasTrimEdits) {
+            mediaItemBuilder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs((editState.trimStartTime * 1000).toLong())
+                    .setEndPositionMs((editState.trimEndTime * 1000).toLong())
+                    .build()
+            )
+        }
+        val editedMediaItem = EditedMediaItem.Builder(mediaItemBuilder.build())
+            .setEffects(effects)
+            .setRemoveAudio(false)
+            .build()
+
+        val outputFile = createTemporaryVideoFile()
+
+        // Run Transformer on the main looper (its requirement) and bridge the
+        // listener callbacks into our coroutine via suspendCancellableCoroutine.
+        suspendCancellableCoroutine<Uri> { continuation ->
+            val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            mainHandler.post {
+                val transformer = Transformer.Builder(context)
+                    .addListener(object : Transformer.Listener {
+                        override fun onCompleted(composition: Composition, exportResult: TransformerExportResult) {
+                            _exportProgress.value = 1.0
+                            println("✅ EXPORT: Transformer complete (${outputFile.length() / 1024} KB)")
+                            if (continuation.isActive) {
+                                continuation.resume(Uri.fromFile(outputFile))
+                            }
+                        }
+
+                        override fun onError(
+                            composition: Composition,
+                            exportResult: TransformerExportResult,
+                            exportException: ExportException
+                        ) {
+                            println("❌ EXPORT: Transformer failed — ${exportException.message}")
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(exportException)
+                            }
+                        }
+                    })
+                    .build()
+
+                continuation.invokeOnCancellation {
+                    mainHandler.post { transformer.cancel() }
+                }
+
+                transformer.start(editedMediaItem, outputFile.absolutePath)
+
+                // Coarse progress polling — Transformer doesn't expose a
+                // continuous progress stream, but getProgress() can be polled.
+                pollTransformerProgress(transformer, mainHandler, continuation)
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun pollTransformerProgress(
+        transformer: Transformer,
+        handler: android.os.Handler,
+        continuation: kotlinx.coroutines.CancellableContinuation<Uri>
+    ) {
+        val holder = androidx.media3.transformer.ProgressHolder()
+        val tick = object : Runnable {
+            override fun run() {
+                if (!continuation.isActive) return
+                val state = transformer.getProgress(holder)
+                if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                    _exportProgress.value = (holder.progress / 100.0).coerceIn(0.0, 0.99)
+                }
+                if (state != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                    handler.postDelayed(this, 200)
+                }
+            }
+        }
+        handler.postDelayed(tick, 200)
     }
     
     // MARK: - Thumbnail Generation

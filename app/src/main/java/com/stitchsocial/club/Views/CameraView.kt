@@ -20,6 +20,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,6 +76,7 @@ fun CameraView(
     onStopAllVideos: () -> Unit = {},
     onDisposeAllVideos: () -> Unit = {},
     onGalleryRequested: () -> Unit = {},  // NEW: Gallery picker callback
+    onReactionRequested: () -> Unit = {}, // NEW: React mode entry (split-canvas recorder)
     modifier: Modifier = Modifier,
     viewModel: CameraViewModel = viewModel()
 ) {
@@ -384,6 +386,39 @@ fun CameraView(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
             )
+
+            // React mode entry — small pill at the right side of the screen,
+            // similar to iOS's right-side camera mode picker. Hidden during
+            // active recording so it can't be tapped mid-take.
+            if (!isRecording) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 12.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable { onReactionRequested() }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PictureInPicture,
+                            contentDescription = "Reaction",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "React",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
 
         } else {
             // Permission request UI

@@ -497,8 +497,19 @@ fun ContextualVideoOverlay(
         Log.d("OVERLAY_FOLLOW", "Loading follow state for ${video.creatorID}")
     }
 
-    // Initialize engagement data
+    // Initialize engagement data.
+    //
+    // Step 1: paint immediately from the parameter so the overlay isn't
+    //         empty while the network call is in flight.
+    // Step 2: fetch fresh from Firestore via getVideoById and overwrite,
+    //         so the displayed counts match the database (not whatever
+    //         stale snapshot the parent view passed in via getUserVideos
+    //         or a cached feed).
+    //
+    // Without step 2 the overlay always showed the parent's cached counts,
+    // which on the profile path could be hours/days old.
     LaunchedEffect(video.id) {
+        // Step 1 — instant local data
         videoEngagement = ContextualVideoEngagement(
             videoID = video.id,
             creatorID = video.creatorID,
@@ -509,6 +520,49 @@ fun ContextualVideoOverlay(
             viewCount = video.viewCount,
             lastEngagementAt = Date()
         )
+        // Step 2 — refresh from Firestore
+        try {
+            val fresh = videoService.getVideoById(video.id)
+            if (fresh != null) {
+                videoEngagement = ContextualVideoEngagement(
+                    videoID = fresh.id,
+                    creatorID = fresh.creatorID,
+                    hypeCount = fresh.hypeCount,
+                    coolCount = fresh.coolCount,
+                    shareCount = fresh.shareCount,
+                    replyCount = fresh.replyCount,
+                    viewCount = fresh.viewCount,
+                    lastEngagementAt = Date()
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("OVERLAY", "Failed to refresh engagement from Firestore: ${e.message}")
+        }
+    }
+
+    // After each completed engagement, re-fetch fresh counts so the displayed
+    // numbers reflect what just landed in Firestore. Without this the overlay
+    // showed the same number after taps as before — looking like the tap
+    // didn't persist (it did, the UI just wasn't reading the new value).
+    val lastEngagement by (engagementViewModel?.lastEngagementFeedback?.collectAsState() ?: remember { mutableStateOf(null) })
+    LaunchedEffect(lastEngagement) {
+        if (lastEngagement != null) {
+            try {
+                val fresh = videoService.getVideoById(video.id)
+                if (fresh != null) {
+                    videoEngagement = ContextualVideoEngagement(
+                        videoID = fresh.id,
+                        creatorID = fresh.creatorID,
+                        hypeCount = fresh.hypeCount,
+                        coolCount = fresh.coolCount,
+                        shareCount = fresh.shareCount,
+                        replyCount = fresh.replyCount,
+                        viewCount = fresh.viewCount,
+                        lastEngagementAt = Date()
+                    )
+                }
+            } catch (_: Exception) { /* swallow — visual feedback already happened */ }
+        }
     }
 
     // Render

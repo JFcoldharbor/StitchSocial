@@ -137,9 +137,13 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.5.0")
 
-    implementation("androidx.media3:media3-exoplayer:1.3.0")
-    implementation("androidx.media3:media3-ui:1.3.0")
-    implementation("androidx.media3:media3-common:1.3.0")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-common:1.4.1")
+    // Used by VideoExportService (caption burn-in) and ReactionCompositor
+    // (split-screen / PiP). 1.4+ exposes VideoCompositorSettings.
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-effect:1.4.1")
 
     implementation("androidx.camera:camera-camera2:1.3.1")
     implementation("androidx.camera:camera-lifecycle:1.3.1")

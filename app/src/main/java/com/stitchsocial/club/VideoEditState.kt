@@ -213,7 +213,10 @@ enum class CaptionStyle(val displayName: String) {
 
 enum class EditTab(val title: String, val icon: String) {
     TRIM("Trim", "content_cut"),
-    FILTERS("Filters", "filter"),
+    // FILTERS intentionally removed — the picker UI shipped without an
+    // export-side renderer (Android: VideoExportService.kt:307 was a TODO,
+    // iOS path is also broken). Re-enable when filter rendering is wired
+    // in for both platforms.
     CAPTIONS("Captions", "subtitles");
 
     companion object {

@@ -94,6 +94,8 @@ import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.coordination.NavigationCoordinator
+import com.stitchsocial.club.coordination.ModalState
+import com.stitchsocial.club.camera.RecordingContextFactory
 import com.stitchsocial.club.FollowManager
 import com.stitchsocial.club.services.ConversationLaneService
 
@@ -586,7 +588,36 @@ fun ThreadView(
                             is OverlayAction.NavigateToThread -> {
                                 // Already in thread view — no-op
                             }
-                            else -> { /* Share, StitchRecording handled by overlay */ }
+                            is OverlayAction.StitchRecording -> {
+                                // The carousel surfaces a single anchor video,
+                                // so selectedVideo is the right target. Dismiss
+                                // ThreadView before launching the recording
+                                // modal — ThreadView sits at zIndex(1000) and
+                                // would otherwise cover the modal.
+                                val target = selectedVideo
+                                if (target != null) {
+                                    val isOwn = target.creatorID == currentUserID
+                                    val ctx = if (isOwn) {
+                                        RecordingContextFactory.createContinueThread(
+                                            target.threadID ?: target.id,
+                                            target.creatorName,
+                                            target.title
+                                        )
+                                    } else {
+                                        RecordingContextFactory.createStitchToThread(
+                                            target.threadID ?: target.id,
+                                            target.creatorName,
+                                            target.title
+                                        )
+                                    }
+                                    onDismiss()
+                                    navigationCoordinator?.showModal(
+                                        ModalState.RECORDING,
+                                        mapOf("context" to ctx, "parentVideo" to target)
+                                    )
+                                }
+                            }
+                            else -> { /* Share handled by overlay */ }
                         }
                     }
                 )
@@ -626,6 +657,29 @@ fun ThreadView(
                         }
                         else -> { }
                     }
+                },
+                onRequestStitch = { target ->
+                    // Dismiss ThreadView before launching RECORDING. Otherwise
+                    // ThreadView's zIndex(1000) covers the modal (500).
+                    val isOwn = target.creatorID == currentUserID
+                    val ctx = if (isOwn) {
+                        RecordingContextFactory.createContinueThread(
+                            target.threadID ?: target.id,
+                            target.creatorName,
+                            target.title
+                        )
+                    } else {
+                        RecordingContextFactory.createStitchToThread(
+                            target.threadID ?: target.id,
+                            target.creatorName,
+                            target.title
+                        )
+                    }
+                    onDismiss()
+                    navigationCoordinator?.showModal(
+                        ModalState.RECORDING,
+                        mapOf("context" to ctx, "parentVideo" to target)
+                    )
                 }
             )
         }
@@ -659,7 +713,8 @@ private fun FullscreenThreadPlayer(
     videoService: VideoServiceImpl,
     onDismiss: () -> Unit,
     onShowCarousel: (video: CoreVideoMetadata, replies: List<CoreVideoMetadata>, participantIDs: Set<String>) -> Unit,
-    onAction: ((OverlayAction) -> Unit)?
+    onAction: ((OverlayAction) -> Unit)?,
+    onRequestStitch: ((CoreVideoMetadata) -> Unit)? = null
 ) {
     val iconMgr = iconManager ?: remember { FloatingIconManager() }
     val scope = rememberCoroutineScope()
@@ -717,6 +772,10 @@ private fun FullscreenThreadPlayer(
                                         }
                                     }
                                 }
+                            }
+                            is OverlayAction.StitchRecording -> {
+                                // Per-page video, so stitch the visible one.
+                                onRequestStitch?.invoke(video)
                             }
                             else -> onAction?.invoke(action)
                         }

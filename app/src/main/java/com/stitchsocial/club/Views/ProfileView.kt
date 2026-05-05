@@ -94,6 +94,11 @@ import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.ProfileVideoGrid
 import com.stitchsocial.club.views.FullscreenVideoPlayer
 import com.stitchsocial.club.views.VideoInfo
+import com.stitchsocial.club.views.OverlayContext
+import com.stitchsocial.club.views.OverlayAction
+import com.stitchsocial.club.views.ContextualVideoOverlay
+import com.stitchsocial.club.views.VideoPlayerComposable
+import com.stitchsocial.club.camera.RecordingContextFactory
 import com.stitchsocial.club.FollowManager
 
 // ===== HELPER FUNCTIONS =====
@@ -278,6 +283,21 @@ fun ProfileView(
         EngagementViewModel(authService, videoService, userService)
     }
     val iconManager = remember { FloatingIconManager() }
+
+    // CRITICAL: EngagementViewModel.currentUserID defaults to "anonymous"
+    // and is only updated via setCurrentUser(). HomeFeedView calls this at
+    // its line 91; ProfileView never did, so every hype/cool tap from a
+    // profile-launched player wrote to Firestore as "anonymous" — breaking
+    // per-user lock keys, clout attribution, and state persistence. This
+    // syncs the viewModel to the actual auth user as soon as we know who
+    // they are.
+    val authUserID = authService.currentUser.collectAsState().value?.uid
+    LaunchedEffect(authUserID) {
+        if (!authUserID.isNullOrEmpty()) {
+            viewModel.setCurrentUser(authUserID)
+            println("PROFILE: EngagementViewModel.setCurrentUser($authUserID)")
+        }
+    }
 
     // Own profile check
     val currentAuthUserID = authService.currentUser.collectAsState().value?.uid
@@ -662,20 +682,9 @@ fun ProfileView(
         // Swipe tracking state
         var swipeOffset by remember { mutableFloatStateOf(0f) }
 
-        // Convert current video — NO remember, recomputes on every selectedVideo change
+        // No more VideoInfo conversion — the direct mount uses
+        // CoreVideoMetadata throughout, like HomeFeedView does.
         val currentVid = selectedVideo!!
-        val videoInfo = VideoInfo(
-            id = currentVid.id,
-            title = currentVid.title,
-            videoUrl = currentVid.videoURL,
-            thumbnailUrl = currentVid.thumbnailURL ?: "",
-            duration = (currentVid.duration * 1000).toLong(),
-            creatorID = currentVid.creatorID,
-            creatorName = currentVid.creatorName ?: "Unknown",
-            threadID = currentVid.threadID,
-            conversationDepth = currentVid.conversationDepth,
-            replyCount = currentVid.replyCount
-        )
 
         // Peek videos for left/right edges
         val prevVideo = if (selectedVideoIndex > 0) currentVideoList.getOrNull(selectedVideoIndex - 1) else null
@@ -702,45 +711,98 @@ fun ProfileView(
                     )
                 }
         ) {
-            // key() forces full recomposition — new ExoPlayer instance for each video
-            key(videoInfo.id) {
-                FullscreenVideoPlayer(
-                    video = videoInfo,
-                    currentUserID = currentAuthUserID ?: userID,
-                    currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
-                    engagementCoordinator = engagementCoordinator,
-                    engagementViewModel = viewModel,
-                    iconManager = iconManager,
-                    navigationCoordinator = navigationCoordinator,
-                    onShowThreadView = { threadID, targetVideoID ->
-                        // Navigate FIRST, then dismiss player after delay
-                        // Setting showingVideoPlayer=false immediately would destroy this
-                        // composable before onShowThreadView propagates to MainActivity
-                        onShowThreadView(threadID, targetVideoID)
-                        scope.launch {
-                            delay(100)
+            // Mount the player + overlay directly, mirroring HomeFeedView:447-475
+            // 1:1. The previous FullscreenVideoPlayer wrapper added an extra
+            // layer that wasn't propagating taps cleanly; this puts the same
+            // structure home feed uses, so behavior matches by construction.
+            key(currentVid.id) {
+                VideoPlayerComposable(
+                    video = currentVid,
+                    isActive = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            ContextualVideoOverlay(
+                video = currentVid,
+                overlayContext = if (isOwnProfile) OverlayContext.PROFILE_OWN else OverlayContext.PROFILE_OTHER,
+                currentUserID = currentAuthUserID,
+                threadVideo = null,
+                currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
+                engagementViewModel = viewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                navigationCoordinator = navigationCoordinator,
+                onAction = { action ->
+                    println("PROFILE PLAYER: action received: $action")
+                    when (action) {
+                        is OverlayAction.NavigateToProfile -> {
+                            // Open the tapped creator's profile, dismiss this player
+                            navigationCoordinator?.showModal(
+                                ModalState.USER_PROFILE,
+                                mapOf("userID" to action.userID)
+                            )
                             showingVideoPlayer = false
                             selectedVideo = null
                         }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    onDismiss = {
-                        showingVideoPlayer = false
-                        selectedVideo = null
-                        scope.launch { loadVideos() }
-                    },
-                    onPrevious = if (selectedVideoIndex > 0) {
-                        {
-                            selectedVideoIndex--
-                            selectedVideo = currentVideoList.getOrNull(selectedVideoIndex)
+                        is OverlayAction.StitchRecording -> {
+                            val authID = currentAuthUserID ?: ""
+                            val isOwn = currentVid.creatorID == authID
+                            val threadID = currentVid.threadID ?: currentVid.id
+                            val ctx = if (isOwn) {
+                                RecordingContextFactory.createContinueThread(
+                                    threadID, currentVid.creatorName, currentVid.title
+                                )
+                            } else {
+                                RecordingContextFactory.createStitchToThread(
+                                    threadID, currentVid.creatorName, currentVid.title
+                                )
+                            }
+                            println("PROFILE PLAYER: Stitch — threadID=$threadID isOwn=$isOwn")
+                            navigationCoordinator?.showModal(
+                                ModalState.RECORDING,
+                                mapOf("context" to ctx, "parentVideo" to currentVid)
+                            )
+                            // Dismiss this overlay so the recording modal isn't
+                            // covered by ProfileView's video-player overlay.
+                            showingVideoPlayer = false
+                            selectedVideo = null
                         }
-                    } else null,
-                    onNext = if (selectedVideoIndex < currentVideoList.size - 1) {
-                        {
-                            selectedVideoIndex++
-                            selectedVideo = currentVideoList.getOrNull(selectedVideoIndex)
+                        is OverlayAction.NavigateToThread -> {
+                            val threadID = currentVid.threadID ?: currentVid.id
+                            onShowThreadView(threadID, currentVid.id)
+                            scope.launch {
+                                delay(100)
+                                showingVideoPlayer = false
+                                selectedVideo = null
+                            }
                         }
-                    } else null
+                        else -> {
+                            // Engagement (HYPE/COOL) is handled internally by
+                            // ContextualVideoOverlay via ProgressiveHypeButton3D
+                            // → engagementViewModel.onHypeTap. Do NOT call
+                            // processHype here or you'll double-count.
+                        }
+                    }
+                }
+            )
+
+            // Close button (top-right)
+            IconButton(
+                onClick = {
+                    showingVideoPlayer = false
+                    selectedVideo = null
+                    scope.launch { loadVideos() }
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color.White
                 )
             }
 

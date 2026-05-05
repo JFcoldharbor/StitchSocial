@@ -369,6 +369,11 @@ fun MainScreen() {
         ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         uri?.let {
+            // Show parallel-processing briefly while we prepare the file
+            // (content:// → local), then route through VIDEO_REVIEW so the
+            // user can trim / caption like a recorded clip. Previously this
+            // skipped review entirely and dumped users straight into
+            // ThreadComposer — gallery imports got no editing affordance.
             navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
             scope.launch {
                 try {
@@ -378,7 +383,13 @@ fun MainScreen() {
                     if (videoPath != null) {
                         val modalDataMap = mutableMapOf<String, Any>("videoPath" to videoPath)
                         if (aiResult != null) modalDataMap["aiResult"] = aiResult
-                        navigationCoordinator.showModal(ModalState.THREAD_COMPOSER, modalDataMap)
+                        // Gallery imports default to a new-thread context.
+                        modalDataMap["context"] = com.stitchsocial.club.camera.RecordingContext.NewThread
+                        // Route to VIDEO_REVIEW (matches recording flow at
+                        // line 838-850). The review's onContinueToThread
+                        // handles PARALLEL_PROCESSING + THREAD_COMPOSER from
+                        // there — same path as a freshly-recorded clip.
+                        navigationCoordinator.showModal(ModalState.VIDEO_REVIEW, modalDataMap)
                     } else {
                         navigationCoordinator.dismissModal()
                     }
@@ -536,12 +547,20 @@ fun MainScreen() {
                     // Tab content with explicit lower z-index
                     var isShowingCollectionPlayer by remember { mutableStateOf(false) }
 
+                    // Hide the entire tab content (Discovery, Home, Profile tab,
+                    // Notifications, etc.) when a modal is active. Compose
+                    // zIndex / opaque overlays don't reliably cover ExoPlayer's
+                    // SurfaceView — it draws on a separate hardware layer that
+                    // can poke through any Composable. Conditional rendering
+                    // unmounts the PlayerViews entirely so there's nothing to
+                    // bleed through. Tab state is preserved by remember; only
+                    // momentary scroll positions in feeds may reset.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .zIndex(0f)  // Ensure this is below ThreadView
                     ) {
-                        TabContent(
+                        if (currentModal == ModalState.NONE) TabContent(
                             selectedTab = selectedTab,
                             currentUser = currentUser!!,
                             videoService = videoService,
@@ -578,39 +597,11 @@ fun MainScreen() {
                         }
                     }
 
-                    // ✅ ThreadView Overlay - MUST render BEFORE tab bar for proper z-index
-                    if (isShowingThreadView) {
-                        Log.d("STITCH_MAIN", "🧵 RENDERING ThreadView")
-                        val user = currentUser  // Capture for smart cast
-                        if (user != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .zIndex(1000f)
-                                    .background(Color.Black)  // Solid black background
-                                    .pointerInput(Unit) {
-                                        // Consume all touches to prevent interaction with content below
-                                        detectTapGestures { /* consume */ }
-                                    }
-                            ) {
-                                ThreadView(
-                                    threadID = threadViewThreadID ?: "",
-                                    videoService = videoService,
-                                    targetVideoID = threadViewTargetVideoID,
-                                    currentUserID = user.id,
-                                    currentUserTier = user.tier,
-                                    onDismiss = {
-                                        isShowingThreadView = false
-                                        threadViewThreadID = null
-                                        threadViewTargetVideoID = null
-                                    },
-                                    onVideoTap = { video ->
-                                        // Video tap handled within ThreadView
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    // ThreadView and ModalOverlay are intentionally moved OUT
+                    // of this Box (after CommunityDetailView below) so they
+                    // can render above ProfileView/CommunityDetailView.
+                    // Inside this Box, zIndex can't compete with siblings of
+                    // this Box that live outside it.
 
                     // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
                     val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView && !isShowingCollectionPlayer
@@ -632,8 +623,9 @@ fun MainScreen() {
                         Log.d("STITCH_MAIN", "🚫 NOT RENDERING CustomDippedTabBar - shouldShowTabBar is FALSE")
                     }
 
-                    // Regular modal overlay
-                    ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
+                    // ModalOverlay rendered below at the same level as
+                    // ProfileView/CommunityDetailView (after this Box closes)
+                    // so its zIndex(500f) actually competes with theirs.
 
                     // ✅ NEW: Announcement overlay (shows on top of everything)
                     if (isShowingAnnouncement && currentAnnouncement != null) {
@@ -738,6 +730,17 @@ fun MainScreen() {
                             userID = profileViewUserID ?: "",
                             viewingUserID = currentUser?.id,
                             navigationCoordinator = navigationCoordinator,
+                            // Wire the thread-nav callback so taps on the
+                            // contextual overlay's "Thread" button (and the
+                            // profile-launched fullscreen player's overlay)
+                            // route into the ThreadView overlay. Without this,
+                            // ProfileView gets the default no-op and the
+                            // button silently dismisses the player.
+                            onShowThreadView = { threadID, targetVideoID ->
+                                threadViewThreadID = threadID
+                                threadViewTargetVideoID = targetVideoID
+                                isShowingThreadView = true
+                            },
                             onDismiss = {
                                 isShowingProfileView = false
                                 profileViewUserID = null
@@ -767,6 +770,55 @@ fun MainScreen() {
                         )
                     }
                 }
+
+                // ── Top-level overlays (siblings of ProfileView / CommunityDetail) ──
+                //
+                // These MUST live outside the main Box (which ends earlier)
+                // so they can compete on z-index with ProfileView (zIndex 50)
+                // and CommunityDetail (zIndex 50). Previously they lived
+                // inside the main Box and zIndex couldn't reach across the
+                // parent boundary, so tapping Stitch/Thread from a profile-
+                // launched player rendered the modal underneath the profile.
+
+                // ModalOverlay — recording, video review, thread composer, etc.
+                Box(modifier = Modifier.fillMaxSize().zIndex(500f)) {
+                    ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
+                }
+
+                // ThreadView — full-screen conversation view, takes precedence
+                // over modals when both are active.
+                if (isShowingThreadView) {
+                    Log.d("STITCH_MAIN", "🧵 RENDERING ThreadView")
+                    val user = currentUser
+                    if (user != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(1000f)
+                                .background(Color.Black)
+                                .pointerInput(Unit) {
+                                    detectTapGestures { /* consume */ }
+                                }
+                        ) {
+                            ThreadView(
+                                threadID = threadViewThreadID ?: "",
+                                videoService = videoService,
+                                targetVideoID = threadViewTargetVideoID,
+                                currentUserID = user.id,
+                                currentUserTier = user.tier,
+                                navigationCoordinator = navigationCoordinator,
+                                onDismiss = {
+                                    isShowingThreadView = false
+                                    threadViewThreadID = null
+                                    threadViewTargetVideoID = null
+                                },
+                                onVideoTap = { video ->
+                                    // Video tap handled within ThreadView
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -781,7 +833,10 @@ private fun ModalOverlay(
     onTabChange: (MainAppTab) -> Unit
 ) {
     if (currentModal != ModalState.NONE) {
-        Box(modifier = Modifier.fillMaxSize().background(StitchColors.modalOverlay)) {
+        // FULLY opaque black background. The shared StitchColors.modalOverlay
+        // is 90% black which let DiscoveryView's video player bleed through
+        // the modal. Recording/review modals need to fully cover the feed.
+        Box(modifier = Modifier.fillMaxSize().zIndex(100f).background(Color.Black)) {
             when (currentModal) {
                 ModalState.RECORDING -> {
                     val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
@@ -817,6 +872,23 @@ private fun ModalOverlay(
                         onStopAllVideos = {},
                         onDisposeAllVideos = {},
                         onGalleryRequested = { navigationCoordinator.requestGalleryPicker() },
+                        onReactionRequested = {
+                            // Switch from RECORDING to REACTION. If we entered
+                            // RECORDING from a stitch (parentVideo set), auto-
+                            // fill the source zone with that video's URL so
+                            // the user can react immediately. Otherwise they
+                            // pick a source manually inside ReactionCameraView.
+                            val parentUrl = parentVideo?.videoURL
+                            val data = if (!parentUrl.isNullOrBlank()) {
+                                mapOf(
+                                    "sourceUri" to parentUrl,
+                                    "context" to recordingContext
+                                )
+                            } else {
+                                mapOf("context" to recordingContext)
+                            }
+                            navigationCoordinator.showModal(ModalState.REACTION, data)
+                        },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -939,6 +1011,33 @@ private fun ModalOverlay(
                         println("❌ MAINACT: No video path for VIDEO_REVIEW")
                         navigationCoordinator.dismissModal()
                     }
+                }
+
+                ModalState.REACTION -> {
+                    // Split-canvas reaction recorder. The composited MP4 is
+                    // routed through VIDEO_REVIEW so the user can trim/caption
+                    // before posting — same path the normal recording flow uses.
+                    val initialSourceUriString = modalData["sourceUri"] as? String
+                    val initialSourceUri = initialSourceUriString?.let { Uri.parse(it) }
+                    val reactionContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
+                    com.stitchsocial.club.views.ReactionCameraView(
+                        onCancel = {
+                            println("🎬 REACTION: cancelled")
+                            navigationCoordinator.dismissModal()
+                        },
+                        onComplete = { resultUri ->
+                            println("🎬 REACTION: completed → $resultUri, routing to VIDEO_REVIEW")
+                            navigationCoordinator.showModal(
+                                ModalState.VIDEO_REVIEW,
+                                mapOf(
+                                    "videoPath" to resultUri.toString(),
+                                    "context" to reactionContext
+                                )
+                            )
+                        },
+                        initialSourceUri = initialSourceUri,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 ModalState.PARALLEL_PROCESSING -> ParallelProcessingView(
