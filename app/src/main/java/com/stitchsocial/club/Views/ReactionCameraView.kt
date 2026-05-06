@@ -131,10 +131,11 @@ fun ReactionCameraView(
     var showLayoutPicker by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var cameraSelector by remember { mutableStateOf(CameraSelector.DEFAULT_FRONT_CAMERA) }
-    // R5: mute toggle for source audio in the merged output. Off by default
-    // so we don't fight the user's voice. Independent of the live preview
-    // mute (sourcePlayer.volume = 0f) which stays muted to avoid mic feedback.
-    var keepSourceAudio by remember { mutableStateOf(false) }
+    // R5: mute toggle for source audio in the merged output. On by default
+    // (matches Stitch/Duet expectations); user can mute via the speaker
+    // icon in the top bar. Independent of the live preview mute
+    // (sourcePlayer.volume = 0f) which stays muted to avoid mic feedback.
+    var keepSourceAudio by remember { mutableStateOf(true) }
 
     // ───── Camera plumbing (hoisted so the record button can drive it) ───
     // PreviewView is created once and reused — re-creating it across
@@ -167,7 +168,10 @@ fun ReactionCameraView(
             ExoPlayer.Builder(context).build().apply {
                 setMediaItem(MediaItem.fromUri(uri))
                 repeatMode = Player.REPEAT_MODE_OFF
-                volume = 0f
+                // Source plays audibly so the user can react to what they
+                // hear. Headphones recommended to avoid mic re-capture; the
+                // top-bar speaker icon mutes if needed.
+                volume = 1f
                 prepare()
                 playWhenReady = false
             }
@@ -189,6 +193,13 @@ fun ReactionCameraView(
             if (d > 0) { sourceDurationMs = d; break }
             kotlinx.coroutines.delay(100)
         }
+    }
+
+    // Keep the live preview's volume in sync with the merged-output toggle
+    // so muting via the speaker icon kills both preview audio and the
+    // composited audio track.
+    LaunchedEffect(sourcePlayer, keepSourceAudio) {
+        sourcePlayer?.volume = if (keepSourceAudio) 1f else 0f
     }
 
     // Bind / re-bind camera every time the cameraSelector flips (front↔back).

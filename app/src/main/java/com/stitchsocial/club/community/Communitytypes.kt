@@ -107,6 +107,7 @@ data class CommunityMembership(
     var localXP: Int = 0,
     var level: Int = 1,
     var earnedBadgeIDs: List<String> = emptyList(),
+    var isOwner: Boolean = false,
     var isModerator: Boolean = false,
     var isBanned: Boolean = false,
     var lastActiveAt: Date = Date(),
@@ -140,6 +141,7 @@ data class CommunityMembership(
                 localXP = (data["localXP"] as? Number)?.toInt() ?: 0,
                 level = (data["level"] as? Number)?.toInt() ?: 1,
                 earnedBadgeIDs = (data["earnedBadgeIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                isOwner = data["isOwner"] as? Boolean ?: false,
                 isModerator = data["isModerator"] as? Boolean ?: false,
                 isBanned = data["isBanned"] as? Boolean ?: false,
                 lastActiveAt = (data["lastActiveAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
@@ -161,6 +163,7 @@ data class CommunityMembership(
         put("subscriptionTier", subscriptionTier)
         put("localXP", localXP); put("level", level)
         put("earnedBadgeIDs", earnedBadgeIDs)
+        put("isOwner", isOwner)
         put("isModerator", isModerator); put("isBanned", isBanned)
         put("lastActiveAt", com.google.firebase.Timestamp(lastActiveAt))
         put("joinedAt", com.google.firebase.Timestamp(joinedAt))

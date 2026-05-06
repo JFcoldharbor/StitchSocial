@@ -36,6 +36,10 @@ class SubscriptionService private constructor() {
 
     private val db = FirebaseFirestore.getInstance("stitchfin")
     private val coinService = HypeCoinService.shared
+    // NotificationService is stateless on Android — instantiate per-call
+    // rather than maintain a configured singleton. Used by subscribe() to
+    // fire the new-subscriber notification.
+    private val notificationService by lazy { NotificationService() }
 
     private object Collections {
         const val PLANS         = "creator_subscription_plans"
@@ -228,6 +232,21 @@ class SubscriptionService private constructor() {
             isSubscribedCache.remove(creatorID)
             subscriptionCache.remove("${subscriberID}_${creatorID}")
             mySubsFetchedAt = null
+
+            // Notify creator about the new subscriber. Best-effort —
+            // notification failure does NOT roll back the subscription
+            // (coins already moved + sub doc already written).
+            try {
+                val subscriberName = resolveDisplayName(subscriberID)
+                notificationService.sendSubscriptionNotification(
+                    recipientID = creatorID,
+                    senderID = subscriberID,
+                    senderUsername = subscriberName,
+                    subscriptionTier = coinTier.displayName
+                )
+            } catch (e: Exception) {
+                println("⚠️ SUB SERVICE: subscription notification failed — ${e.message}")
+            }
 
             println("🎉 SUBS: $subscriberID → $creatorID at ${coinTier.displayName} (${price} coins)")
 
@@ -446,5 +465,20 @@ class SubscriptionService private constructor() {
         if (value is Int) return value
         if (value is Double) return value.toInt()
         return 0
+    }
+
+    /** Display-name fallback chain: displayName → username → "Someone".
+     *  Mirrors iOS SubscriptionService.fetchSubscriberDisplayName so
+     *  notification copy never shows a raw uid. */
+    private suspend fun resolveDisplayName(userID: String): String {
+        if (userID.isEmpty()) return "Someone"
+        return try {
+            val data = db.collection("users").document(userID).get().await().data ?: return "Someone"
+            (data["displayName"] as? String)?.takeIf { it.isNotEmpty() }
+                ?: (data["username"] as? String)?.takeIf { it.isNotEmpty() }
+                ?: "Someone"
+        } catch (_: Exception) {
+            "Someone"
+        }
     }
 }

@@ -326,7 +326,8 @@ fun MainScreen() {
                 // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
                 "hype", "reply", "cool", "engagement",
                 "stitch", "thread", "newVideo", "mention",
-                "video", "reengagement_stitches", "reengagement_milestone" -> {
+                "video", "reengagement_stitches", "reengagement_milestone",
+                "tip" -> {
                     // Cloud Functions include threadID in payload — use it for deep linking
                     val resolvedThreadID = threadId ?: videoId
                     if (resolvedThreadID != null) {
@@ -336,8 +337,8 @@ fun MainScreen() {
                         isShowingThreadView = true
                     }
                 }
-                // Follow → profile navigation
-                "follow", "user", "reengagement_followers" -> {
+                // Follow / new subscriber → profile of the sender
+                "follow", "user", "reengagement_followers", "subscription" -> {
                     userId?.let { id ->
                         Log.d("STITCH_MAIN", "📱 Navigating to profile: $id")
                         profileViewUserID = id

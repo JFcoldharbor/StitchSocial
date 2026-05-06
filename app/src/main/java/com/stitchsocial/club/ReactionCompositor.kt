@@ -25,14 +25,18 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Effect
 import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.Presentation
 import androidx.media3.effect.VideoCompositorSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
 import com.stitchsocial.club.views.ReactionLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -64,16 +68,22 @@ object ReactionCompositor {
         layout: ReactionLayout,
         cameraIsTop: Boolean,
         sourceStartMs: Long = 0L,
-        keepSourceAudio: Boolean = false,
+        keepSourceAudio: Boolean = true,
         onProgress: (Float) -> Unit = {}
     ): Uri = withContext(Dispatchers.IO) {
         val outputFile = File(context.cacheDir, "reaction_${UUID.randomUUID()}.mp4")
 
-        // Build two parallel sequences — Composition runs them simultaneously
-        // on the same output timeline. Camera's audio is the master; source
-        // audio is muted in this MVP so we don't get two voices fighting.
+        // Per-zone aspect-fill — each input is cropped (Presentation with
+        // SCALE_TO_FIT_WITH_CROP) so its frames already match the zone's
+        // aspect before the compositor places them. Without this, the
+        // compositor would stretch a 9:16 source into the 9:8 top half
+        // and you'd see distorted/letterboxed video.
+        val cameraEffects = zoneEffects(layout, cameraIsTop, isCamera = true)
+        val sourceEffects = zoneEffects(layout, cameraIsTop, isCamera = false)
+
         val cameraItem = EditedMediaItem.Builder(MediaItem.fromUri(cameraUri))
             .setRemoveAudio(false)
+            .setEffects(cameraEffects)
             .build()
         // Apply the user's scrub offset to the source via ClippingConfiguration
         // so the merged output starts the source at the same frame the
@@ -92,14 +102,24 @@ object ReactionCompositor {
             .build()
         val sourceItem = EditedMediaItem.Builder(sourceMediaItem)
             .setRemoveAudio(!keepSourceAudio)
+            .setEffects(sourceEffects)
             .build()
 
         // Order matters for audio: the FIRST sequence's audio is used.
         val cameraSequence = EditedMediaItemSequence(cameraItem)
         val sourceSequence = EditedMediaItemSequence(sourceItem)
 
+        // Force a 1080×1920 output canvas at the Composition level.
+        // VideoCompositorSettings.getOutputSize is advisory — without this
+        // top-level Presentation, Transformer falls back to one of the
+        // input sizes (e.g., the 1080×960 cropped half-frame), and the
+        // exported MP4 ends up letterboxed in the player.
+        val outputPresentation = Presentation.createForWidthAndHeight(
+            OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT
+        )
         val composition = Composition.Builder(listOf(cameraSequence, sourceSequence))
             .setVideoCompositorSettings(buildCompositorSettings(layout, cameraIsTop))
+            .setEffects(Effects(emptyList(), ImmutableList.of<Effect>(outputPresentation)))
             .build()
 
         suspendCancellableCoroutine { continuation ->
@@ -157,9 +177,15 @@ object ReactionCompositor {
     //   0 = camera sequence
     //   1 = source sequence
     //
-    // OverlaySettings anchor coords range -1..1 over the OUTPUT frame:
-    //   (-1, -1) = bottom-left, (1, 1) = top-right, (0, 0) = center.
-    // setScale(sx, sy) scales the input. Half-height = scale.y = 0.5.
+    // Anchor semantics (NDC, range [-1,1], y=+1 top, y=-1 bottom):
+    //   • backgroundFrameAnchor — point on the output where the overlay
+    //     lands. Use this to POSITION an overlay.
+    //   • overlayFrameAnchor — point ON THE OVERLAY ITSELF that gets
+    //     placed at that background anchor. (0,0) = overlay center.
+    //
+    // setScale(sx, sy) is a fraction of the output. (1, 0.5) = full width,
+    // half height. The input is pre-cropped via the Presentation effect
+    // to match the zone aspect, so the scale doesn't distort.
 
     private fun buildCompositorSettings(
         layout: ReactionLayout,
@@ -177,23 +203,22 @@ object ReactionCompositor {
      * Vertical split. topFrac is the height fraction of the top zone
      * (0.5 = even split, 0.7 = top is 70% tall, etc.). cameraIsTop picks
      * which input ID lives in which zone.
+     *
+     * Top-zone center in NDC y: 1 - topFrac. Bottom-zone center: topFrac - 1.
      */
     private fun splitSettings(topFrac: Float, cameraIsTop: Boolean): VideoCompositorSettings {
-        // Convert "fraction of output height" to anchor coords.
-        // Top-zone center y in anchor space: 1 - topFrac (since y goes -1 bottom .. 1 top).
-        // Bottom-zone center y in anchor space: topFrac - 1.
         val topAnchorY = 1f - topFrac
         val bottomAnchorY = topFrac - 1f
 
         val cameraSettings = OverlaySettings.Builder()
-            .setOverlayFrameAnchor(0f, if (cameraIsTop) topAnchorY else bottomAnchorY)
-            .setBackgroundFrameAnchor(0f, 0f)
+            .setOverlayFrameAnchor(0f, 0f)  // overlay's own center
+            .setBackgroundFrameAnchor(0f, if (cameraIsTop) topAnchorY else bottomAnchorY)
             .setScale(1f, if (cameraIsTop) topFrac else (1f - topFrac))
             .setAlphaScale(1f)
             .build()
         val sourceSettings = OverlaySettings.Builder()
-            .setOverlayFrameAnchor(0f, if (cameraIsTop) bottomAnchorY else topAnchorY)
-            .setBackgroundFrameAnchor(0f, 0f)
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(0f, if (cameraIsTop) bottomAnchorY else topAnchorY)
             .setScale(1f, if (cameraIsTop) (1f - topFrac) else topFrac)
             .setAlphaScale(1f)
             .build()
@@ -207,15 +232,15 @@ object ReactionCompositor {
     }
 
     /**
-     * PiP — one input fills the whole frame (background), the other is a
-     * small bubble in the top-right. Bubble is ~25% width, 25% height.
+     * PiP — one input fills the whole frame, the other is a small bubble
+     * in the top-right. Bubble is ~25% width, 25% height.
      */
     private fun pipSettings(cameraIsTop: Boolean): VideoCompositorSettings {
         val bubbleScaleX = 0.25f
         val bubbleScaleY = 0.25f
-        // Bubble anchor: top-right with a small inset.
-        val bubbleAnchorX = 0.7f
-        val bubbleAnchorY = 0.7f
+        // Where on the BACKGROUND the bubble sits — top-right with a small inset.
+        val bubblePosX = 0.7f
+        val bubblePosY = 0.7f
 
         val backgroundSettings = OverlaySettings.Builder()
             .setOverlayFrameAnchor(0f, 0f)
@@ -224,8 +249,8 @@ object ReactionCompositor {
             .setAlphaScale(1f)
             .build()
         val bubbleSettings = OverlaySettings.Builder()
-            .setOverlayFrameAnchor(bubbleAnchorX, bubbleAnchorY)
-            .setBackgroundFrameAnchor(0f, 0f)
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(bubblePosX, bubblePosY)
             .setScale(bubbleScaleX, bubbleScaleY)
             .setAlphaScale(1f)
             .build()
@@ -241,6 +266,50 @@ object ReactionCompositor {
                     inputId == 1 && cameraIsTop -> backgroundSettings
                     else -> bubbleSettings
                 }
+            }
+        }
+    }
+
+    // ───── Per-zone Presentation effects ─────────────────────────────────
+    //
+    // Each input is pre-rendered at the zone's pixel dimensions using
+    // SCALE_TO_FIT_WITH_CROP so a 9:16 portrait source fills a 9:8 split-
+    // half without letterboxing or stretch. The compositor's setScale
+    // then maps that already-correct frame into the output rectangle.
+
+    private fun zoneEffects(
+        layout: ReactionLayout,
+        cameraIsTop: Boolean,
+        isCamera: Boolean
+    ): Effects {
+        val (w, h) = zoneSize(layout, cameraIsTop, isCamera) ?: return Effects(emptyList(), emptyList())
+        val presentation = Presentation.createForWidthAndHeight(
+            w, h, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+        )
+        return Effects(emptyList(), ImmutableList.of<Effect>(presentation))
+    }
+
+    private fun zoneSize(
+        layout: ReactionLayout,
+        cameraIsTop: Boolean,
+        isCamera: Boolean
+    ): Pair<Int, Int>? {
+        val isTopZone = (isCamera && cameraIsTop) || (!isCamera && !cameraIsTop)
+        return when (layout) {
+            ReactionLayout.SPLIT_50_50 -> OUT_W to (OUT_H / 2)
+            ReactionLayout.SPLIT_70_30 -> {
+                val topH = (OUT_H * 0.7f).toInt()
+                OUT_W to if (isTopZone) topH else (OUT_H - topH)
+            }
+            ReactionLayout.SPLIT_30_70 -> {
+                val topH = (OUT_H * 0.3f).toInt()
+                OUT_W to if (isTopZone) topH else (OUT_H - topH)
+            }
+            ReactionLayout.PIP -> {
+                // Background fills full canvas, bubble is 25%×25%. Bubble
+                // dimensions match output aspect so no crop is needed for
+                // either side — return null to skip the Presentation step.
+                null
             }
         }
     }

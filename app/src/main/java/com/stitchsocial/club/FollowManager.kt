@@ -238,6 +238,7 @@ class FollowManager(private val context: Context) : ViewModel() {
     fun loadFollowState(userID: String) {
         viewModelScope.launch {
             val currentUserID = auth.currentUser?.uid ?: return@launch
+            if (currentUserID.isEmpty() || userID.isEmpty()) return@launch
 
             try {
                 val isFollowing = userService.isFollowing(currentUserID, userID)
@@ -256,11 +257,20 @@ class FollowManager(private val context: Context) : ViewModel() {
     fun loadFollowStates(userIDs: List<String>) {
         viewModelScope.launch {
             val currentUserID = auth.currentUser?.uid ?: return@launch
+            if (currentUserID.isEmpty()) return@launch
 
-            println("🔄 FOLLOW MANAGER: Loading follow states for ${userIDs.size} users from Firebase...")
+            // Strip blank IDs — they sneak in when seeded/deleted users
+            // leave dangling references and Firestore's document(_:) would
+            // crash synchronously on an empty path.
+            val validIDs = userIDs.filter { it.isNotEmpty() }
+            if (validIDs.size != userIDs.size) {
+                println("🔄 FOLLOW MANAGER: dropped ${userIDs.size - validIDs.size} empty user IDs")
+            }
+
+            println("🔄 FOLLOW MANAGER: Loading follow states for ${validIDs.size} users from Firebase...")
 
             // Parallel loading using async/await
-            val deferredResults = userIDs.map { userID ->
+            val deferredResults = validIDs.map { userID ->
                 async {
                     try {
                         val isFollowing = userService.isFollowing(currentUserID, userID)
@@ -274,7 +284,7 @@ class FollowManager(private val context: Context) : ViewModel() {
             }
 
             deferredResults.awaitAll()
-            println("✅ FOLLOW MANAGER: Finished loading follow states for ${userIDs.size} users")
+            println("✅ FOLLOW MANAGER: Finished loading follow states for ${validIDs.size} users")
         }
     }
 

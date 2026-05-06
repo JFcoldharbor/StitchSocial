@@ -172,14 +172,14 @@ private fun HeatProgressCard(
                 }
 
                 Text(
-                    text = "THREAD LIVE!",
+                    text = "READY TO POST",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF00CC66)
                 )
 
                 Text(
-                    text = "Your content is now visible",
+                    text = "Add a title and hashtags next",
                     fontSize = 14.sp,
                     color = Color(0xFF00CC66).copy(alpha = 0.7f)
                 )

@@ -327,6 +327,52 @@ class NotificationService {
     }
 
     // ========================================================================
+    // MARK: - Subscription Notification
+    // Mirrors iOS NotificationService.sendSubscriptionNotification.
+    // No cooldown — subscriptions are infrequent and meaningful.
+    // FCM push is fired by the onNotificationCreated CF on doc create.
+    // ========================================================================
+
+    suspend fun sendSubscriptionNotification(
+        recipientID: String,        // creator
+        senderID: String,           // new subscriber
+        senderUsername: String,
+        subscriptionTier: String? = null
+    ): Boolean {
+        if (recipientID.isEmpty() || senderID.isEmpty()) return false
+        return try {
+            val tierText = subscriptionTier?.let { " ($it)" } ?: ""
+            val notificationID = java.util.UUID.randomUUID().toString()
+            val payload = mapOf(
+                "senderUsername" to senderUsername,
+                "senderID" to senderID,
+                "subscriptionTier" to (subscriptionTier ?: ""),
+                "notificationType" to "subscription"
+            )
+            val notification = mapOf(
+                "id" to notificationID,
+                "recipientID" to recipientID,
+                "senderID" to senderID,
+                "type" to "subscription",
+                "title" to "⭐ New Subscriber!",
+                "message" to "$senderUsername subscribed to you$tierText",
+                "payload" to payload,
+                "isRead" to false,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "expiresAt" to com.google.firebase.Timestamp(
+                    java.util.Date(System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
+                )
+            )
+            db.collection(notificationsCollection).document(notificationID).set(notification).await()
+            println("✅ SUB NOTIF: Subscription notification written for $recipientID")
+            true
+        } catch (e: Exception) {
+            println("⚠️ SUB NOTIF: write failed — ${e.message}")
+            false
+        }
+    }
+
+    // ========================================================================
     // MARK: - Legacy Direct Write (fallback only)
     // ========================================================================
 
@@ -537,6 +583,7 @@ class NotificationService {
             "milestone" -> StitchNotificationType.MILESTONE
             "tier_upgrade" -> StitchNotificationType.TIER_UPGRADE
             "spinoff" -> StitchNotificationType.SPIN_OFF
+            "tip" -> StitchNotificationType.TIP
             "system" -> StitchNotificationType.SYSTEM
             else -> StitchNotificationType.SYSTEM
         }
@@ -584,6 +631,7 @@ enum class StitchNotificationType(val rawValue: String) {
     MILESTONE("milestone"),
     TIER_UPGRADE("tier_upgrade"),
     SPIN_OFF("spinoff"),
+    TIP("tip"),
     SYSTEM("system");
 
     val displayName: String
@@ -597,6 +645,7 @@ enum class StitchNotificationType(val rawValue: String) {
             MILESTONE -> "Milestone"
             TIER_UPGRADE -> "Tier Upgrade"
             SPIN_OFF -> "Spin-off"
+            TIP -> "Tip"
             SYSTEM -> "System"
         }
 
@@ -611,6 +660,7 @@ enum class StitchNotificationType(val rawValue: String) {
             MILESTONE -> "emoji_events"
             TIER_UPGRADE -> "arrow_upward"
             SPIN_OFF -> "call_split"
+            TIP -> "monetization_on"
             SYSTEM -> "info"
         }
 }

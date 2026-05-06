@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,12 +42,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.AdRevenueShare
 import com.stitchsocial.club.services.SubscriptionService
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
+
+private enum class SupporterTab { SUBSCRIPTIONS, TOP_SUPPORTERS }
+
+/** One row of users/{id}.topSupporters — names only; tip totals stay private. */
+data class TopSupporterEntry(val tipperID: String, val username: String)
 
 // ─────────────────────────────────────────────
 // MARK: - MySubscriptionsView
@@ -62,19 +70,40 @@ fun MySubscriptionsView(
     val scope = rememberCoroutineScope()
 
     var subscriptions by remember { mutableStateOf<List<ActiveSubscription>>(emptyList()) }
+    var topSupporters by remember { mutableStateOf<List<TopSupporterEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var cancelingID by remember { mutableStateOf<String?>(null) }
     var showCancelConfirm by remember { mutableStateOf<String?>(null) } // creatorID to cancel
+    var selectedTab by remember { mutableStateOf(SupporterTab.SUBSCRIPTIONS) }
 
     LaunchedEffect(userID) {
         try {
             subscriptions = service.fetchMySubscriptions(userID)
+            // If the user has no subs but presumably has supporters, default
+            // the view to Top Supporters so the screen isn't an empty state
+            // for creators who haven't subscribed to anyone.
+            if (subscriptions.isEmpty()) selectedTab = SupporterTab.TOP_SUPPORTERS
         } catch (e: Exception) {
             error = e.message
         } finally {
             isLoading = false
         }
+    }
+
+    // Fetch top supporters lazily (cheap — one read per profile entry).
+    LaunchedEffect(userID) {
+        try {
+            val db = FirebaseFirestore.getInstance("stitchfin")
+            val data = db.collection("users").document(userID).get().await().data ?: return@LaunchedEffect
+            val raw = data["topSupporters"] as? List<*> ?: return@LaunchedEffect
+            topSupporters = raw.mapNotNull { row ->
+                val map = row as? Map<*, *> ?: return@mapNotNull null
+                val id = map["tipperID"] as? String ?: return@mapNotNull null
+                val name = map["username"] as? String ?: return@mapNotNull null
+                if (id.isEmpty() || name.isEmpty()) null else TopSupporterEntry(id, name)
+            }
+        } catch (_: Exception) { /* best-effort */ }
     }
 
     Column(
@@ -89,10 +118,26 @@ fun MySubscriptionsView(
                 Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan)
             }
             Text(
-                "My Subscriptions", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                if (selectedTab == SupporterTab.SUBSCRIPTIONS) "Supporting" else "Top Supporters",
+                fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.size(48.dp))
+        }
+
+        // Tab picker
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SupporterTabPill(
+                label = "Supporting",
+                active = selectedTab == SupporterTab.SUBSCRIPTIONS
+            ) { selectedTab = SupporterTab.SUBSCRIPTIONS }
+            SupporterTabPill(
+                label = "Top Supporters",
+                active = selectedTab == SupporterTab.TOP_SUPPORTERS
+            ) { selectedTab = SupporterTab.TOP_SUPPORTERS }
         }
 
         when {
@@ -102,17 +147,38 @@ fun MySubscriptionsView(
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(error!!, color = Color.Red, textAlign = TextAlign.Center, modifier = Modifier.padding(24.dp))
             }
-            subscriptions.isEmpty() -> EmptySubscriptionsView()
-            else -> LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(subscriptions, key = { it.id }) { sub ->
-                    ActiveSubscriptionCard(
-                        subscription = sub,
-                        isCanceling = cancelingID == sub.creatorID,
-                        onCancelTap = { showCancelConfirm = sub.creatorID }
-                    )
+            else -> when (selectedTab) {
+                SupporterTab.SUBSCRIPTIONS -> {
+                    if (subscriptions.isEmpty()) {
+                        EmptySubscriptionsView()
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(subscriptions, key = { it.id }) { sub ->
+                                ActiveSubscriptionCard(
+                                    subscription = sub,
+                                    isCanceling = cancelingID == sub.creatorID,
+                                    onCancelTap = { showCancelConfirm = sub.creatorID }
+                                )
+                            }
+                        }
+                    }
+                }
+                SupporterTab.TOP_SUPPORTERS -> {
+                    if (topSupporters.isEmpty()) {
+                        EmptyTopSupportersView()
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            itemsIndexed(topSupporters) { idx, entry ->
+                                TopSupporterRow(rank = idx + 1, entry = entry)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -235,6 +301,84 @@ private fun EmptySubscriptionsView() {
             Text("No Active Subscriptions", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
             Text("Support your favourite creators with Hype Coins", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center)
         }
+    }
+}
+
+@Composable
+private fun EmptyTopSupportersView() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("💗", fontSize = 48.sp)
+            Text("No Top Supporters Yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Text("Tippers who back your videos will show up here.", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+        }
+    }
+}
+
+@Composable
+private fun SupporterTabPill(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (active) Color.White else Color.White.copy(alpha = 0.08f))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (active) Color.Black else Color.White.copy(alpha = 0.6f)
+        )
+    }
+}
+
+@Composable
+private fun TopSupporterRow(rank: Int, entry: TopSupporterEntry) {
+    val medalColor = when (rank) {
+        1 -> Color(0xFFFBBF24) // gold
+        2 -> Color(0xFFD4D4D8) // silver
+        3 -> Color(0xFFF97316) // bronze
+        else -> Color.White.copy(alpha = 0.3f)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(14.dp))
+            .border(1.dp, medalColor.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Rank badge
+        Box(
+            modifier = Modifier.size(28.dp).clip(CircleShape).background(medalColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "$rank",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (rank <= 3) Color.Black else Color.White.copy(alpha = 0.7f)
+            )
+        }
+        // Avatar (initial)
+        Box(
+            modifier = Modifier.size(40.dp).clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.5.dp, medalColor.copy(alpha = 0.4f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                entry.username.take(1).uppercase(),
+                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White
+            )
+        }
+        Text(
+            entry.username,
+            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            maxLines = 1
+        )
+        Spacer(Modifier.weight(1f))
     }
 }
 

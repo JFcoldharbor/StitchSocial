@@ -176,8 +176,13 @@ class CommunityService private constructor() {
     ): CommunityMembership {
         _isLoading.value = true
         try {
+            val isOwnCommunity = userID == creatorID
             val community = fetchCommunity(creatorID)
-            if (community == null || !community.isActive) throw CommunityError.CommunityNotFound
+            // Creator can enter their own community even if it's currently
+            // marked inactive — same as iOS exemption.
+            if (community == null || (!community.isActive && !isOwnCommunity)) {
+                throw CommunityError.CommunityNotFound
+            }
 
             val memberRef = db.collection(Col.COMMUNITIES).document(creatorID)
                 .collection(Col.MEMBERS).document(userID)
@@ -187,15 +192,24 @@ class CommunityService private constructor() {
                 if (!existing.isBanned) throw CommunityError.AlreadyMember
             }
 
-            // Developer bypass — skip subscription check (matches iOS)
-            if (!isDeveloper) {
+            // Subscription gate — creators always get to join their own
+            // community for free, and developers bypass.
+            if (!isDeveloper && !isOwnCommunity) {
                 // TODO: Verify active subscription via SubscriptionService.shared.checkSubscription
             }
 
             val membership = CommunityMembership(
                 id = userID, userID = userID, communityID = creatorID,
                 username = username, displayName = displayName
-            )
+            ).apply {
+                // Creator joining their own community gets owner + mod role
+                // and a high level — matches iOS createCommunity auto-join.
+                if (isOwnCommunity) {
+                    isOwner = true
+                    isModerator = true
+                    level = 1000
+                }
+            }
 
             // BATCHED WRITE: membership + memberCount
             val batch = db.batch()

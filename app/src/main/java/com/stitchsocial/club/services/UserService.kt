@@ -638,6 +638,12 @@ class UserService(private val context: Context) {
      * Check if user is following another user
      */
     suspend fun isFollowing(followerID: String, followeeID: String): Boolean {
+        // Firestore's document(_:) raises an IllegalArgumentException
+        // synchronously when the path is empty — that bypasses the Kotlin
+        // exception machinery in some contexts and crashes the app. Guard
+        // up front so a stray empty ID (e.g. dangling reference from a
+        // deleted seed user) just resolves to "not following".
+        if (followerID.isEmpty() || followeeID.isEmpty()) return false
         return try {
             val followDoc = db.collection("users")
                 .document(followerID)

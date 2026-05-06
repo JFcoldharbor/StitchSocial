@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.stitchsocial.club.firebase.FirebaseSchema
@@ -83,8 +84,35 @@ class HypeCoinCoordinator private constructor(context: Context) {
 
     private var balanceListener: ListenerRegistration? = null
     private var currentUserID: String?                 = null
+    private var authStateListener: FirebaseAuth.AuthStateListener? = null
 
-    init { setupLifecycleObserver() }
+    init {
+        setupLifecycleObserver()
+        setupAuthObserver()
+    }
+
+    // Reattach the balance listener whenever Firebase Auth swaps users.
+    // Without this, configure(userID:) holds the FIRST uid we ever saw —
+    // even after sign-out + sign-in as a different account. The Firestore
+    // listener then targets the wrong /coin_balances/{uid} doc and the
+    // rules reject it ("Missing or insufficient permissions").
+    private fun setupAuthObserver() {
+        val auth = FirebaseAuth.getInstance()
+        val listener = FirebaseAuth.AuthStateListener { fbAuth ->
+            val newUID = fbAuth.currentUser?.uid
+            if (newUID != null && newUID.isNotEmpty()) {
+                if (currentUserID != newUID) {
+                    disconnect()
+                    configure(newUID)
+                }
+            } else {
+                // Signed out — drop everything so a future sign-in starts clean.
+                disconnect()
+            }
+        }
+        auth.addAuthStateListener(listener)
+        authStateListener = listener
+    }
 
     fun configure(userID: String) {
         if (currentUserID == userID) return

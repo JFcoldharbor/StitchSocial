@@ -1638,7 +1638,7 @@ internal fun SwappableEngagementSlot(
                         videoID = video.id,
                         creatorID = video.creatorID,
                         currentUserID = currentUserID,
-                        tipCount = 0,
+                        coinTotal = 0,
                         isSelfTip = isSelfTip,
                         onAction = onAction
                     )
@@ -1663,8 +1663,10 @@ internal fun SwappableEngagementSlot(
 // MARK: - TIP BUTTON
 // Mirrors TipButton.swift: tap=1 coin, long press=5 coins
 // isSelfTip disabled with PersonOff icon
-// Optimistic sessionTotal over persisted tipCount
-// Writes: debit tipper coin_balances, credit creator pendingCoins, increment tipCount
+// Optimistic sessionTotal over persisted coinTotal (matches iOS field name)
+// Writes: debit tipper coin_balances, credit creator pendingCoins,
+//         increment videos.coinTotal, write tip notification, update
+//         creator's supporters subcollection + topSupporters array.
 // ============================================================================
 
 @androidx.compose.runtime.Composable
@@ -1672,7 +1674,7 @@ internal fun TipButton(
     videoID: String,
     creatorID: String,
     currentUserID: String,
-    tipCount: Int,
+    coinTotal: Int,
     isSelfTip: Boolean,
     onAction: ((OverlayAction) -> Unit)?
 ) {
@@ -1681,7 +1683,7 @@ internal fun TipButton(
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     var sessionTotal by androidx.compose.runtime.remember(videoID) { androidx.compose.runtime.mutableStateOf(0) }
-    val displayCount = tipCount + sessionTotal
+    val displayCount = coinTotal + sessionTotal
 
     var isPressed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showBurst by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -1699,8 +1701,22 @@ internal fun TipButton(
                 db.collection("coin_balances").document(creatorID)
                     .update("pendingCoins", FieldValue.increment(amount.toLong())).await()
                 db.collection("videos").document(videoID)
-                    .update("tipCount", FieldValue.increment(amount.toLong())).await()
+                    .update(
+                        "coinTotal", FieldValue.increment(amount.toLong()),
+                        "lastTippedAt", com.google.firebase.Timestamp(java.util.Date())
+                    ).await()
                 println("💰 TIP: $currentUserID → $creatorID +$amount on $videoID")
+
+                // Side-effects — notification + creator's supporters list +
+                // topSupporters array. Run sequentially after the core
+                // transfer so a side-effect failure doesn't roll back the tip.
+                recordTipSideEffects(
+                    db = db,
+                    tipperID = currentUserID,
+                    creatorID = creatorID,
+                    videoID = videoID,
+                    amount = amount
+                )
             } catch (e: Exception) {
                 sessionTotal -= amount
                 errorMsg = "Tip failed"
@@ -1791,5 +1807,128 @@ internal fun TipButton(
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             )
         }
+    }
+}
+
+// ============================================================================
+// MARK: - Tip side-effects (mirrors iOS TipService.recordTipAggregates +
+// sendTipNotification). Run after the tip transfer succeeds.
+//
+// Schema:
+//   notifications/{id}                                           — drives FCM
+//   users/{creatorID}/supporters/{tipperID}                      — per-tipper aggregate
+//   users/{creatorID}.topSupporters: [{tipperID, username, totalSent}]
+//                                                                 — denormalized top 10
+// ============================================================================
+
+private suspend fun recordTipSideEffects(
+    db: FirebaseFirestore,
+    tipperID: String,
+    creatorID: String,
+    videoID: String,
+    amount: Int
+) {
+    if (tipperID.isEmpty() || creatorID.isEmpty()) return
+
+    // Resolve tipper's display name with the same fallback chain iOS uses:
+    // displayName → username → "Someone". Notification copy reads better
+    // than a raw uid prefix.
+    val tipperUsername = resolveDisplayName(db, tipperID)
+
+    // 1) In-app notification — onNotificationCreated CF will fan out FCM.
+    //    Cooldown handled by checking tipper→creator pair within 60s.
+    try {
+        val cooldownKey = "tip_${tipperID}_${creatorID}"
+        val cooldownDoc = db.collection("notification_cooldowns").document(cooldownKey).get().await()
+        val lastTs = cooldownDoc.getTimestamp("lastNotificationAt")?.toDate()?.time ?: 0L
+        val now = System.currentTimeMillis()
+        val withinCooldown = lastTs > 0 && (now - lastTs) < 60_000L
+        if (!withinCooldown) {
+            val amountText = if (amount == 1) "1 coin" else "$amount coins"
+            val notificationID = java.util.UUID.randomUUID().toString()
+            val notification = mapOf(
+                "id" to notificationID,
+                "recipientID" to creatorID,
+                "senderID" to tipperID,
+                "type" to "tip",
+                "title" to "💰 You got tipped!",
+                "message" to "$tipperUsername tipped you $amountText",
+                "payload" to mapOf(
+                    "senderUsername" to tipperUsername,
+                    "senderID" to tipperID,
+                    "amount" to amount,
+                    "videoID" to videoID,
+                    "notificationType" to "tip"
+                ),
+                "isRead" to false,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "expiresAt" to com.google.firebase.Timestamp(
+                    java.util.Date(now + 30L * 24 * 60 * 60 * 1000)
+                )
+            )
+            db.collection("notifications").document(notificationID).set(notification).await()
+            db.collection("notification_cooldowns").document(cooldownKey)
+                .set(mapOf("lastNotificationAt" to com.google.firebase.Timestamp(java.util.Date())))
+                .await()
+            println("✅ TIP NOTIF: $amountText tip notification written for $creatorID")
+        } else {
+            println("⏱ TIP NOTIF: Cooldown active ($tipperID → $creatorID)")
+        }
+    } catch (e: Exception) {
+        println("⚠️ TIP NOTIF: write failed — ${e.message}")
+    }
+
+    // 2) Per-tipper supporter row under the creator (atomic increment so
+    //    repeat tips just bump totalSent).
+    try {
+        db.collection("users").document(creatorID)
+            .collection("supporters").document(tipperID)
+            .set(
+                mapOf(
+                    "tipperID" to tipperID,
+                    "username" to tipperUsername,
+                    "totalSent" to FieldValue.increment(amount.toLong()),
+                    "lastSentAt" to com.google.firebase.Timestamp(java.util.Date())
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            )
+            .await()
+    } catch (e: Exception) {
+        println("⚠️ TIP AGG: supporter row update failed for $creatorID/$tipperID — ${e.message}")
+        return
+    }
+
+    // 3) Refresh creator's top-10 array. Read subcollection ordered desc,
+    //    project to {tipperID, username, totalSent}, write to user doc.
+    try {
+        val snapshot = db.collection("users").document(creatorID)
+            .collection("supporters")
+            .orderBy("totalSent", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(10)
+            .get()
+            .await()
+        val top: List<Map<String, Any>> = snapshot.documents.map { doc ->
+            val data = doc.data ?: emptyMap()
+            mapOf(
+                "tipperID" to (data["tipperID"] as? String ?: doc.id),
+                "username" to (data["username"] as? String ?: "user"),
+                "totalSent" to ((data["totalSent"] as? Number)?.toInt() ?: 0)
+            )
+        }
+        db.collection("users").document(creatorID).update("topSupporters", top).await()
+    } catch (e: Exception) {
+        println("⚠️ TIP AGG: topSupporters refresh failed for $creatorID — ${e.message}")
+    }
+}
+
+private suspend fun resolveDisplayName(db: FirebaseFirestore, userID: String): String {
+    if (userID.isEmpty()) return "Someone"
+    return try {
+        val data = db.collection("users").document(userID).get().await().data ?: return "Someone"
+        val displayName = (data["displayName"] as? String)?.takeIf { it.isNotEmpty() }
+        val username    = (data["username"]    as? String)?.takeIf { it.isNotEmpty() }
+        displayName ?: username ?: "Someone"
+    } catch (_: Exception) {
+        "Someone"
     }
 }
