@@ -62,8 +62,28 @@ class FollowManager(private val context: Context) : ViewModel() {
     /** Callback for when follow operation fails */
     var onFollowError: ((String, Exception) -> Unit)? = null
 
+    private var observedUID: String? = auth.currentUser?.uid
+    private val authStateListener = FirebaseAuth.AuthStateListener { fb ->
+        // Clear cached follow state on auth swap (linked-account toggle)
+        // so the new account doesn't see the previous user's follow pills.
+        val newUID = fb.currentUser?.uid
+        if (newUID != observedUID) {
+            observedUID = newUID
+            _followingStates.value = emptyMap()
+            _loadingStates.value = emptySet()
+            _lastError.value = null
+            println("🔗 FOLLOW MANAGER: cache reset on auth swap → ${newUID ?: "nil"}")
+        }
+    }
+
     init {
         println("🔗 FOLLOW MANAGER: Initialized with auto-follow protection")
+        auth.addAuthStateListener(authStateListener)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        auth.removeAuthStateListener(authStateListener)
     }
 
     // MARK: - Public Interface

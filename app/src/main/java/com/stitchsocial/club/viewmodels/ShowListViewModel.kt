@@ -135,7 +135,7 @@ class ShowEditorViewModel : ViewModel() {
         val config = _scheduleConfig.value
         viewModelScope.launch {
             try {
-                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
                 db.collection("shows").document(showId).set(
                     config.toFirestore() + mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()),
                     com.google.firebase.firestore.SetOptions.merge()

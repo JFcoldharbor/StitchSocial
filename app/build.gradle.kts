@@ -107,6 +107,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
+    // EncryptedSharedPreferences — used by LinkedAccountManager to store
+    // email/password for linked accounts so the toggle doesn't re-prompt.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)

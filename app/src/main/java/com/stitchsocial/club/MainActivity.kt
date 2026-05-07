@@ -108,6 +108,10 @@ class MainActivity : ComponentActivity() {
         // ✅ NEW: Create notification channel EARLY (before any push can arrive)
         FCMService.ensureChannelExists(this)
 
+        // Bootstrap LinkedAccountManager so AuthService can use the
+        // static `shared` accessor when seeding linked accounts on signIn.
+        com.stitchsocial.club.services.LinkedAccountManager.getInstance(this)
+
         // ✅ NEW: Request notification permission (Android 13+)
         requestNotificationPermission()
 

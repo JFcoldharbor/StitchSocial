@@ -92,6 +92,32 @@ class AuthService {
                     }
                 }
 
+                // Seed LinkedAccountManager with this account if not yet
+                // linked. Existing users get their current account into
+                // the multi-account list automatically on next sign-in.
+                LinkedAccountManager.shared?.let { manager ->
+                    serviceScope.launch {
+                        try {
+                            val doc = db.collection("users").document(user.uid).get().await()
+                            val data = doc.data ?: emptyMap()
+                            val typeRaw = data["accountType"] as? String
+                            val displayName = (data["displayName"] as? String) ?: (user.email ?: "")
+                            val profileImageURL = data["profileImageURL"] as? String
+                            val acctType = if (typeRaw == "business") AccountType.BUSINESS else AccountType.PERSONAL
+                            manager.seedActiveIfMissing(
+                                uid = user.uid,
+                                email = email,
+                                password = password,
+                                accountType = acctType,
+                                displayName = displayName,
+                                profileImageURL = profileImageURL
+                            )
+                        } catch (e: Exception) {
+                            println("AUTH SERVICE: ⚠️ LinkedAccount seed failed (non-critical): ${e.message}")
+                        }
+                    }
+                }
+
                 AuthResult(success = true, userId = user.uid, email = user.email ?: "", isNewUser = false)
 
             } catch (e: Exception) {

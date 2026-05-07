@@ -19,6 +19,7 @@
 package com.stitchsocial.club.services
 
 import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.foundation.*
@@ -40,6 +41,25 @@ class SubscriptionService private constructor() {
     // rather than maintain a configured singleton. Used by subscribe() to
     // fire the new-subscriber notification.
     private val notificationService by lazy { NotificationService() }
+
+    init {
+        // Wipe per-user caches when Firebase Auth swaps users (linked-
+        // account toggle / sign-out). Without this, toggling between a
+        // personal and business account would surface the previous
+        // account's subscription list and isSubscribed cache.
+        var observed: String? = FirebaseAuth.getInstance().currentUser?.uid
+        FirebaseAuth.getInstance().addAuthStateListener { fb ->
+            val newUID = fb.currentUser?.uid
+            if (newUID != observed) {
+                observed = newUID
+                clearCache()
+                _mySubscriptions.value = emptyList()
+                _mySubscribers.value = emptyList()
+                _creatorPlan.value = null
+                println("⭐ SUB SERVICE: cache reset on auth swap → ${newUID ?: "nil"}")
+            }
+        }
+    }
 
     private object Collections {
         const val PLANS         = "creator_subscription_plans"

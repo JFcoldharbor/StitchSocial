@@ -113,7 +113,7 @@ class HypeRatingService private constructor() {
     val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
 
     private var state = HypeRatingStateData()
-    private val db = FirebaseFirestore.getInstance()
+    private val db = FirebaseFirestore.getInstance("stitchfin")
     private val maxRating = 100.0
     private val minRating = 0.0
     private var saveJob: Job? = null

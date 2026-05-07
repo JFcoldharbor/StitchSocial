@@ -32,7 +32,7 @@ class SocialSignalService private constructor() {
         val shared = SocialSignalService()
     }
 
-    private val db = FirebaseFirestore.getInstance()
+    private val db = FirebaseFirestore.getInstance("stitchfin")
     private val functions = FirebaseFunctions.getInstance()
 
     private val _activeSignals = MutableStateFlow<List<SocialSignal>>(emptyList())

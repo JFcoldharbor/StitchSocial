@@ -87,15 +87,32 @@ fun SettingsView(
     val coinBalanceObj by coinCoordinator.balance.collectAsState()
     val coinBalance = coinBalanceObj?.availableCoins ?: 0
 
-    val isBusiness = currentUser.isBusiness ?: false
+    // Self-healing user state: starts from the prop, but re-fetches from
+    // Firestore whenever Firebase Auth's active uid changes (e.g. after a
+    // linked-account toggle). Without this, switching personal ↔ business
+    // would leave Settings rendering the previous account's profile until
+    // the parent ProfileView gets re-mounted.
+    val activeUID by com.stitchsocial.club.services.LinkedAccountManager.getInstance(context).activeUID.collectAsState()
+    var liveUser by remember(currentUser.id) { mutableStateOf(currentUser) }
+    val userService = remember { com.stitchsocial.club.services.UserService(context) }
+    LaunchedEffect(activeUID) {
+        val uid = activeUID ?: return@LaunchedEffect
+        if (uid != liveUser.id) {
+            try {
+                userService.getUserProfile(uid)?.let { liveUser = it }
+            } catch (_: Exception) { /* keep last value on error */ }
+        }
+    }
+
+    val isBusiness = liveUser.isBusiness ?: false
     // Matches iOS: AdRevenueShare.canAccessAds(tier:)
-    val isCreator = !isBusiness && AdRevenueShare.canAccessAds(currentUser.tier)
+    val isCreator = !isBusiness && AdRevenueShare.canAccessAds(liveUser.tier)
 
     // Dynamic revenue shares — matches iOS computed vars
-    val subRevenuePercent = (SubscriptionRevenueShare.creatorShare(currentUser.tier) * 100).toInt()
-    val adRevenuePercent  = (AdRevenueShare.creatorShare(currentUser.tier) * 100).toInt()
+    val subRevenuePercent = (SubscriptionRevenueShare.creatorShare(liveUser.tier) * 100).toInt()
+    val adRevenuePercent  = (AdRevenueShare.creatorShare(liveUser.tier) * 100).toInt()
 
-    LaunchedEffect(currentUser.id) { coinCoordinator.configure(currentUser.id) }
+    LaunchedEffect(liveUser.id) { coinCoordinator.configure(liveUser.id) }
 
     var hapticEnabled by remember { mutableStateOf(prefs.getBoolean("hapticFeedbackEnabled", true)) }
     var notificationsEnabled by remember { mutableStateOf(prefs.getBoolean("notificationsEnabled", true)) }
@@ -118,6 +135,7 @@ fun SettingsView(
     var showFriendSuggestions by remember { mutableStateOf(false) }
     var showBusinessAnalytics by remember { mutableStateOf(false) }
     var showBusinessCampaigns by remember { mutableStateOf(false) }
+    var showAccountSwitcher by remember { mutableStateOf(false) }
 
     val appVersion = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0" }
@@ -158,7 +176,7 @@ fun SettingsView(
             ) {
 
                 // ── Profile Header ────────────────────────────────
-                item { ProfileHeaderCard(currentUser) }
+                item { ProfileHeaderCard(liveUser) }
 
                 // ── Wallet ────────────────────────────────────────
                 item {
@@ -290,6 +308,20 @@ fun SettingsView(
                     }
                 }
 
+                // ── Linked Accounts ───────────────────────────────
+                item {
+                    SSection("ACCOUNTS", Icons.Default.SupervisorAccount, Color.Cyan) {
+                        // One-tap toggle row when both accounts are linked.
+                        QuickAccountToggleRow()
+                        SNavRow(
+                            Icons.Default.SwapHoriz,
+                            Color.Cyan,
+                            "Manage linked accounts",
+                            "Add or remove personal/business"
+                        ) { showAccountSwitcher = true }
+                    }
+                }
+
                 // ── Sign Out ──────────────────────────────────────
                 item {
                     Button(
@@ -317,10 +349,16 @@ fun SettingsView(
         if (showWallet) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
                 WalletView(
-                    userID = currentUser.id,
-                    userTier = currentUser.tier,
+                    userID = liveUser.id,
+                    userTier = liveUser.tier,
                     onDismiss = { showWallet = false }
                 )
+            }
+        }
+
+        if (showAccountSwitcher) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                AccountSwitcherView(onDismiss = { showAccountSwitcher = false })
             }
         }
 
@@ -341,8 +379,8 @@ fun SettingsView(
         if (showSubscriptionSettings) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
                 CreatorSubscriptionSettingsView(
-                    creatorID = currentUser.id,
-                    creatorTier = currentUser.tier,
+                    creatorID = liveUser.id,
+                    creatorTier = liveUser.tier,
                     onDismiss = { showSubscriptionSettings = false }
                 )
             }
@@ -351,7 +389,7 @@ fun SettingsView(
         if (showMySubscriptions) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
                 MySubscriptionsView(
-                    userID = currentUser.id,
+                    userID = liveUser.id,
                     onDismiss = { showMySubscriptions = false }
                 )
             }
