@@ -441,6 +441,49 @@ fun MainScreen() {
     var isLoadingUser by remember { mutableStateOf(true) }
     var userError by remember { mutableStateOf<String?>(null) }
 
+    // ── Age gate (app-launch level) ──────────────────────────────────
+    // Existing users who never open their profile would never hit the
+    // ProfileView-level prompt — gate it here at the root so every signed-in
+    // session goes through it once.  Resolved values:
+    //   "checking"  — read in flight, show splash
+    //   "prompt"    — birthdate missing, show BirthdayPromptView
+    //   "blocked"   — under-13, show Under13BlockedView
+    //   "teen"      — show TeenLockedView until the teen lane is built
+    //   "ok"        — adult, render the main app
+    var ageGateState by remember { mutableStateOf("checking") }
+    LaunchedEffect(currentUser?.id) {
+        val uid = currentUser?.id ?: run { ageGateState = "checking"; return@LaunchedEffect }
+        try {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+            val snap = db.collection("users").document(uid).get().await()
+            @Suppress("UNCHECKED_CAST")
+            val privacy = snap.get("privacySettings") as? Map<String, Any>
+            val ageGroupRaw = privacy?.get("ageGroup") as? String
+            if (ageGroupRaw == "blocked") {
+                ageGateState = "blocked"
+            } else {
+                val dob = (privacy?.get("birthdate") as? com.google.firebase.Timestamp)?.toDate()
+                if (dob == null) {
+                    ageGateState = "prompt"
+                } else {
+                    val cal = java.util.Calendar.getInstance().apply { time = dob }
+                    val now = java.util.Calendar.getInstance()
+                    var age = now.get(java.util.Calendar.YEAR) - cal.get(java.util.Calendar.YEAR)
+                    if (now.get(java.util.Calendar.DAY_OF_YEAR) < cal.get(java.util.Calendar.DAY_OF_YEAR)) age--
+                    ageGateState = when {
+                        age < 13 -> "blocked"
+                        age < 18 -> "teen"
+                        else     -> "ok"
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Network / read failure — fall through to "ok" so users aren't
+            // hard-blocked by a transient error.  Next launch retries.
+            ageGateState = "ok"
+        }
+    }
+
     // ✅ NEW: Announcement state
     val isShowingAnnouncement by announcementService.isShowingAnnouncement.collectAsState()
     val currentAnnouncement by announcementService.currentAnnouncement.collectAsState()
@@ -548,6 +591,38 @@ fun MainScreen() {
                     isLoadingUser = false
                 }
             })
+            // Age gate — applies to every signed-in session, not just profile open.
+            // Render the gate in front of the main app whenever the gate isn't "ok".
+            currentUser != null && ageGateState == "checking" -> LoadingScreen()
+            currentUser != null && ageGateState == "blocked" -> {
+                com.stitchsocial.club.views.Under13BlockedView(onAcknowledged = {
+                    // Already signed-out by the prompt; just clear local state.
+                    currentUser = null
+                    ageGateState = "checking"
+                })
+            }
+            currentUser != null && ageGateState == "teen" -> {
+                com.stitchsocial.club.views.TeenLockedView(
+                    displayName = currentUser?.displayName ?: "there",
+                    onSignedOut = {
+                        currentUser = null
+                        ageGateState = "checking"
+                    }
+                )
+            }
+            currentUser != null && ageGateState == "prompt" -> {
+                val uid = currentUser!!.id
+                com.stitchsocial.club.views.BirthdayPromptView(
+                    userID = uid,
+                    onCompleted = { outcome ->
+                        ageGateState = when (outcome) {
+                            is com.stitchsocial.club.views.AgeGateOutcome.Adult           -> "ok"
+                            is com.stitchsocial.club.views.AgeGateOutcome.Teen            -> "teen"
+                            is com.stitchsocial.club.views.AgeGateOutcome.Under13Blocked  -> "blocked"
+                        }
+                    }
+                )
+            }
             currentUser != null -> {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Tab content with explicit lower z-index
