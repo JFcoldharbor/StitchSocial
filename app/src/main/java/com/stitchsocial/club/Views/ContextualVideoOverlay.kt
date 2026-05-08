@@ -158,7 +158,8 @@ enum class OverlayContext {
     PROFILE_OWN,
     PROFILE_OTHER,
     THREAD_VIEW,
-    CAROUSEL  // Minimal overlay for CardVideoCarouselView
+    CAROUSEL,    // Minimal overlay for CardVideoCarouselView
+    COLLECTION   // Show/episode segment playback — stitch button becomes Reply
 }
 
 enum class EngagementType {
@@ -405,16 +406,31 @@ fun ContextualVideoOverlay(
         // Allow replies at all depths (removed depth > 1 restriction)
         if (isUserVideo) {
             when (overlayContext) {
-                OverlayContext.PROFILE_OWN, OverlayContext.HOME_FEED, OverlayContext.THREAD_VIEW, OverlayContext.CAROUSEL -> true
+                OverlayContext.PROFILE_OWN, OverlayContext.HOME_FEED, OverlayContext.THREAD_VIEW, OverlayContext.CAROUSEL, OverlayContext.COLLECTION -> true
                 else -> false
             }
         } else true
     }
 
-    // Stitch button properties
-    val stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector = if (isUserVideo) Icons.Default.AddCircle else Icons.Default.ContentCut
-    val stitchButtonLabel: String = if (isUserVideo) "Continue" else "Stitch"
-    val stitchButtonRingColor: Color = if (isUserVideo) Color.Green else Color(0xFF9C27B0)
+    // Collection segments only allow replies — no stitching or spinoffs (iOS parity)
+    val isStitchBlocked: Boolean = overlayContext == OverlayContext.COLLECTION
+
+    // Stitch button properties — flips to Reply when stitch is blocked
+    val stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector = when {
+        isStitchBlocked -> Icons.Default.Reply
+        isUserVideo -> Icons.Default.AddCircle
+        else -> Icons.Default.ContentCut
+    }
+    val stitchButtonLabel: String = when {
+        isStitchBlocked -> "Reply"
+        isUserVideo -> "Continue"
+        else -> "Stitch"
+    }
+    val stitchButtonRingColor: Color = when {
+        isStitchBlocked -> Color.Cyan
+        isUserVideo -> Color.Green
+        else -> Color(0xFF9C27B0)
+    }
 
     // Swappable hype/tip slot state (mirrors iOS SwappableEngagementButton)
     var slotMode by remember { mutableStateOf(SwappableSlotMode.HYPE) }
@@ -610,6 +626,7 @@ fun ContextualVideoOverlay(
                 isFollowing = isFollowing,
                 isFollowLoading = isFollowLoading,
                 canReply = canReply,
+                isStitchBlocked = isStitchBlocked,
                 stitchButtonIcon = stitchButtonIcon,
                 stitchButtonLabel = stitchButtonLabel,
                 stitchButtonRingColor = stitchButtonRingColor,
@@ -858,6 +875,7 @@ private fun FullContextualOverlay(
     isFollowing: Boolean,
     isFollowLoading: Boolean,
     canReply: Boolean,
+    isStitchBlocked: Boolean,
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
@@ -906,6 +924,7 @@ private fun FullContextualOverlay(
             isFollowing = isFollowing,
             isFollowLoading = isFollowLoading,
             canReply = canReply,
+            isStitchBlocked = isStitchBlocked,
             stitchButtonIcon = stitchButtonIcon,
             stitchButtonLabel = stitchButtonLabel,
             stitchButtonRingColor = stitchButtonRingColor,
@@ -1004,6 +1023,7 @@ private fun BottomSection(
     isFollowing: Boolean,
     isFollowLoading: Boolean,
     canReply: Boolean,
+    isStitchBlocked: Boolean,
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
@@ -1179,7 +1199,10 @@ private fun BottomSection(
                     onAction = onAction
                 )
 
-                // Stitch Button (conditional)
+                // Stitch Button (conditional). For COLLECTION context the button
+                // *looks* like Reply (cyan, reply-arrow icon) but still emits
+                // StitchRecording — the caller turns that into the recording flow
+                // with the segment as parent.
                 if (canReply) {
                     OverlayActionButton(
                         icon = stitchButtonIcon,

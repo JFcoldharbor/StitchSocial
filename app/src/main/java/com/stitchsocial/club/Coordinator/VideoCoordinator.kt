@@ -655,32 +655,61 @@ class VideoCoordinator(
     // MARK: - Thumbnail Generation (matches iOS VideoUploadService)
 
     /**
-     * Generate thumbnail from video file using MediaMetadataRetriever
-     * Equivalent to iOS AVAssetImageGenerator.copyCGImage(at: 0.5s)
+     * Generate thumbnail from video file using MediaMetadataRetriever.
+     *
+     * Samples 3 candidate frames (1.0s, 25%, 50%) and picks the brightest.
+     * Avoids the black-poster problem when the camera hasn't finished
+     * autoexposing in the first ~0.5s of recording. Mirrors iOS
+     * VideoUploadService.generateThumbnail.
      */
     private suspend fun generateThumbnail(videoPath: String): ByteArray? = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(videoPath)
 
-            // Extract frame at 0.5 seconds (matches iOS: CMTime(seconds: 0.5))
-            val bitmap = retriever.getFrameAtTime(
-                500_000, // 0.5 seconds in microseconds
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            ) ?: return@withContext null
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            val durationUs = durationMs * 1000L
 
-            // Scale down if needed (target max 1080x1920 like iOS)
-            val scaledBitmap = scaleBitmap(bitmap, 1080, 1920)
+            // Build candidate sample points in microseconds.
+            val candidates = mutableListOf<Long>()
+            if (durationUs > 0) {
+                val oneSecond = 1_000_000L
+                val quarter = durationUs / 4
+                val mid = durationUs / 2
+                candidates.add(if (durationUs > oneSecond * 2) oneSecond else mid)
+                if (quarter !in candidates && quarter > 0) candidates.add(quarter)
+                if (mid !in candidates && mid > 0) candidates.add(mid)
+            } else {
+                // Unknown duration — fall back to a single 1.0s sample.
+                candidates.add(1_000_000L)
+            }
 
-            // Compress to JPEG (quality 90 matches iOS compressionQuality: 0.9)
+            var bestBitmap: Bitmap? = null
+            var bestBrightness = -1.0
+            for (sampleUs in candidates) {
+                val frame = retriever.getFrameAtTime(sampleUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: continue
+                val brightness = averageLuminance(frame)
+                if (brightness > bestBrightness) {
+                    bestBitmap?.recycle()
+                    bestBitmap = frame
+                    bestBrightness = brightness
+                } else {
+                    frame.recycle()
+                }
+            }
+
+            val chosen = bestBitmap ?: return@withContext null
+            val scaledBitmap = scaleBitmap(chosen, 1080, 1920)
             val outputStream = ByteArrayOutputStream()
             scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
 
-            if (scaledBitmap != bitmap) scaledBitmap.recycle()
-            bitmap.recycle()
+            if (scaledBitmap != chosen) scaledBitmap.recycle()
+            chosen.recycle()
 
             val data = outputStream.toByteArray()
-            println("THUMBNAIL: Generated ${data.size} bytes from $videoPath")
+            println("THUMBNAIL: Generated ${data.size} bytes from $videoPath (brightness=${"%.1f".format(bestBrightness)})")
             data
 
         } catch (e: Exception) {
@@ -689,6 +718,27 @@ class VideoCoordinator(
         } finally {
             retriever.release()
         }
+    }
+
+    /**
+     * Cheap average-luminance estimate (0..255). Downsamples to 16×16 and
+     * averages luma per pixel. Used to skip black/near-black frames.
+     */
+    private fun averageLuminance(bitmap: Bitmap): Double {
+        val w = 16
+        val h = 16
+        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, /* filter = */ false)
+        val pixels = IntArray(w * h)
+        scaled.getPixels(pixels, 0, w, 0, 0, w, h)
+        if (scaled != bitmap) scaled.recycle()
+        var sum = 0L
+        for (px in pixels) {
+            val r = (px shr 16) and 0xFF
+            val g = (px shr 8) and 0xFF
+            val b = px and 0xFF
+            sum += r * 76L + g * 150L + b * 29L
+        }
+        return sum.toDouble() / (pixels.size.toDouble() * 255.0)
     }
 
     /**
@@ -772,6 +822,25 @@ class VideoCoordinator(
         val currentUser = auth.currentUser
         val creatorID = currentUser?.uid ?: "anonymous"
 
+        // Fetch the canonical creator name from users/{uid}.  Firebase Auth's
+        // displayName is rarely set (most users sign up with email and never
+        // touch updateProfile), so falling back to it prints "Anonymous" on
+        // every video.  Match iOS VideoService:148-163 — read the user doc
+        // and use `username` (the @-handle) for `creatorName`.
+        var creatorUsername: String? = null
+        var creatorDisplayName: String? = null
+        try {
+            val userDoc = db.collection("users").document(creatorID).get().await()
+            creatorUsername   = userDoc.getString("username")
+            creatorDisplayName = userDoc.getString("displayName")
+        } catch (e: Exception) {
+            println("⚠️ DATABASE: Could not load user doc for $creatorID: ${e.message}")
+        }
+        val resolvedCreatorName = creatorUsername
+            ?: creatorDisplayName
+            ?: currentUser?.displayName
+            ?: "unknown_user"
+
         // ✅ CRITICAL: For new threads, threadID should equal the video ID
         // This will be set after document creation
         var finalThreadID = metadata.threadID
@@ -782,7 +851,12 @@ class VideoCoordinator(
             "videoURL" to metadata.videoURL,
             "thumbnailURL" to metadata.thumbnailURL,
             "creatorID" to creatorID,
-            "creatorName" to (currentUser?.displayName ?: "Anonymous"),
+            "creatorName" to resolvedCreatorName,
+            // Extra denormalized fields for moderation/audit. iOS only writes
+            // creatorName, but having both makes it easier to identify users
+            // in the database (you mentioned this was a pain point).
+            "creatorUsername" to (creatorUsername ?: ""),
+            "creatorDisplayName" to (creatorDisplayName ?: resolvedCreatorName),
             "hashtags" to hashtags,
             "taggedUserIDs" to taggedUserIDs, // NEW: Include tagged user IDs
             "createdAt" to now,

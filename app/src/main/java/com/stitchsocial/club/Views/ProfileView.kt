@@ -324,6 +324,7 @@ fun ProfileView(
     var selectedTab by remember { mutableStateOf(0) }
     var showingEditProfile by remember { mutableStateOf(false) }
     var showingSettings by remember { mutableStateOf(false) }
+    var showingBadgePage by remember { mutableStateOf(false) }
 
     // Video player state
     var showingVideoPlayer by remember { mutableStateOf(false) }
@@ -337,6 +338,12 @@ fun ProfileView(
 
     // Stitchers sheet state
     var showStitchersSheet by remember { mutableStateOf(false) }
+
+    // Age gate state — own profile only
+    var showingBirthdayPrompt by remember { mutableStateOf(false) }
+    var showingUnder13Block by remember { mutableStateOf(false) }
+    var teenLocked by remember { mutableStateOf(false) }
+    var ageGateChecked by remember { mutableStateOf(false) }
 
     // Collections state
     var userCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
@@ -353,7 +360,8 @@ fun ProfileView(
     val filteredVideos = remember(userVideos, pinnedVideos, selectedTab) {
         val pinnedIDs = pinnedVideos.map { it.id }.toSet()
         when (selectedTab) {
-            0 -> userVideos.filter { it.conversationDepth == 0 && !pinnedIDs.contains(it.id) }
+            // Videos tab — pinned videos lead, then unpinned parents (iOS parity)
+            0 -> pinnedVideos + userVideos.filter { it.conversationDepth == 0 && !pinnedIDs.contains(it.id) }
             1 -> userVideos.filter { it.conversationDepth == 1 }
             2 -> userVideos.filter { it.conversationDepth >= 2 }
             else -> userVideos
@@ -416,11 +424,50 @@ fun ProfileView(
         }
     }
 
+    val isOwnProfileForAgeGate = (userID == currentAuthUserID)
+
     LaunchedEffect(userID) {
         // Launch all in parallel — collections no longer blocked by user/video load
         launch { loadUser() }
         launch { loadVideos() }
         launch { loadPinnedVideos() }
+
+        // Age gate — own profile only.  Reads users/{id}.privacySettings.birthdate.
+        // Server-side custom claim (audienceLane) is set by onUserBirthdateSet
+        // Cloud Function — this client check is for UX only.
+        if (isOwnProfileForAgeGate && !ageGateChecked) {
+            launch {
+                try {
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+                    val snap = db.collection("users").document(userID).get().await()
+                    @Suppress("UNCHECKED_CAST")
+                    val privacy = snap.get("privacySettings") as? Map<String, Any>
+                    val ageGroupRaw = privacy?.get("ageGroup") as? String
+                    if (ageGroupRaw == "blocked") {
+                        showingUnder13Block = true
+                    } else {
+                        val dob = (privacy?.get("birthdate") as? com.google.firebase.Timestamp)?.toDate()
+                        if (dob == null) {
+                            showingBirthdayPrompt = true
+                        } else {
+                            val age = java.util.Calendar.getInstance().let { now ->
+                                val cal = java.util.Calendar.getInstance().apply { time = dob }
+                                var a = now.get(java.util.Calendar.YEAR) - cal.get(java.util.Calendar.YEAR)
+                                if (now.get(java.util.Calendar.DAY_OF_YEAR) < cal.get(java.util.Calendar.DAY_OF_YEAR)) a--
+                                a.coerceAtLeast(0)
+                            }
+                            when {
+                                age < 13 -> showingUnder13Block = true
+                                age < 18 -> teenLocked = true
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    println("PROFILE: ageGate read failed — ${e.message}")
+                }
+                ageGateChecked = true
+            }
+        }
         launch {
             try {
                 val showService = ShowService.shared
@@ -503,7 +550,8 @@ fun ProfileView(
                             onFollowersClick = { showStitchersSheet = true },
                             isFollowing = isFollowing,
                             isFollowLoading = isFollowLoading,
-                            onFollowToggle = { followManager.toggleFollow(userID) }
+                            onFollowToggle = { followManager.toggleFollow(userID) },
+                            onShowBadgePage = { showingBadgePage = true }
                         )
                     }
 
@@ -536,27 +584,13 @@ fun ProfileView(
                         )
                     }
 
-                    // Pinned videos section
-                    if (pinnedVideos.isNotEmpty()) {
-                        item {
-                            PinnedVideosSection(
-                                pinnedVideos = pinnedVideos,
-                                onVideoTap = { video ->
-                                    selectedVideo = video
-                                    selectedVideoIndex = 0
-                                    currentVideoList = listOf(video)
-                                    showingVideoPlayer = true
-                                }
-                            )
-                        }
-                    }
-
-                    // Tab bar with icons
+                    // Tab bar with icons — pinned now live inside the grid (iOS parity)
                     item {
+                        val pinnedIDs = pinnedVideos.map { it.id }.toSet()
                         ProfileTabBar(
                             selectedTab = selectedTab,
                             tabCounts = listOf(
-                                userVideos.count { it.conversationDepth == 0 && !pinnedVideos.map { p -> p.id }.contains(it.id) },
+                                pinnedVideos.size + userVideos.count { it.conversationDepth == 0 && !pinnedIDs.contains(it.id) },
                                 userVideos.count { it.conversationDepth == 1 },
                                 userVideos.count { it.conversationDepth >= 2 }
                             ),
@@ -575,6 +609,7 @@ fun ProfileView(
                             tabTitles = profileTabs.map { it.title },
                             isLoading = isLoadingVideos,
                             isCurrentUserProfile = isOwn,
+                            pinnedVideoIDs = pinnedVideos.map { it.id }.toSet(),
                             onVideoTap = { basicVideo, index, _ ->
                                 val coreVideo = filteredVideos.find { it.id == basicVideo.id }
                                 if (coreVideo != null) {
@@ -650,6 +685,36 @@ fun ProfileView(
             }
         }
 
+        // ── Age gate overlays (own profile only) ──────────
+        // Order matters: under-13 block wins over teen-locked, which wins
+        // over the prompt. The prompt only shows when DOB is missing.
+        if (isOwnProfileForAgeGate) {
+            if (showingUnder13Block) {
+                Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
+                    Under13BlockedView(onAcknowledged = { showingUnder13Block = false })
+                }
+            } else if (teenLocked) {
+                val name = currentUser?.displayName ?: "there"
+                Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
+                    TeenLockedView(displayName = name, onSignedOut = { teenLocked = false })
+                }
+            } else if (showingBirthdayPrompt) {
+                Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
+                    BirthdayPromptView(
+                        userID = userID,
+                        onCompleted = { outcome ->
+                            showingBirthdayPrompt = false
+                            when (outcome) {
+                                is AgeGateOutcome.Adult -> { /* allow */ }
+                                is AgeGateOutcome.Teen  -> teenLocked = true
+                                is AgeGateOutcome.Under13Blocked -> showingUnder13Block = true
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
         // Close button overlay for other profiles (iOS: top-right X)
         if (!isOwnProfile && onDismiss != null) {
             Box(
@@ -673,6 +738,31 @@ fun ProfileView(
         CollectionPlayerView(
             collection = coll,
             userID = currentAuthUserID ?: userID,
+            currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
+            videoService = videoService,
+            authService = authService,
+            engagementViewModel = viewModel,
+            iconManager = iconManager,
+            followManager = followManager,
+            onReplyToSegment = { seg ->
+                val authID = currentAuthUserID ?: ""
+                val isOwn = seg.creatorID == authID
+                val threadID = seg.threadID ?: seg.id
+                val ctx = if (isOwn) {
+                    RecordingContextFactory.createContinueThread(
+                        threadID, seg.creatorName, seg.title
+                    )
+                } else {
+                    RecordingContextFactory.createStitchToThread(
+                        threadID, seg.creatorName, seg.title
+                    )
+                }
+                navigationCoordinator?.showModal(
+                    ModalState.RECORDING,
+                    mapOf("context" to ctx, "parentVideo" to seg)
+                )
+                showCollectionPlayer = false
+            },
             onDismiss = { showCollectionPlayer = false }
         )
     }
@@ -980,6 +1070,27 @@ fun ProfileView(
         )
     }
 
+    // ===== BADGE PAGE =====
+    // Mounted at the top of ProfileView (sibling to the LazyColumn) so
+    // BadgePageView's verticalScroll has bounded constraints. Mounting
+    // it inside the scrollable header throws "infinity max height".
+    if (showingBadgePage && currentUser != null) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(60f)) {
+            BadgePageView(
+                userID = currentUser!!.id,
+                isOwner = isOwnProfile,
+                stats = com.stitchsocial.club.services.RealUserStats(
+                    clout = currentUser!!.clout,
+                    followers = currentUser!!.followerCount ?: 0,
+                    posts = userVideos.size
+                ),
+                xp = currentUser!!.clout,
+                tierRaw = currentUser!!.tier.rawValue,
+                onDismiss = { showingBadgePage = false }
+            )
+        }
+    }
+
     // ===== DELETE CONFIRMATION =====
     if (showingDeleteConfirmation && videoToDelete != null) {
         AlertDialog(
@@ -1057,37 +1168,38 @@ private fun ProfileHeader(
     onFollowersClick: () -> Unit,
     isFollowing: Boolean = false,
     isFollowLoading: Boolean = false,
-    onFollowToggle: () -> Unit = {}
+    onFollowToggle: () -> Unit = {},
+    onShowBadgePage: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 60.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(top = 36.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // Profile image + info row
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             EnhancedProfileImage(user = user, videos = videos)
 
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(user.displayName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     if (user.isVerified) {
-                        Icon(Icons.Default.Verified, "Verified", tint = Color.Red, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Verified, "Verified", tint = Color.Red, modifier = Modifier.size(16.dp))
                     }
                 }
 
-                Text("@${user.username}", fontSize = 14.sp, color = Color.Gray)
+                Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
 
                 ProfileTierBadge(tier = user.tier)
             }
@@ -1111,6 +1223,17 @@ private fun ProfileHeader(
             onSettingsClick = onSettingsClick,
             onFollowToggle = onFollowToggle
         )
+
+        // Badge preview — pinned-first, taps open the badge page.
+        // Mounting the BadgePageView itself happens at the top of
+        // ProfileView (outside the scrolling container) — nesting
+        // BadgePageView's verticalScroll inside Profile's scroll
+        // throws "infinity max height".
+        ProfileBadgePreviewRow(
+            userID = user.id,
+            isOwner = isOwnProfile,
+            onTapView = onShowBadgePage
+        )
     }
 }
 
@@ -1122,9 +1245,9 @@ private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMeta
     val hypeProgress = calculateHypeLevel(user, videos, user.followerCount ?: 0) / 100f
     val sweepAngle = 360f * hypeProgress.coerceIn(0f, 1f)
 
-    Box(modifier = Modifier.size(90.dp), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.size(76.dp), contentAlignment = Alignment.Center) {
         // Background ring
-        Canvas(modifier = Modifier.size(90.dp)) {
+        Canvas(modifier = Modifier.size(76.dp)) {
             drawArc(
                 color = Color.Gray.copy(alpha = 0.3f),
                 startAngle = -90f, sweepAngle = 360f,
@@ -1134,7 +1257,7 @@ private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMeta
         }
 
         // Hype progress ring
-        Canvas(modifier = Modifier.size(90.dp)) {
+        Canvas(modifier = Modifier.size(76.dp)) {
             drawArc(
                 brush = Brush.sweepGradient(
                     colors = if (tierColors.size > 1) tierColors else listOf(tierColors[0], tierColors[0])
@@ -1152,7 +1275,7 @@ private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMeta
                 .crossfade(true)
                 .build(),
             contentDescription = "Profile",
-            modifier = Modifier.size(80.dp).clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
+            modifier = Modifier.size(66.dp).clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
             contentScale = ContentScale.Crop
         )
     }
@@ -1241,23 +1364,23 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
             .padding(horizontal = 20.dp)
             .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
             .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(14.dp))
-                Text("Hype Rating", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hype Rating", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("${hypeRating.toInt()}%", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("${hypeRating.toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
-        Box(modifier = Modifier.fillMaxWidth().height(12.dp)) {
-            Box(Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(6.dp)))
+        Box(modifier = Modifier.fillMaxWidth().height(10.dp)) {
+            Box(Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(5.dp)))
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
                     .background(
                         Brush.horizontalGradient(listOf(Color(0xFF4CAF50), Color(0xFFFFEB3B), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF9C27B0))),
-                        RoundedCornerShape(6.dp)
+                        RoundedCornerShape(5.dp)
                     )
             )
         }
@@ -1278,11 +1401,11 @@ private fun StatsRow(user: BasicUserInfo, videoCount: Int, onFollowersClick: () 
 @Composable
 private fun StatItem(count: Int, label: String, onClick: () -> Unit) {
     Column(
-        modifier = Modifier.clickable(onClick = onClick).padding(8.dp),
+        modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(formatLargeNumber(count), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = if (label == "Stitchers") Color.Cyan else Color.Gray, fontSize = 12.sp)
+        Text(formatLargeNumber(count), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = if (label == "Stitchers") Color.Cyan else Color.Gray, fontSize = 11.sp)
     }
 }
 
@@ -1487,103 +1610,4 @@ private fun CoreVideoMetadata.toBasicVideoInfo(): BasicVideoInfo {
         contentType = this.contentType,
         temperature = this.temperature
     )
-}
-// ===== PINNED VIDEOS SECTION =====
-
-@Composable
-private fun PinnedVideosSection(
-    pinnedVideos: List<CoreVideoMetadata>,
-    onVideoTap: (CoreVideoMetadata) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(bottom = 8.dp)
-        ) {
-            Icon(
-                Icons.Default.PushPin,
-                contentDescription = "Pinned",
-                tint = Color(0xFFFFD700),
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                "Pinned",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(pinnedVideos.size) { index ->
-                val video = pinnedVideos[index]
-                Box(
-                    modifier = Modifier
-                        .size(width = 110.dp, height = 160.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(1.5.dp, Color(0xFFFFD700).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                        .clickable { onVideoTap(video) }
-                ) {
-                    // Thumbnail
-                    if (!video.thumbnailURL.isNullOrEmpty()) {
-                        AsyncImage(
-                            model = video.thumbnailURL,
-                            contentDescription = video.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.DarkGray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.VideoLibrary, "Video", tint = Color.Gray, modifier = Modifier.size(28.dp))
-                        }
-                    }
-
-                    // Pin badge
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(4.dp)
-                            .size(20.dp)
-                            .background(Color(0xFFFFD700), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.PushPin, "Pinned", tint = Color.Black, modifier = Modifier.size(12.dp))
-                    }
-
-                    // Title overlay
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
-                                )
-                            )
-                            .padding(6.dp)
-                    ) {
-                        Text(
-                            video.title,
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-    }
 }

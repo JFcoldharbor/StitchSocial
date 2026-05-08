@@ -439,39 +439,80 @@ class VideoExportService private constructor(private val context: Context) {
     
     private suspend fun generateThumbnail(videoUri: Uri, duration: Double): Uri = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
-        
+
         try {
             retriever.setDataSource(context, videoUri)
-            
-            // Generate at 0.5 seconds or 10% in, whichever is smaller
-            val thumbnailTimeUs = (minOf(0.5, duration * 0.1) * 1_000_000).toLong()
-            
-            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                retriever.getScaledFrameAtTime(
-                    thumbnailTimeUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                    1080,
-                    1920
-                )
+
+            // Sample 1.0s, 25%, 50% — pick the brightest frame so we don't
+            // pin a black poster from the camera's autoexposure window.
+            val candidatesUs = mutableListOf<Long>()
+            val durationUs = (duration * 1_000_000).toLong()
+            if (durationUs > 0) {
+                val oneSecond = 1_000_000L
+                val quarter = durationUs / 4
+                val mid = durationUs / 2
+                candidatesUs.add(if (durationUs > oneSecond * 2) oneSecond else mid)
+                if (quarter !in candidatesUs && quarter > 0) candidatesUs.add(quarter)
+                if (mid !in candidatesUs && mid > 0) candidatesUs.add(mid)
             } else {
-                retriever.getFrameAtTime(
-                    thumbnailTimeUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                )
-            } ?: throw VideoExportError.ThumbnailGenerationFailed
-            
-            // Save to file
+                candidatesUs.add(1_000_000L)
+            }
+
+            var best: Bitmap? = null
+            var bestBrightness = -1.0
+
+            for (sampleUs in candidatesUs) {
+                val frame: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    retriever.getScaledFrameAtTime(
+                        sampleUs,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        1080, 1920
+                    )
+                } else {
+                    retriever.getFrameAtTime(sampleUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                }
+                if (frame == null) continue
+                val brightness = thumbnailLuminance(frame)
+                if (brightness > bestBrightness) {
+                    best?.recycle()
+                    best = frame
+                    bestBrightness = brightness
+                } else {
+                    frame.recycle()
+                }
+            }
+
+            val chosen = best ?: throw VideoExportError.ThumbnailGenerationFailed
+
             val thumbnailFile = createTemporaryImageFile()
             FileOutputStream(thumbnailFile).use { output ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
+                chosen.compress(Bitmap.CompressFormat.JPEG, 90, output)
             }
-            bitmap.recycle()
-            
+            chosen.recycle()
+
             Uri.fromFile(thumbnailFile)
-            
+
         } finally {
             retriever.release()
         }
+    }
+
+    /** Cheap average-luminance estimate (0..255). Downsamples to 16×16. */
+    private fun thumbnailLuminance(bitmap: Bitmap): Double {
+        val w = 16
+        val h = 16
+        val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
+        val pixels = IntArray(w * h)
+        scaled.getPixels(pixels, 0, w, 0, 0, w, h)
+        if (scaled != bitmap) scaled.recycle()
+        var sum = 0L
+        for (px in pixels) {
+            val r = (px shr 16) and 0xFF
+            val g = (px shr 8) and 0xFF
+            val b = px and 0xFF
+            sum += r * 76L + g * 150L + b * 29L
+        }
+        return sum.toDouble() / (pixels.size.toDouble() * 255.0)
     }
     
     // MARK: - Quality Logging

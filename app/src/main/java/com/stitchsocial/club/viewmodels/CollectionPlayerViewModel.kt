@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class CollectionPlayerViewModel(
     private val collectionService: CollectionService = CollectionService()
@@ -213,6 +214,50 @@ class CollectionPlayerViewModel(
         val collID = _collection.value?.id ?: return
         viewModelScope.launch {
             collectionService.incrementCollectionField(collID, "totalViews", 1)
+        }
+    }
+
+    /**
+     * Pull live engagement counts (view/hype/cool/reply) for the segment at [index]
+     * and replace the in-memory segment so the overlay re-renders with fresh numbers.
+     * Mirrors iOS CollectionPlayerView.refreshSegmentViewCount.
+     *
+     * Reads from top-level videos/{segId} — this is where stitchnoti_processEngagement
+     * writes hype/cool, and where viewCount is incremented. Show segments backfilled
+     * to top-level via backfill-collection-segments.js are reachable here.
+     */
+    fun refreshSegmentCounts(index: Int) {
+        val segs = _segments.value
+        val seg = segs.getOrNull(index) ?: return
+        if (seg.id.isEmpty()) return
+
+        viewModelScope.launch {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+                val doc = db.collection("videos").document(seg.id).get().await()
+                val data = doc.data ?: return@launch
+
+                val liveView = (data["viewCount"] as? Number)?.toInt() ?: seg.viewCount
+                val liveHype = (data["hypeCount"] as? Number)?.toInt() ?: seg.hypeCount
+                val liveCool = (data["coolCount"] as? Number)?.toInt() ?: seg.coolCount
+                val liveReply = (data["replyCount"] as? Number)?.toInt() ?: seg.replyCount
+
+                if (liveView == seg.viewCount && liveHype == seg.hypeCount &&
+                    liveCool == seg.coolCount && liveReply == seg.replyCount) return@launch
+
+                val updated = seg.copy(
+                    viewCount = liveView,
+                    hypeCount = liveHype,
+                    coolCount = liveCool,
+                    replyCount = liveReply
+                )
+                val current = _segments.value
+                if (index < current.size && current[index].id == seg.id) {
+                    _segments.value = current.toMutableList().also { it[index] = updated }
+                }
+            } catch (e: Exception) {
+                println("⚠️ COLLECTION PLAYER: refreshSegmentCounts($index) failed: ${e.message}")
+            }
         }
     }
 

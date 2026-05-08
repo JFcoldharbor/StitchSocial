@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -136,6 +137,15 @@ fun SettingsView(
     var showBusinessAnalytics by remember { mutableStateOf(false) }
     var showBusinessCampaigns by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
+    var showBadgePage by remember { mutableStateOf(false) }
+    var showReferralDashboard by remember { mutableStateOf(false) }
+
+    // Influencer+ tiers see the Refer Friends entry (iOS ReferralButton.isAmbassador)
+    val isAmbassador = liveUser.tier in setOf(
+        UserTier.INFLUENCER, UserTier.AMBASSADOR, UserTier.ELITE,
+        UserTier.PARTNER, UserTier.LEGENDARY, UserTier.TOP_CREATOR,
+        UserTier.FOUNDER, UserTier.CO_FOUNDER
+    )
 
     val appVersion = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0" }
@@ -154,25 +164,25 @@ fun SettingsView(
             // Top Bar (matches iOS navigationBarItems back button)
             Row(
                 modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 52.dp, bottom = 8.dp),
+                    .padding(horizontal = 12.dp)
+                    .padding(top = 40.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.Cyan, modifier = Modifier.size(22.dp))
                 }
                 Text(
                     "Settings", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     color = Color.White, modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.size(48.dp))
+                Spacer(Modifier.size(40.dp))
             }
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
 
                 // ── Profile Header ────────────────────────────────
@@ -186,22 +196,21 @@ fun SettingsView(
                             modifier = Modifier.fillMaxWidth()
                                 .clickable { showWallet = true }
                                 .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                Modifier.size(44.dp).clip(CircleShape)
+                                Modifier.size(36.dp).clip(CircleShape)
                                     .background(Brush.linearGradient(listOf(Color(0xFFFFD60A), Color(0xFFFF9F0A)))),
                                 contentAlignment = Alignment.Center
-                            ) { Text("🔥", fontSize = 20.sp) }
+                            ) { Text("🔥", fontSize = 16.sp) }
                             Column(Modifier.weight(1f)) {
-                                Text("Hype Coins", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                Text("$coinBalance coins", fontSize = 14.sp, color = Color(0xFFFFD60A))
+                                Text("Hype Coins", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text("$coinBalance coins", fontSize = 12.sp, color = Color(0xFFFFD60A))
                             }
-                            Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(14.dp))
                         }
-                        Spacer(Modifier.height(8.dp))
                         SNavRow(Icons.Default.Language, Color.Cyan, "Manage Account", "Profile, billing & security") { showManageAccount = true }
                         if (isCreator) SNavRow(Icons.Default.AttachMoney, Color(0xFF30D158), "Cash Out", "Withdraw your earnings") { showCashOut = true }
                     }
@@ -242,17 +251,17 @@ fun SettingsView(
                             Row(
                                 modifier = Modifier.fillMaxWidth()
                                     .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                                    .padding(16.dp),
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
-                                    Text("Sub Revenue", fontSize = 12.sp, color = Color.Gray)
-                                    Text("$subRevenuePercent%", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF30D158))
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Sub Revenue", fontSize = 11.sp, color = Color.Gray)
+                                    Text("$subRevenuePercent%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF30D158))
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text("Ad Revenue", fontSize = 12.sp, color = Color.Gray)
-                                    Text("$adRevenuePercent%", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.Cyan)
+                                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Ad Revenue", fontSize = 11.sp, color = Color.Gray)
+                                    Text("$adRevenuePercent%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Cyan)
                                 }
                             }
                         }
@@ -272,6 +281,15 @@ fun SettingsView(
                 if (!isBusiness) {
                     item {
                         SSection("SOCIAL", Icons.Default.People, Color(0xFF0A84FF)) {
+                            // Refer Friends — Influencer+ only (iOS ReferralButton)
+                            if (isAmbassador) {
+                                SNavRow(
+                                    Icons.Default.Campaign,
+                                    Color(0xFFBF5AF2),
+                                    "Refer Friends",
+                                    "Share your link and earn rewards"
+                                ) { showReferralDashboard = true }
+                            }
                             SNavRow(Icons.Default.PersonAdd, Color.Cyan, "People You May Know", "Based on mutual connections") { showFriendSuggestions = true }
                             SNavRow(Icons.Default.Link, Color(0xFFBF5AF2), "Connected Accounts", "Link social media") { }
                         }
@@ -322,21 +340,33 @@ fun SettingsView(
                     }
                 }
 
+                // ── Badges ────────────────────────────────────────
+                item {
+                    SSection("BADGES", Icons.Default.EmojiEvents, Color(0xFFFBBF24)) {
+                        SNavRow(
+                            Icons.Default.EmojiEvents,
+                            Color(0xFFFBBF24),
+                            "View badges",
+                            "Earned and in-progress"
+                        ) { showBadgePage = true }
+                    }
+                }
+
                 // ── Sign Out ──────────────────────────────────────
                 item {
                     Button(
                         onClick = { showSignOutDialog = true },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF453A).copy(alpha = 0.15f)),
                         shape = RoundedCornerShape(12.dp),
                         enabled = !isSigningOut
                     ) {
                         if (isSigningOut) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Default.Logout, null, tint = Color(0xFFFF453A), modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Sign Out", color = Color(0xFFFF453A), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Icon(Icons.Default.Logout, null, tint = Color(0xFFFF453A), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Sign Out", color = Color(0xFFFF453A), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                     Spacer(Modifier.height(40.dp))
@@ -356,9 +386,69 @@ fun SettingsView(
             }
         }
 
+        if (showManageAccount) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                AccountWebView(onDismiss = {
+                    showManageAccount = false
+                    // Mirror iOS: re-sync coin balance on return from web portal.
+                    scope.launch {
+                        try { com.stitchsocial.club.services.HypeCoinService.shared.syncBalance(liveUser.id) }
+                        catch (_: Exception) { }
+                    }
+                })
+            }
+        }
+
+        if (showCashOut) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                CashOutSheet(
+                    userID = liveUser.id,
+                    userTier = liveUser.tier,
+                    availableCoins = coinBalance,
+                    onDismiss = { showCashOut = false }
+                )
+            }
+        }
+
+        if (showMySubscribers) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                MySubscribersView(creatorID = liveUser.id, onDismiss = { showMySubscribers = false })
+            }
+        }
+
+        if (showPrivacySettings) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                PrivacySettingsView(userID = liveUser.id, onDismiss = { showPrivacySettings = false })
+            }
+        }
+
+        if (showAdOpportunities) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                AdOpportunitiesView(user = liveUser, onDismiss = { showAdOpportunities = false })
+            }
+        }
+
         if (showAccountSwitcher) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
                 AccountSwitcherView(onDismiss = { showAccountSwitcher = false })
+            }
+        }
+
+        if (showBadgePage) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                BadgePageView(
+                    userID = liveUser.id,
+                    isOwner = true,
+                    stats = com.stitchsocial.club.services.RealUserStats(
+                        clout = liveUser.clout,
+                        // Other stats not yet plumbed into BasicUserInfo
+                        // — server-side awards still fire from the user
+                        // doc, this just powers the in-progress %.
+                    ),
+                    xp = liveUser.clout,  // fallback until xp field added
+                    tierRaw = liveUser.tier.rawValue,
+                    onDismiss = { showBadgePage = false }
+                )
             }
         }
 
@@ -373,8 +463,26 @@ fun SettingsView(
             }
         }
 
-        // TODO: CreatorCommunitySettingsView — add when KT port is complete
-        // if (showCommunitySettings) { CreatorCommunitySettingsView(...) }
+        if (showReferralDashboard) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                ReferralDashboardView(
+                    userID = liveUser.id,
+                    onDismiss = { showReferralDashboard = false }
+                )
+            }
+        }
+
+        if (showCommunitySettings) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                CreatorCommunitySettingsView(
+                    creatorID = liveUser.id,
+                    creatorUsername = liveUser.username,
+                    creatorDisplayName = liveUser.displayName,
+                    creatorTier = liveUser.tier,
+                    onDismiss = { showCommunitySettings = false }
+                )
+            }
+        }
 
         if (showSubscriptionSettings) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
@@ -454,43 +562,95 @@ fun SettingsView(
 private fun ProfileHeaderCard(user: BasicUserInfo) {
     Column(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
-            .padding(20.dp),
+            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Avatar
+        // Avatar (with verified-business badge overlay — iOS parity)
         Box(contentAlignment = Alignment.BottomEnd) {
             if (!user.profileImageURL.isNullOrEmpty()) {
                 AsyncImage(
                     model = user.profileImageURL,
                     contentDescription = user.displayName,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(80.dp).clip(CircleShape)
+                    modifier = Modifier.size(64.dp).clip(CircleShape)
                         .background(Color.Gray.copy(alpha = 0.3f), CircleShape)
                 )
             } else {
                 Box(
-                    Modifier.size(80.dp).clip(CircleShape)
+                    Modifier.size(64.dp).clip(CircleShape)
                         .background(Color.Gray.copy(alpha = 0.3f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         if (user.isBusiness == true) Icons.Default.Business else Icons.Default.Person,
-                        null, tint = Color.Gray, modifier = Modifier.size(40.dp)
+                        null, tint = Color.Gray, modifier = Modifier.size(32.dp)
                     )
                 }
+            }
+
+            // Verified business seal — iOS profileHeader line 261-268
+            if (user.isBusiness == true && user.businessProfile?.isVerifiedBusiness == true) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Verified,
+                        contentDescription = "Verified Business",
+                        tint = Color(0xFF64D2FF),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            } else {
+                // Empty placeholder so the avatar Box still aligns the same way
+                Box(Modifier.size(0.dp))
             }
         }
 
         // Name + username
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(user.displayName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("@${user.username}", fontSize = 14.sp, color = Color.Gray)
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(user.displayName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
         }
 
-        // Tier badge
-        TierBadge(user.tier)
+        // Business: category chip + website link.  Personal: tier badge.  (iOS parity, line 292-333)
+        val biz = user.businessProfile
+        if (user.isBusiness == true && biz != null) {
+            Text(
+                biz.categoryDisplay,
+                fontSize = 12.sp,
+                color = Color(0xFF64D2FF),
+                modifier = Modifier
+                    .background(Color(0xFF64D2FF).copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            val site = biz.websiteURL
+            if (!site.isNullOrEmpty()) {
+                val uriHandler = LocalUriHandler.current
+                Row(
+                    modifier = Modifier.clickable {
+                        val href = if (site.startsWith("http")) site else "https://$site"
+                        runCatching { uriHandler.openUri(href) }
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Link, null, tint = Color(0xFF0A84FF), modifier = Modifier.size(12.dp))
+                    Text(
+                        site.removePrefix("https://").removePrefix("http://"),
+                        fontSize = 12.sp,
+                        color = Color(0xFF0A84FF)
+                    )
+                }
+            }
+        } else {
+            TierBadge(user.tier)
+        }
 
         // Stats row: followers · following · videos
         Row(
@@ -523,23 +683,23 @@ private fun TierBadge(tier: UserTier) {
             Brush.linearGradient(listOf(Color.Gray, Color.DarkGray)) to tier.displayName
     }
     Box(
-        modifier = Modifier.background(bg, RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 5.dp)
+        modifier = Modifier.background(bg, RoundedCornerShape(16.dp)).padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
     }
 }
 
 @Composable
 private fun StatItem(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(label, fontSize = 12.sp, color = Color.Gray)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text(label, fontSize = 11.sp, color = Color.Gray)
     }
 }
 
 @Composable
 private fun StatDivider() {
-    Box(Modifier.width(1.dp).height(32.dp).background(Color.White.copy(alpha = 0.1f)))
+    Box(Modifier.width(1.dp).height(24.dp).background(Color.White.copy(alpha = 0.1f)))
 }
 
 // ─────────────────────────────────────────────
@@ -548,13 +708,13 @@ private fun StatDivider() {
 
 @Composable
 private fun SSection(title: String, icon: ImageVector, iconTint: Color, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(icon, null, tint = iconTint, modifier = Modifier.size(14.dp))
-            Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray,
-                letterSpacing = 1.sp)
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(12.dp))
+            Text(title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray,
+                letterSpacing = 0.8.sp)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
     }
 }
 
@@ -563,14 +723,14 @@ private fun SNavRow(icon: ImageVector, iconTint: Color, title: String, subtitle:
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
             .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
-            .padding(vertical = 14.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(vertical = 10.dp, horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, color = Color.White)
-            Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+            Text(title, fontSize = 14.sp, color = Color.White)
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
         }
         Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(14.dp))
     }
@@ -581,14 +741,14 @@ private fun SToggleRow(icon: ImageVector, iconTint: Color, title: String, subtit
     Row(
         modifier = Modifier.fillMaxWidth()
             .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
-            .padding(vertical = 14.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(vertical = 10.dp, horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, color = Color.White)
-            Text(subtitle, fontSize = 13.sp, color = Color.Gray)
+            Text(title, fontSize = 14.sp, color = Color.White)
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
         }
         Switch(
             checked = checked, onCheckedChange = onCheckedChange,
@@ -605,11 +765,11 @@ private fun SAboutRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth()
             .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
-            .padding(vertical = 12.dp, horizontal = 16.dp),
+            .padding(vertical = 10.dp, horizontal = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 15.sp, color = Color.Gray)
-        Text(value, fontSize = 15.sp, color = Color.White)
+        Text(label, fontSize = 14.sp, color = Color.Gray)
+        Text(value, fontSize = 14.sp, color = Color.White)
     }
 }
 

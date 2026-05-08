@@ -708,6 +708,30 @@ fun DiscoveryView(
                 CollectionPlayerView(
                     collection = coll,
                     userID = currentUserID ?: "",
+                    videoService = videoService,
+                    authService = authService,
+                    engagementViewModel = engagementViewModel,
+                    iconManager = iconManager,
+                    followManager = followManager,
+                    onReplyToSegment = { seg ->
+                        val authID = currentUserID ?: ""
+                        val isOwn = seg.creatorID == authID
+                        val threadID = seg.threadID ?: seg.id
+                        val ctx = if (isOwn) {
+                            RecordingContextFactory.createContinueThread(
+                                threadID, seg.creatorName, seg.title
+                            )
+                        } else {
+                            RecordingContextFactory.createStitchToThread(
+                                threadID, seg.creatorName, seg.title
+                            )
+                        }
+                        navigationCoordinator?.showModal(
+                            ModalState.RECORDING,
+                            mapOf("context" to ctx, "parentVideo" to seg)
+                        )
+                        showCollectionPlayer = false
+                    },
                     onDismiss = { showCollectionPlayer = false }
                 )
             }

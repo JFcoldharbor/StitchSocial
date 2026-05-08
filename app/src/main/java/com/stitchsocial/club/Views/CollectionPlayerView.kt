@@ -97,6 +97,12 @@ fun CollectionPlayerView(
     engagementViewModel: EngagementViewModel? = null,
     iconManager: FloatingIconManager? = null,
     followManager: FollowManager? = null,
+    /**
+     * Invoked when the user taps the Reply button on a segment overlay.
+     * Caller should launch the recording modal with [segment] as the parent
+     * (mirrors the StitchRecording handler used for HomeFeed/Profile videos).
+     */
+    onReplyToSegment: ((segment: CoreVideoMetadata) -> Unit)? = null,
     onDismiss: () -> Unit,
     viewModel: CollectionPlayerViewModel = viewModel(
         key = collection.id,
@@ -147,24 +153,19 @@ fun CollectionPlayerView(
     val offsetX = remember { Animatable(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
-    // Overlay
-    var showOverlay by remember { mutableStateOf(true) }
+    // Overlay state
     var showThreadView by remember { mutableStateOf(false) }
     var threadTargetVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
-    var overlayHideJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-
-    fun showOverlayBriefly() {
-        showOverlay = true
-        overlayHideJob?.cancel()
-        overlayHideJob = scope.launch { delay(5_000); showOverlay = false }
-    }
 
     LaunchedEffect(collection.id) {
         viewModel.loadCollection(collection, userID, startingIndex.takeIf { it > 0 })
         viewModel.recordView()
     }
-    LaunchedEffect(Unit) { showOverlayBriefly() }
-    LaunchedEffect(currentIndex) { showOverlayBriefly() }
+    LaunchedEffect(currentIndex) {
+        // Pull fresh hype/cool/view/reply for the active segment so the overlay
+        // doesn't sit on whatever was cached at collection load (iOS parity).
+        viewModel.refreshSegmentCounts(currentIndex)
+    }
 
     // ExoPlayer listener — auto-advance on segment end
     DisposableEffect(exoPlayer) {
@@ -278,8 +279,8 @@ fun CollectionPlayerView(
                             )
                         }
                 ) {
-                    // ── Single video layer — translates with drag ─────
-                    // Exactly one PlayerView alive at a time — no bleed
+                    // ── Video + overlay — same Box, overlay on top (HomeFeed pattern)
+                    // Exactly one PlayerView alive at a time — no bleed.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -303,27 +304,32 @@ fun CollectionPlayerView(
                             update = { it.player = exoPlayer },
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
 
-                    // ── Overlay — hidden while dragging ───────────────
-                    currentSegment?.let { seg ->
-                        AnimatedVisibility(
-                            visible = showOverlay && !isDragging,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
+                        // Overlay sits as a sibling above the player — same shape
+                        // HomeFeedView uses. No AnimatedVisibility / no auto-hide; the
+                        // earlier wrapper was breaking pointer routing so taps on the
+                        // hype/cool/reply buttons never landed.
+                        currentSegment?.let { seg ->
                             ContextualVideoOverlay(
                                 video = seg,
-                                overlayContext = OverlayContext.HOME_FEED,
+                                overlayContext = OverlayContext.COLLECTION,
                                 currentUserID = userID.takeIf { it.isNotEmpty() },
                                 currentUserTier = currentUserTier,
                                 engagementViewModel = engagementViewModel,
                                 iconManager = iconManager,
                                 followManager = followManager,
-                                isVisible = showOverlay && !isDragging,
+                                isVisible = !isDragging,
                                 onAction = { action ->
                                     when (action) {
+                                        // Reply button on collection overlay is wired
+                                        // to StitchRecording — open recording modal
+                                        // via the caller's handler.
+                                        is OverlayAction.StitchRecording -> {
+                                            onReplyToSegment?.invoke(seg)
+                                        }
+                                        // Reply-count tap (in the bottom section) still
+                                        // goes to ThreadView so users can browse existing
+                                        // replies without opening the camera.
                                         is OverlayAction.NavigateToThread -> {
                                             threadTargetVideo = seg
                                             showThreadView = true

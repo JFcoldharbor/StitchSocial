@@ -58,6 +58,7 @@ fun ProfileVideoGrid(
     tabTitles: List<String> = listOf("Videos"),
     isLoading: Boolean = false,
     isCurrentUserProfile: Boolean = false,
+    pinnedVideoIDs: Set<String> = emptySet(),
     onVideoTap: (BasicVideoInfo, Int, List<BasicVideoInfo>) -> Unit = { _, _, _ -> },
     onVideoDelete: ((BasicVideoInfo) -> Unit)? = null
 ) {
@@ -104,6 +105,7 @@ fun ProfileVideoGrid(
                                 video = video,
                                 index = videoIndex,
                                 isCurrentUserProfile = isCurrentUserProfile,
+                                isPinned = pinnedVideoIDs.contains(video.id),
                                 onVideoTap = {
                                     println("🔹 PROFILE GRID: Video tapped - ${video.title}")
                                     onVideoTap(video, videoIndex, videos)
@@ -142,6 +144,7 @@ private fun VideoGridItem(
     video: BasicVideoInfo,
     index: Int,
     isCurrentUserProfile: Boolean,
+    isPinned: Boolean = false,
     onVideoTap: () -> Unit,
     onVideoDelete: ((BasicVideoInfo) -> Unit)?,
     modifier: Modifier = Modifier
@@ -185,6 +188,25 @@ private fun VideoGridItem(
             video = video,
             onTap = onVideoTap
         )
+
+        // Pinned badge — small gold pin in the top-right (iOS parity)
+        if (isPinned) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(18.dp)
+                    .background(Color(0xFFFFD700), androidx.compose.foundation.shape.CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PushPin,
+                    contentDescription = "Pinned",
+                    tint = Color.Black,
+                    modifier = Modifier.size(11.dp)
+                )
+            }
+        }
 
         // Loading Overlay during deletion
         if (isDeletingVideo) {

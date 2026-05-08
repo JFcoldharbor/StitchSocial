@@ -151,6 +151,45 @@ class CommunityService private constructor() {
         return if (community.isActive) CommunityStatus.Active(community) else CommunityStatus.Inactive(community)
     }
 
+    // MARK: - Activate Community (Creator Settings)
+    // Sets isActive = true, optionally updates displayName / description.
+    // Mirrors iOS CommunityService.activateCommunity.
+
+    suspend fun activateCommunity(
+        creatorID: String,
+        displayName: String? = null,
+        description: String? = null
+    ): Community {
+        val docRef = db.collection(Col.COMMUNITIES).document(creatorID)
+        val doc = docRef.get().await()
+        val data = doc.data ?: throw CommunityError.CommunityNotFound
+        val community = Community.fromFirestore(doc.id, data)
+
+        community.isActive = true
+        community.updatedAt = Date()
+        displayName?.takeIf { it.isNotEmpty() }?.let { community.displayName = it }
+        description?.let { community.description = it }
+
+        docRef.set(community.toFirestore()).await()
+        communityCache[creatorID] = CachedItem(community, System.currentTimeMillis(), communityTTL)
+        Log.d(TAG, "Activated community $creatorID")
+        return community
+    }
+
+    // MARK: - Deactivate Community (Creator Settings)
+    // Members stay attached; they just can't see/interact until reactivated.
+
+    suspend fun deactivateCommunity(creatorID: String) {
+        db.collection(Col.COMMUNITIES).document(creatorID).update(
+            mapOf(
+                "isActive" to false,
+                "updatedAt" to Timestamp(Date())
+            )
+        ).await()
+        communityCache.remove(creatorID)
+        Log.d(TAG, "Deactivated community $creatorID")
+    }
+
     // MARK: - Update Community (Creator Only)
 
     suspend fun updateCommunity(

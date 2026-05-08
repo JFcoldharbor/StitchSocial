@@ -460,23 +460,92 @@ private fun SeasonsSection(
         if (seasons.isEmpty()) {
             Text("No seasons yet — tap + to add one", color = Color.Gray, fontSize = 11.sp)
         } else {
+            // Tracks which season the user is confirming a delete for.  Putting
+            // the destructive action behind an overflow menu + dialog keeps the
+            // delete out of finger-fall distance from the season expand chevron.
+            var seasonPendingDelete by remember { mutableStateOf<Season?>(null) }
+
             seasons.forEach { season ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.White.copy(alpha = 0.04f))
-                        .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(season.displayTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text("${season.episodeCount} episodes", color = Color.Gray, fontSize = 10.sp)
+                SeasonRow(
+                    season = season,
+                    onRequestDelete = { seasonPendingDelete = season }
+                )
+            }
+
+            seasonPendingDelete?.let { target ->
+                AlertDialog(
+                    onDismissRequest = { seasonPendingDelete = null },
+                    title = { Text("Delete \"${target.displayTitle}\"?", color = Color.White) },
+                    text = {
+                        Text(
+                            "This removes the season and all its episodes. This can't be undone.",
+                            color = Color.Gray
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            onDeleteSeason(target)
+                            seasonPendingDelete = null
+                        }) { Text("Delete Season", color = Color(0xFFFF453A)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { seasonPendingDelete = null }) {
+                            Text("Cancel", color = Color.Gray)
+                        }
+                    },
+                    containerColor = Color(0xFF1C1C1E)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Row for a single season.  The overflow menu (3-dot) replaces the inline
+ * trash so there's spatial separation between expand-on-tap and destructive
+ * actions.
+ */
+@Composable
+private fun SeasonRow(
+    season: Season,
+    onRequestDelete: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.04f))
+            .padding(start = 10.dp, top = 10.dp, bottom = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(season.displayTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text("${season.episodeCount} episodes", color = Color.Gray, fontSize = 10.sp)
+        }
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Default.MoreVert, "More", tint = Color.Gray)
+            }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                modifier = Modifier.background(Color(0xFF1C1C1E))
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Delete Season", color = Color(0xFFFF453A)) },
+                    onClick = {
+                        menuOpen = false
+                        onRequestDelete()
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.DeleteOutline, null,
+                            tint = Color(0xFFFF453A),
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
-                    IconButton(onClick = { onDeleteSeason(season) }) {
-                        Icon(Icons.Default.DeleteOutline, "Delete", tint = Color.Red.copy(alpha = 0.6f))
-                    }
-                }
+                )
             }
         }
     }
