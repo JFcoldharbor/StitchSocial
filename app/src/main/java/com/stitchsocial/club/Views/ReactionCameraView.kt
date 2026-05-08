@@ -82,6 +82,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Layout
 
@@ -235,16 +236,16 @@ fun ReactionCameraView(
                 newVideoCapture
             )
             videoCapture = newVideoCapture
-            println("🎬 REACTION: camera bound (selector=$cameraSelector)")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: camera bound (selector=$cameraSelector)") }
         } catch (e: Exception) {
-            println("🎬 REACTION: camera bind failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: camera bind failed — ${e.message}") }
         }
     }
 
     // ───── Recording control ─────────────────────────────────────────────
     val startRecording: () -> Unit = start@{
         val capture = videoCapture ?: run {
-            println("🎬 REACTION: cannot start — videoCapture is null")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: cannot start — videoCapture is null") }
             return@start
         }
         val outFile = File(context.cacheDir, "reaction_camera_${UUID.randomUUID()}.mp4")
@@ -257,7 +258,7 @@ fun ReactionCameraView(
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
-                            println("🎬 REACTION: recording started → ${outFile.name}")
+                            if (BuildConfig.DEBUG) { println("🎬 REACTION: recording started → ${outFile.name}") }
                             // Kick the source from the scrubbed offset.
                             sourcePlayer?.let { p ->
                                 p.seekTo(sourceStartMs)
@@ -266,7 +267,7 @@ fun ReactionCameraView(
                         }
                         is VideoRecordEvent.Finalize -> {
                             if (!event.hasError()) {
-                                println("🎬 REACTION: recording finalized → ${outFile.absolutePath} (${outFile.length() / 1024} KB)")
+                                if (BuildConfig.DEBUG) { println("🎬 REACTION: recording finalized → ${outFile.absolutePath} (${outFile.length() / 1024} KB)") }
                                 // R3: if a source video was picked, run the
                                 // compositor to produce a split-screen MP4.
                                 // If no source, just hand the camera file up
@@ -291,7 +292,7 @@ fun ReactionCameraView(
                                             isCompositing = false
                                             onComplete(composite)
                                         } catch (e: Exception) {
-                                            println("🎬 REACTION: composite failed → falling back to camera-only — ${e.message}")
+                                            if (BuildConfig.DEBUG) { println("🎬 REACTION: composite failed → falling back to camera-only — ${e.message}") }
                                             isCompositing = false
                                             onComplete(Uri.fromFile(outFile))
                                         }
@@ -300,7 +301,7 @@ fun ReactionCameraView(
                                     onComplete(Uri.fromFile(outFile))
                                 }
                             } else {
-                                println("🎬 REACTION: recording failed — ${event.error}")
+                                if (BuildConfig.DEBUG) { println("🎬 REACTION: recording failed — ${event.error}") }
                                 outFile.delete()
                             }
                             activeRecording = null
@@ -315,7 +316,7 @@ fun ReactionCameraView(
         } catch (e: SecurityException) {
             // Audio permission missing — record silently. R5 may add a
             // pre-flight permission check; for R2 we just fall back.
-            println("🎬 REACTION: audio permission missing, recording without audio — ${e.message}")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: audio permission missing, recording without audio — ${e.message}") }
             try {
                 activeRecording = capture.output
                     .prepareRecording(context, outputOptions)
@@ -330,10 +331,10 @@ fun ReactionCameraView(
                     }
                 isRecording = true
             } catch (e2: Exception) {
-                println("🎬 REACTION: recording start failed — ${e2.message}")
+                if (BuildConfig.DEBUG) { println("🎬 REACTION: recording start failed — ${e2.message}") }
             }
         } catch (e: Exception) {
-            println("🎬 REACTION: recording start failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: recording start failed — ${e.message}") }
         }
     }
 
@@ -364,7 +365,7 @@ fun ReactionCameraView(
     ) { uri: Uri? ->
         if (uri != null) {
             contentZone = ContentZone.Video(uri)
-            println("🎬 REACTION: source video picked: $uri")
+            if (BuildConfig.DEBUG) { println("🎬 REACTION: source video picked: $uri") }
         }
     }
 

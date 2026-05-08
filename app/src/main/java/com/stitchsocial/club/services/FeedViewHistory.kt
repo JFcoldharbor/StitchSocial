@@ -14,6 +14,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.stitchsocial.club.foundation.ThreadData
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Tracks viewed videos and feed position for personalized content delivery
@@ -146,9 +147,9 @@ class FeedViewHistory private constructor(context: Context) {
                 put("savedAt", System.currentTimeMillis())
             }
             prefs.edit().putString(FEED_POSITION_KEY, json.toString()).apply()
-            println("📍 FEED HISTORY: Saved position - item $itemIndex, stitch $stitchIndex")
+            if (BuildConfig.DEBUG) { println("📍 FEED HISTORY: Saved position - item $itemIndex, stitch $stitchIndex") }
         } catch (e: Exception) {
-            println("❌ FEED HISTORY: Failed to save position - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FEED HISTORY: Failed to save position - ${e.message}") }
         }
     }
 
@@ -169,7 +170,7 @@ class FeedViewHistory private constructor(context: Context) {
                 savedAt = Date(savedAt)
             )
         } catch (e: Exception) {
-            println("❌ FEED HISTORY: Failed to decode position - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FEED HISTORY: Failed to decode position - ${e.message}") }
             null
         }
     }
@@ -195,9 +196,9 @@ class FeedViewHistory private constructor(context: Context) {
                 .putString(LAST_SESSION_FEED_KEY, array.toString())
                 .putLong(LAST_SESSION_TIMESTAMP_KEY, System.currentTimeMillis())
                 .apply()
-            println("💾 FEED HISTORY: Saved ${threads.size.coerceAtMost(50)} threads")
+            if (BuildConfig.DEBUG) { println("💾 FEED HISTORY: Saved ${threads.size.coerceAtMost(50)} threads") }
         } catch (e: Exception) {
-            println("❌ FEED HISTORY: Failed to save session feed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FEED HISTORY: Failed to save session feed - ${e.message}") }
         }
     }
 
@@ -216,7 +217,7 @@ class FeedViewHistory private constructor(context: Context) {
             val array = JSONArray(json)
             (0 until array.length()).map { array.getJSONObject(it).getString("id") }
         } catch (e: Exception) {
-            println("❌ FEED HISTORY: Failed to decode session feed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FEED HISTORY: Failed to decode session feed - ${e.message}") }
             null
         }
     }
@@ -275,7 +276,7 @@ class FeedViewHistory private constructor(context: Context) {
             val seenIDs = getSeenVideoIDs().toMutableList()
             seenIDs.removeAll(oldKeys.toSet())
             saveSeenVideoIDs(seenIDs)
-            println("🧹 FEED HISTORY: Cleaned ${oldKeys.size} old entries")
+            if (BuildConfig.DEBUG) { println("🧹 FEED HISTORY: Cleaned ${oldKeys.size} old entries") }
         }
     }
 
@@ -287,7 +288,7 @@ class FeedViewHistory private constructor(context: Context) {
             .remove(LAST_SESSION_TIMESTAMP_KEY)
             .remove(VIEW_HISTORY_TIMESTAMPS_KEY)
             .apply()
-        println("🗑️ FEED HISTORY: Cleared all history")
+        if (BuildConfig.DEBUG) { println("🗑️ FEED HISTORY: Cleared all history") }
     }
 
     fun debugStatus(): String {

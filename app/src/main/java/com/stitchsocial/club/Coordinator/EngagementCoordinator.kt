@@ -14,6 +14,7 @@ import com.stitchsocial.club.services.SocialSignalService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 class EngagementCoordinator(
     private val videoService: VideoServiceImpl,
@@ -94,7 +95,7 @@ class EngagementCoordinator(
                 videoTitle = videoTitle
             )
         } catch (e: Exception) {
-            println("NOTIFICATION: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("NOTIFICATION: Error - ${e.message}") }
         }
     }
 

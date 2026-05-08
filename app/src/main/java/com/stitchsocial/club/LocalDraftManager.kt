@@ -26,6 +26,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Date
 import java.util.concurrent.TimeUnit
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Manages local video drafts before they're posted
@@ -74,7 +75,7 @@ class LocalDraftManager private constructor(private val context: Context) {
     // MARK: - Initialization
 
     init {
-        println("📁 DRAFT MANAGER: Initialized at ${draftsDirectory.absolutePath}")
+        if (BuildConfig.DEBUG) { println("📁 DRAFT MANAGER: Initialized at ${draftsDirectory.absolutePath}") }
     }
 
     // MARK: - Public Interface
@@ -108,10 +109,10 @@ class LocalDraftManager private constructor(private val context: Context) {
 
             _drafts.value = currentDrafts.sortedByDescending { it.lastModified }
 
-            println("💾 DRAFT MANAGER: Saved draft ${editState.draftId}")
+            if (BuildConfig.DEBUG) { println("💾 DRAFT MANAGER: Saved draft ${editState.draftId}") }
 
         } catch (e: Exception) {
-            println("❌ DRAFT MANAGER: Failed to save draft: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ DRAFT MANAGER: Failed to save draft: ${e.message}") }
             throw e
         }
     }
@@ -125,7 +126,7 @@ class LocalDraftManager private constructor(private val context: Context) {
             try {
                 saveDraft(editState)
             } catch (e: Exception) {
-                println("⚠️ DRAFT MANAGER: Auto-save failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ DRAFT MANAGER: Auto-save failed: ${e.message}") }
             }
         }
     }
@@ -145,7 +146,7 @@ class LocalDraftManager private constructor(private val context: Context) {
             VideoEditState.fromJson(json)
 
         } catch (e: Exception) {
-            println("⚠️ DRAFT MANAGER: Failed to load draft $id: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DRAFT MANAGER: Failed to load draft $id: ${e.message}") }
             null
         }
     }
@@ -161,10 +162,10 @@ class LocalDraftManager private constructor(private val context: Context) {
             // Remove from memory
             _drafts.value = _drafts.value.filter { it.draftId != id }
 
-            println("🗑️ DRAFT MANAGER: Deleted draft $id")
+            if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted draft $id") }
 
         } catch (e: Exception) {
-            println("⚠️ DRAFT MANAGER: Failed to delete draft $id: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DRAFT MANAGER: Failed to delete draft $id: ${e.message}") }
         }
     }
 
@@ -194,11 +195,11 @@ class LocalDraftManager private constructor(private val context: Context) {
                     } else {
                         // Delete old draft
                         file.delete()
-                        println("🗑️ DRAFT MANAGER: Deleted expired draft ${draft.draftId}")
+                        if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted expired draft ${draft.draftId}") }
                     }
 
                 } catch (e: Exception) {
-                    println("⚠️ DRAFT MANAGER: Failed to load draft from ${file.name}: ${e.message}")
+                    if (BuildConfig.DEBUG) { println("⚠️ DRAFT MANAGER: Failed to load draft from ${file.name}: ${e.message}") }
                 }
             }
 
@@ -207,10 +208,10 @@ class LocalDraftManager private constructor(private val context: Context) {
 
             _drafts.value = loadedDrafts
 
-            println("📂 DRAFT MANAGER: Loaded ${loadedDrafts.size} drafts")
+            if (BuildConfig.DEBUG) { println("📂 DRAFT MANAGER: Loaded ${loadedDrafts.size} drafts") }
 
         } catch (e: Exception) {
-            println("❌ DRAFT MANAGER: Failed to load drafts: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ DRAFT MANAGER: Failed to load drafts: ${e.message}") }
         } finally {
             _isLoading.value = false
         }
@@ -236,7 +237,7 @@ class LocalDraftManager private constructor(private val context: Context) {
         }
 
         if (deletedCount > 0) {
-            println("🧹 DRAFT MANAGER: Cleaned up $deletedCount old drafts")
+            if (BuildConfig.DEBUG) { println("🧹 DRAFT MANAGER: Cleaned up $deletedCount old drafts") }
         }
     }
 

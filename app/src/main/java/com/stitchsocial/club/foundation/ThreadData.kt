@@ -10,6 +10,7 @@ package com.stitchsocial.club.foundation
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 /**
  * ThreadData with child video support (MATCHES SWIFT)
@@ -68,60 +69,60 @@ class HybridHomeFeedService(
 
     suspend fun getAllDiscoveryVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("🔍 DISCOVERY: Loading all discovery videos")
+            if (BuildConfig.DEBUG) { println("🔍 DISCOVERY: Loading all discovery videos") }
             val videos = videoService.getDiscoveryVideos(limit)
-            println("🔍 DISCOVERY: Found ${videos.size} discovery videos")
+            if (BuildConfig.DEBUG) { println("🔍 DISCOVERY: Found ${videos.size} discovery videos") }
             videos
         } catch (e: Exception) {
-            println("❌ DISCOVERY ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ DISCOVERY ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     suspend fun getTrendingVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("🔥 TRENDING: Loading trending videos")
+            if (BuildConfig.DEBUG) { println("🔥 TRENDING: Loading trending videos") }
             val videos = videoService.getDiscoveryVideos(limit)
-            println("🔥 TRENDING: Found ${videos.size} trending videos")
+            if (BuildConfig.DEBUG) { println("🔥 TRENDING: Found ${videos.size} trending videos") }
             videos
         } catch (e: Exception) {
-            println("❌ TRENDING ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ TRENDING ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     suspend fun getViralVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("💥 VIRAL: Loading viral videos")
+            if (BuildConfig.DEBUG) { println("💥 VIRAL: Loading viral videos") }
             val videos = videoService.getPersonalizedVideos("", limit)
-            println("💥 VIRAL: Found ${videos.size} viral videos")
+            if (BuildConfig.DEBUG) { println("💥 VIRAL: Found ${videos.size} viral videos") }
             videos
         } catch (e: Exception) {
-            println("❌ VIRAL ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIRAL ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     suspend fun getFreshVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("🌱 FRESH: Loading fresh videos")
+            if (BuildConfig.DEBUG) { println("🌱 FRESH: Loading fresh videos") }
             val videos = videoService.getFeedVideos(limit)
-            println("🌱 FRESH: Found ${videos.size} fresh videos")
+            if (BuildConfig.DEBUG) { println("🌱 FRESH: Found ${videos.size} fresh videos") }
             videos
         } catch (e: Exception) {
-            println("❌ FRESH ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FRESH ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     suspend fun getQualityVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("⭐ QUALITY: Loading quality videos")
+            if (BuildConfig.DEBUG) { println("⭐ QUALITY: Loading quality videos") }
             val videos = videoService.getDiscoveryVideos(limit)
-            println("⭐ QUALITY: Found ${videos.size} quality videos")
+            if (BuildConfig.DEBUG) { println("⭐ QUALITY: Found ${videos.size} quality videos") }
             videos
         } catch (e: Exception) {
-            println("❌ QUALITY ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ QUALITY ERROR: ${e.message}") }
             emptyList()
         }
     }
@@ -140,10 +141,10 @@ class HybridHomeFeedService(
             val followingIDs = userService.getFollowingIDs(userID)
             cachedFollowingIDs = followingIDs
             followingCacheTime = now
-            println("📱 FOLLOWING CACHE: Loaded ${followingIDs.size} following IDs")
+            if (BuildConfig.DEBUG) { println("📱 FOLLOWING CACHE: Loaded ${followingIDs.size} following IDs") }
             followingIDs
         } catch (e: Exception) {
-            println("❌ FOLLOWING ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FOLLOWING ERROR: ${e.message}") }
             emptyList()
         }
     }
@@ -152,10 +153,10 @@ class HybridHomeFeedService(
 
     suspend fun loadFeedThreads(userID: String, limit: Int = 20): List<ThreadData> {
         return try {
-            println("🎬 FEED LOADING: Starting feed load for user $userID")
+            if (BuildConfig.DEBUG) { println("🎬 FEED LOADING: Starting feed load for user $userID") }
 
             if (feedCache.isNotEmpty()) {
-                println("⚡ INSTANT FEED: Returning ${feedCache.size} cached threads")
+                if (BuildConfig.DEBUG) { println("⚡ INSTANT FEED: Returning ${feedCache.size} cached threads") }
                 return feedCache.take(limit)
             }
 
@@ -163,11 +164,11 @@ class HybridHomeFeedService(
             feedCache.clear()
             feedCache.addAll(freshThreads)
 
-            println("✅ FEED LOADED: ${freshThreads.size} threads")
+            if (BuildConfig.DEBUG) { println("✅ FEED LOADED: ${freshThreads.size} threads") }
             freshThreads
 
         } catch (e: Exception) {
-            println("❌ FEED LOADING ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FEED LOADING ERROR: ${e.message}") }
             emptyList()
         }
     }
@@ -184,7 +185,7 @@ class HybridHomeFeedService(
 
     private suspend fun loadFollowingBasedFeed(followingIDs: List<String>, limit: Int): List<ThreadData> {
         return try {
-            println("👥 FOLLOWING FEED: Loading from ${followingIDs.size} users")
+            if (BuildConfig.DEBUG) { println("👥 FOLLOWING FEED: Loading from ${followingIDs.size} users") }
 
             // ✅ FIXED: Correct signature - getFeedVideos(List<String>, Int)
             val feedVideos = videoService.getFeedVideos(followingIDs, limit)
@@ -193,18 +194,18 @@ class HybridHomeFeedService(
                 ThreadData.fromVideo(video)
             }
 
-            println("👥 FOLLOWING FEED: Created ${threads.size} threads")
+            if (BuildConfig.DEBUG) { println("👥 FOLLOWING FEED: Created ${threads.size} threads") }
             threads
 
         } catch (e: Exception) {
-            println("❌ FOLLOWING FEED ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FOLLOWING FEED ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     private suspend fun loadTrendingFeed(limit: Int): List<ThreadData> {
         return try {
-            println("🔥 TRENDING FEED: Loading trending content")
+            if (BuildConfig.DEBUG) { println("🔥 TRENDING FEED: Loading trending content") }
 
             // ✅ FIXED: Correct signature - getDiscoveryVideos(Int)
             val trendingVideos = videoService.getDiscoveryVideos(limit)
@@ -213,22 +214,22 @@ class HybridHomeFeedService(
                 ThreadData.fromVideo(video)
             }
 
-            println("🔥 TRENDING FEED: Created ${threads.size} threads")
+            if (BuildConfig.DEBUG) { println("🔥 TRENDING FEED: Created ${threads.size} threads") }
             threads
 
         } catch (e: Exception) {
-            println("❌ TRENDING FEED ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ TRENDING FEED ERROR: ${e.message}") }
             emptyList()
         }
     }
 
     suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
         return try {
-            println("🔄 LOADING CHILDREN: For thread $threadID")
+            if (BuildConfig.DEBUG) { println("🔄 LOADING CHILDREN: For thread $threadID") }
 
             threadCache[threadID]?.let { cachedThread ->
                 if (cachedThread.isChildrenLoaded) {
-                    println("⚡ CACHED CHILDREN: Returning ${cachedThread.childVideos.size}")
+                    if (BuildConfig.DEBUG) { println("⚡ CACHED CHILDREN: Returning ${cachedThread.childVideos.size}") }
                     return cachedThread.childVideos
                 }
             }
@@ -242,11 +243,11 @@ class HybridHomeFeedService(
                 )
             }
 
-            println("✅ CHILDREN LOADED: ${children.size}")
+            if (BuildConfig.DEBUG) { println("✅ CHILDREN LOADED: ${children.size}") }
             children
 
         } catch (e: Exception) {
-            println("❌ CHILDREN LOADING ERROR: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ CHILDREN LOADING ERROR: ${e.message}") }
             emptyList()
         }
     }
@@ -262,7 +263,7 @@ class HybridHomeFeedService(
         feedCache.clear()
         cachedFollowingIDs = emptyList()
         followingCacheTime = 0
-        println("🧹 CACHE CLEARED")
+        if (BuildConfig.DEBUG) { println("🧹 CACHE CLEARED") }
     }
 
     fun getInstantFeed(limit: Int = 20): List<ThreadData>? {

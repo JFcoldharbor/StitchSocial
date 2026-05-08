@@ -14,6 +14,7 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import java.util.UUID
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Velocity Tier (matches iOS)
 
@@ -83,7 +84,7 @@ class HashtagService {
         }
 
         return try {
-            println("📈 HASHTAG: Loading trending hashtags")
+            if (BuildConfig.DEBUG) { println("📈 HASHTAG: Loading trending hashtags") }
 
             val cutoffDate = Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000)
             val snapshot = db.collection(VIDEOS_COLLECTION)
@@ -122,11 +123,11 @@ class HashtagService {
             cachedTrending = trending
             trendingCacheTime = now
 
-            println("✅ HASHTAG: Found ${trending.size} trending hashtags")
+            if (BuildConfig.DEBUG) { println("✅ HASHTAG: Found ${trending.size} trending hashtags") }
             trending
 
         } catch (e: Exception) {
-            println("❌ HASHTAG: Failed to load trending - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ HASHTAG: Failed to load trending - ${e.message}") }
             emptyList()
         }
     }
@@ -141,7 +142,7 @@ class HashtagService {
         val cleanTag = hashtag.removePrefix("#").lowercase().trim()
 
         return try {
-            println("🏷️ HASHTAG: Loading videos for #$cleanTag")
+            if (BuildConfig.DEBUG) { println("🏷️ HASHTAG: Loading videos for #$cleanTag") }
 
             val snapshot = db.collection(VIDEOS_COLLECTION)
                 .whereArrayContains("hashtags", cleanTag)
@@ -153,7 +154,7 @@ class HashtagService {
 
             val videos = processVideoDocuments(snapshot.documents)
 
-            println("✅ HASHTAG: Found ${videos.size} videos for #$cleanTag")
+            if (BuildConfig.DEBUG) { println("✅ HASHTAG: Found ${videos.size} videos for #$cleanTag") }
 
             HashtagVideoResult(
                 hashtag = cleanTag,
@@ -162,7 +163,7 @@ class HashtagService {
             )
 
         } catch (e: Exception) {
-            println("❌ HASHTAG: Primary query failed for #$cleanTag - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ HASHTAG: Primary query failed for #$cleanTag - ${e.message}") }
             // Fallback: query without conversationDepth, filter client-side
             getVideosForHashtagFallback(cleanTag, limit)
         }
@@ -184,7 +185,7 @@ class HashtagService {
                 .filter { it.conversationDepth == 0 }
                 .take(limit)
 
-            println("✅ HASHTAG: Fallback found ${videos.size} videos for #$hashtag")
+            if (BuildConfig.DEBUG) { println("✅ HASHTAG: Fallback found ${videos.size} videos for #$hashtag") }
 
             HashtagVideoResult(
                 hashtag = hashtag,
@@ -193,7 +194,7 @@ class HashtagService {
             )
 
         } catch (e: Exception) {
-            println("❌ HASHTAG: Fallback also failed for #$hashtag - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ HASHTAG: Fallback also failed for #$hashtag - ${e.message}") }
             HashtagVideoResult(hashtag = hashtag, videos = emptyList(), totalCount = 0)
         }
     }
@@ -264,7 +265,7 @@ class HashtagService {
 
                 videos.add(video)
             } catch (e: Exception) {
-                println("⚠️ HASHTAG: Failed to process document ${document.id}")
+                if (BuildConfig.DEBUG) { println("⚠️ HASHTAG: Failed to process document ${document.id}") }
             }
         }
 

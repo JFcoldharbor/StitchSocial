@@ -5,6 +5,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 enum class ReferralStatus(val rawValue: String) {
     PENDING("pending"), COMPLETED("completed"), EXPIRED("expired"), FAILED("failed");
@@ -79,7 +80,7 @@ class ReferralService {
         referralCode: String, newUserID: String,
         platform: String = "android", sourceType: String = "manual"
     ): ReferralProcessingResult {
-        println("🔥 REFERRAL: Processing $referralCode for $newUserID")
+        if (BuildConfig.DEBUG) { println("🔥 REFERRAL: Processing $referralCode for $newUserID") }
 
         if (!isValidCodeFormat(referralCode)) return fail("Invalid code format", "INVALID_CODE_FORMAT")
 
@@ -146,12 +147,12 @@ class ReferralService {
                 null
             }.await()
 
-            println("✅ REFERRAL: $referralCode done — $referrerID +$cloutToAward clout")
+            if (BuildConfig.DEBUG) { println("✅ REFERRAL: $referralCode done — $referrerID +$cloutToAward clout") }
             ReferralProcessingResult(true, referralID, cloutToAward, hypeRatingBonusPerReferral, rewardsMaxed,
                 if (rewardsMaxed) "Processed! (Cap reached)" else "Success! +$cloutToAward clout", null, referrerID)
 
         } catch (e: Exception) {
-            println("❌ REFERRAL: Transaction failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ REFERRAL: Transaction failed — ${e.message}") }
             ReferralProcessingResult(false, null, 0, 0.0, false, "Transaction failed", e.message, null)
         }
     }
@@ -229,9 +230,9 @@ class ReferralService {
                 "createdAt" to Timestamp.now(), "completedAt" to Timestamp.now(), "cloutAwarded" to 0
             )
             db.collection("referrals").document("organic_$newUserID").set(data).await()
-            println("📊 REFERRAL: Organic tracked for $newUserID")
+            if (BuildConfig.DEBUG) { println("📊 REFERRAL: Organic tracked for $newUserID") }
         } catch (e: Exception) {
-            println("⚠️ REFERRAL: Organic tracking failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ REFERRAL: Organic tracking failed — ${e.message}") }
         }
     }
 

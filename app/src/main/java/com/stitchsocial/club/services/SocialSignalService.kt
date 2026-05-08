@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 class SocialSignalService private constructor() {
 
@@ -46,7 +47,7 @@ class SocialSignalService private constructor() {
     private val signalExpirationHours = 72.0
 
     init {
-        println("📢 SOCIAL SIGNAL SERVICE: Initialized")
+        if (BuildConfig.DEBUG) { println("📢 SOCIAL SIGNAL SERVICE: Initialized") }
     }
 
     // MARK: - Record Notable Engagement
@@ -64,7 +65,7 @@ class SocialSignalService private constructor() {
         if (!NotableEngagement.isMegaphoneTier(engagerTier)) return
         if (engagerID == videoCreatorID) return
 
-        println("📢 MEGAPHONE: $engagerName ($engagerTier) hyped video $videoID with weight $hypeWeight")
+        if (BuildConfig.DEBUG) { println("📢 MEGAPHONE: $engagerName ($engagerTier) hyped video $videoID with weight $hypeWeight") }
 
         val docID = "${engagerID}_${videoID}"
 
@@ -89,14 +90,14 @@ class SocialSignalService private constructor() {
                 .set(data, com.google.firebase.firestore.SetOptions.merge())
                 .await()
 
-            println("📢 MEGAPHONE: Notable engagement recorded")
+            if (BuildConfig.DEBUG) { println("📢 MEGAPHONE: Notable engagement recorded") }
 
             triggerFanOut(
                 engagerID, engagerName, engagerTier,
                 engagerProfileImageURL, videoID, videoCreatorID, hypeWeight
             )
         } catch (e: Exception) {
-            println("⚠️ MEGAPHONE: Failed to record — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ MEGAPHONE: Failed to record — ${e.message}") }
         }
     }
 
@@ -128,9 +129,9 @@ class SocialSignalService private constructor() {
             @Suppress("UNCHECKED_CAST")
             val data = result.data as? Map<String, Any>
             val followersNotified = data?.get("followersNotified") as? Int ?: 0
-            println("📢 MEGAPHONE: Fan-out complete — $followersNotified followers will see this")
+            if (BuildConfig.DEBUG) { println("📢 MEGAPHONE: Fan-out complete — $followersNotified followers will see this") }
         } catch (e: Exception) {
-            println("⚠️ MEGAPHONE: Fan-out failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ MEGAPHONE: Fan-out failed — ${e.message}") }
         }
     }
 
@@ -173,10 +174,10 @@ class SocialSignalService private constructor() {
             }
 
             _activeSignals.value = signals
-            println("📢 SOCIAL SIGNALS: Loaded ${signals.size} active signals for feed")
+            if (BuildConfig.DEBUG) { println("📢 SOCIAL SIGNALS: Loaded ${signals.size} active signals for feed") }
             return signals
         } catch (e: Exception) {
-            println("⚠️ SOCIAL SIGNALS: Failed to load — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ SOCIAL SIGNALS: Failed to load — ${e.message}") }
             return emptyList()
         }
     }
@@ -206,10 +207,10 @@ class SocialSignalService private constructor() {
                 docRef.update("dismissed", true).await()
                 dismissedSignalIDs.add(signalID)
                 _activeSignals.value = _activeSignals.value.filter { it.id != signalID }
-                println("📢 SIGNAL DISMISSED: $signalID after $impressions impressions")
+                if (BuildConfig.DEBUG) { println("📢 SIGNAL DISMISSED: $signalID after $impressions impressions") }
             }
         } catch (e: Exception) {
-            println("⚠️ SIGNAL IMPRESSION: Failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ SIGNAL IMPRESSION: Failed — ${e.message}") }
         }
     }
 
@@ -226,9 +227,9 @@ class SocialSignalService private constructor() {
                 .document(signalID)
                 .update("engagedWith", true)
                 .await()
-            println("📢 SIGNAL ENGAGED: $signalID — counts as real view")
+            if (BuildConfig.DEBUG) { println("📢 SIGNAL ENGAGED: $signalID — counts as real view") }
         } catch (e: Exception) {
-            println("⚠️ SIGNAL ENGAGEMENT: Failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ SIGNAL ENGAGEMENT: Failed — ${e.message}") }
         }
     }
 
@@ -259,7 +260,7 @@ class SocialSignalService private constructor() {
                 )
             }
         } catch (e: Exception) {
-            println("⚠️ Notable engagers fetch failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ Notable engagers fetch failed — ${e.message}") }
             emptyList()
         }
     }

@@ -100,6 +100,7 @@ import com.stitchsocial.club.views.ContextualVideoOverlay
 import com.stitchsocial.club.views.VideoPlayerComposable
 import com.stitchsocial.club.camera.RecordingContextFactory
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.BuildConfig
 
 // ===== HELPER FUNCTIONS =====
 
@@ -295,7 +296,7 @@ fun ProfileView(
     LaunchedEffect(authUserID) {
         if (!authUserID.isNullOrEmpty()) {
             viewModel.setCurrentUser(authUserID)
-            println("PROFILE: EngagementViewModel.setCurrentUser($authUserID)")
+            if (BuildConfig.DEBUG) { println("PROFILE: EngagementViewModel.setCurrentUser($authUserID)") }
         }
     }
 
@@ -463,7 +464,7 @@ fun ProfileView(
                         }
                     }
                 } catch (e: Exception) {
-                    println("PROFILE: ageGate read failed — ${e.message}")
+                    if (BuildConfig.DEBUG) { println("PROFILE: ageGate read failed — ${e.message}") }
                 }
                 ageGateChecked = true
             }
@@ -490,9 +491,9 @@ fun ProfileView(
                 for (col in standalone) { if (seen.add(col.id)) merged.add(col) }
 
                 userCollections = merged
-                println("📚 PROFILE: Loaded ${merged.size} collections (${showEpisodes.size} from shows, ${standalone.size} standalone) for $userID")
+                if (BuildConfig.DEBUG) { println("📚 PROFILE: Loaded ${merged.size} collections (${showEpisodes.size} from shows, ${standalone.size} standalone) for $userID") }
             } catch (e: Exception) {
-                println("❌ PROFILE: Collections load failed for $userID: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ PROFILE: Collections load failed for $userID: ${e.message}") }
             }
         }
     }
@@ -577,7 +578,7 @@ fun ProfileView(
                                         collectionService.deleteCollection(collection.id)
                                         userCollections = userCollections.filter { it.id != collection.id }
                                     } catch (e: Exception) {
-                                        println("❌ PROFILE: Delete failed: ${e.message}")
+                                        if (BuildConfig.DEBUG) { println("❌ PROFILE: Delete failed: ${e.message}") }
                                     }
                                 }
                             }) else null
@@ -824,7 +825,7 @@ fun ProfileView(
                 followManager = followManager,
                 navigationCoordinator = navigationCoordinator,
                 onAction = { action ->
-                    println("PROFILE PLAYER: action received: $action")
+                    if (BuildConfig.DEBUG) { println("PROFILE PLAYER: action received: $action") }
                     when (action) {
                         is OverlayAction.NavigateToProfile -> {
                             // Open the tapped creator's profile, dismiss this player
@@ -848,7 +849,7 @@ fun ProfileView(
                                     threadID, currentVid.creatorName, currentVid.title
                                 )
                             }
-                            println("PROFILE PLAYER: Stitch — threadID=$threadID isOwn=$isOwn")
+                            if (BuildConfig.DEBUG) { println("PROFILE PLAYER: Stitch — threadID=$threadID isOwn=$isOwn") }
                             navigationCoordinator?.showModal(
                                 ModalState.RECORDING,
                                 mapOf("context" to ctx, "parentVideo" to currentVid)
@@ -1145,7 +1146,7 @@ fun ProfileView(
                             mapOf("userID" to tappedUserID)
                         )
                     } else {
-                        println("PROFILE: navigationCoordinator is NULL - cannot navigate to $tappedUserID")
+                        if (BuildConfig.DEBUG) { println("PROFILE: navigationCoordinator is NULL - cannot navigate to $tappedUserID") }
                     }
                 }
             )

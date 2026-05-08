@@ -45,6 +45,7 @@ import java.io.File
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import com.stitchsocial.club.BuildConfig
 
 @OptIn(UnstableApi::class)
 object ReactionCompositor {
@@ -128,7 +129,7 @@ object ReactionCompositor {
                 val transformer = Transformer.Builder(context)
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                            println("🎬 REACTION COMP: complete — ${outputFile.length() / 1024} KB")
+                            if (BuildConfig.DEBUG) { println("🎬 REACTION COMP: complete — ${outputFile.length() / 1024} KB") }
                             if (continuation.isActive) continuation.resume(Uri.fromFile(outputFile))
                         }
                         override fun onError(
@@ -136,7 +137,7 @@ object ReactionCompositor {
                             exportResult: ExportResult,
                             exportException: ExportException
                         ) {
-                            println("🎬 REACTION COMP: failed — ${exportException.message}")
+                            if (BuildConfig.DEBUG) { println("🎬 REACTION COMP: failed — ${exportException.message}") }
                             if (continuation.isActive) continuation.resumeWithException(exportException)
                         }
                     })

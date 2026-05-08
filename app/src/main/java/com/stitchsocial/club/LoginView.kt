@@ -71,6 +71,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlin.random.Random
+import com.stitchsocial.club.BuildConfig
 
 private const val TERMS_VERSION = "1.0"
 private const val TERMS_URL = "https://stitchsocial.me/privacy"
@@ -218,7 +219,7 @@ fun LoginView(
                             val rs = ReferralService()
                             if (code.isNotEmpty()) {
                                 val ref = rs.processReferralSignup(code, r.userId, "android", "manual")
-                                println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}")
+                                if (BuildConfig.DEBUG) { println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}") }
                             } else {
                                 rs.processOrganicSignup(newUserID = r.userId, platform = "android")
                             }

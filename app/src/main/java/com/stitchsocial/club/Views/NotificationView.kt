@@ -80,6 +80,7 @@ import com.stitchsocial.club.FollowManager
 // Firebase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Complete notification screen with discovery and filtering
@@ -162,7 +163,7 @@ fun NotificationViewComplete(
             recentUsers = users
             leaderboardVideos = videos
         } catch (e: Exception) {
-            println("❌ NOTIFICATION VIEW: Failed to load discovery data: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ NOTIFICATION VIEW: Failed to load discovery data: ${e.message}") }
         }
         isLoadingDiscovery = false
 

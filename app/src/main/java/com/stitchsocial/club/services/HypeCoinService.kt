@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import java.util.UUID
+import com.stitchsocial.club.BuildConfig
 
 class HypeCoinService private constructor() {
 
@@ -135,7 +136,7 @@ class HypeCoinService private constructor() {
                 .get().await()
 
             if (!existing.isEmpty) {
-                println("⚠️ COINS: Purchase token already credited: $purchaseToken")
+                if (BuildConfig.DEBUG) { println("⚠️ COINS: Purchase token already credited: $purchaseToken") }
                 return
             }
 
@@ -165,7 +166,7 @@ class HypeCoinService private constructor() {
 
             // Refresh published state
             fetchBalance(userID)
-            println("💰 COINS: Credited $coins coins from Play purchase $purchaseToken")
+            if (BuildConfig.DEBUG) { println("💰 COINS: Credited $coins coins from Play purchase $purchaseToken") }
 
         } finally {
             _isLoading.value = false
@@ -184,7 +185,7 @@ class HypeCoinService private constructor() {
     suspend fun syncBalance(userID: String) {
         fetchBalance(userID)
         fetchTransactions(userID)
-        println("🔄 COINS: Balance synced")
+        if (BuildConfig.DEBUG) { println("🔄 COINS: Balance synced") }
     }
 
     // ─────────────────────────────────────────────
@@ -270,7 +271,7 @@ class HypeCoinService private constructor() {
             .set(receiverTxMap).await()
 
         fetchBalance(fromUserID)
-        println("💸 COINS: Transferred $amount coins from $fromUserID to $toUserID")
+        if (BuildConfig.DEBUG) { println("💸 COINS: Transferred $amount coins from $fromUserID to $toUserID") }
     }
 
     // ─────────────────────────────────────────────
@@ -299,7 +300,7 @@ class HypeCoinService private constructor() {
         ).await()
 
         fetchBalance(userID)
-        println("✅ COINS: Released $pending pending coins for $userID")
+        if (BuildConfig.DEBUG) { println("✅ COINS: Released $pending pending coins for $userID") }
     }
 
     // ─────────────────────────────────────────────
@@ -404,7 +405,7 @@ class HypeCoinService private constructor() {
             .set(txMap).await()
 
         fetchBalance(userID)
-        println("💵 CASH OUT: $amount coins → \$${String.format("%.2f", creatorAmount)} for ${tier.displayName}")
+        if (BuildConfig.DEBUG) { println("💵 CASH OUT: $amount coins → \$${String.format("%.2f", creatorAmount)} for ${tier.displayName}") }
         return request
     }
 

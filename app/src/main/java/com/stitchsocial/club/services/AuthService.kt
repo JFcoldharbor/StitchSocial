@@ -27,6 +27,7 @@ import com.stitchsocial.club.services.AdCategory
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.*
+import com.stitchsocial.club.BuildConfig
 
 class AuthService {
 
@@ -50,14 +51,14 @@ class AuthService {
     val lastError: StateFlow<StitchError?> = _lastError.asStateFlow()
 
     init {
-        println("AUTH SERVICE: Initializing Firebase Authentication")
+        if (BuildConfig.DEBUG) { println("AUTH SERVICE: Initializing Firebase Authentication") }
         setupAuthListener()
         val user = auth.currentUser
         if (user != null) {
             _currentUser.value = user
             _isAuthenticated.value = true
             _authState.value = AuthState.SIGNED_IN
-            println("AUTH SERVICE: User already authenticated - ${user.email}")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: User already authenticated - ${user.email}") }
         }
     }
 
@@ -73,22 +74,22 @@ class AuthService {
                 validateEmail(email)
                 validatePassword(password)
 
-                println("AUTH SERVICE: 🔐 Attempting sign in for: $email")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: 🔐 Attempting sign in for: $email") }
 
                 val result = auth.signInWithEmailAndPassword(email, password).await()
                 val user = result.user ?: throw StitchError.AuthenticationError("No user returned")
 
-                println("AUTH SERVICE: ✅ Firebase sign-in successful - UID: ${user.uid}")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Firebase sign-in successful - UID: ${user.uid}") }
 
                 serviceScope.launch {
                     try {
                         val profileExists = checkUserProfileExists(user.uid)
                         if (!profileExists) {
-                            println("AUTH SERVICE: 📝 Creating missing user profile...")
+                            if (BuildConfig.DEBUG) { println("AUTH SERVICE: 📝 Creating missing user profile...") }
                             createUserProfile(user)
                         }
                     } catch (e: Exception) {
-                        println("AUTH SERVICE: ⚠️ Profile creation failed (non-critical): ${e.message}")
+                        if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⚠️ Profile creation failed (non-critical): ${e.message}") }
                     }
                 }
 
@@ -113,7 +114,7 @@ class AuthService {
                                 profileImageURL = profileImageURL
                             )
                         } catch (e: Exception) {
-                            println("AUTH SERVICE: ⚠️ LinkedAccount seed failed (non-critical): ${e.message}")
+                            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⚠️ LinkedAccount seed failed (non-critical): ${e.message}") }
                         }
                     }
                 }
@@ -121,7 +122,7 @@ class AuthService {
                 AuthResult(success = true, userId = user.uid, email = user.email ?: "", isNewUser = false)
 
             } catch (e: Exception) {
-                println("AUTH SERVICE: ❌ Sign in failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Sign in failed: ${e.message}") }
                 _authState.value = AuthState.SIGNED_OUT
                 _isLoading.value = false
                 throw e
@@ -172,14 +173,14 @@ class AuthService {
                     }
                 }
 
-                println("AUTH SERVICE: 🔐 Attempting sign up for: $email (${accountType.rawValue})")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: 🔐 Attempting sign up for: $email (${accountType.rawValue})") }
 
                 // Username check — personal only
                 if (accountType == AccountType.PERSONAL) {
                     val usernameAvailable = try {
                         checkUsernameAvailabilityInternal(username)
                     } catch (e: Exception) {
-                        println("AUTH SERVICE: ⚠️ Username check failed (allowing): ${e.message}")
+                        if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⚠️ Username check failed (allowing): ${e.message}") }
                         true
                     }
                     if (!usernameAvailable) {
@@ -190,7 +191,7 @@ class AuthService {
                 val result = auth.createUserWithEmailAndPassword(email, password).await()
                 val user = result.user ?: throw StitchError.AuthenticationError("Failed to create user")
 
-                println("AUTH SERVICE: ✅ Firebase user created - UID: ${user.uid}")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Firebase user created - UID: ${user.uid}") }
 
                 try {
                     val isSpecialUser = checkSpecialUserStatus(email)
@@ -204,11 +205,11 @@ class AuthService {
                         websiteURL = websiteURL,
                         businessCategory = businessCategory
                     )
-                    println("AUTH SERVICE: ✅ User profile created successfully")
+                    if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User profile created successfully") }
 
                     // Verify the document was actually written — retry once if missing
                     if (!checkUserProfileExists(user.uid)) {
-                        println("AUTH SERVICE: ⚠️ Profile not found after write — retrying")
+                        if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⚠️ Profile not found after write — retrying") }
                         createUserProfile(
                             firebaseUser = user,
                             username = username,
@@ -222,23 +223,23 @@ class AuthService {
                         delay(500)
                     }
 
-                    println("AUTH SERVICE: ⏳ Waiting for Firestore propagation...")
+                    if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⏳ Waiting for Firestore propagation...") }
                     delay(1500)
-                    println("AUTH SERVICE: ✅ Firestore propagation delay complete")
+                    if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Firestore propagation delay complete") }
 
                 } catch (e: Exception) {
                     // Profile creation failed — throw so signup fails cleanly
                     // instead of creating a phantom authenticated user with no profile
-                    println("AUTH SERVICE: ❌ Profile creation failed: ${e.message}")
+                    if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Profile creation failed: ${e.message}") }
                     throw e
                 }
 
-                println("AUTH SERVICE: ✅ Sign up completed successfully")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Sign up completed successfully") }
 
                 AuthResult(success = true, userId = user.uid, email = user.email ?: "", isNewUser = true)
 
             } catch (e: Exception) {
-                println("AUTH SERVICE: ❌ Sign up failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Sign up failed: ${e.message}") }
                 _authState.value = AuthState.SIGNED_OUT
                 _isLoading.value = false
                 throw e
@@ -254,9 +255,9 @@ class AuthService {
         try {
             _authState.value = AuthState.SIGNING_OUT
             auth.signOut()
-            println("AUTH SERVICE: ✅ User signed out successfully")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User signed out successfully") }
         } catch (e: Exception) {
-            println("AUTH SERVICE: ❌ Sign out error: ${e.message}")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Sign out error: ${e.message}") }
             handleAuthError(e)
         }
     }
@@ -267,9 +268,9 @@ class AuthService {
         try {
             validateEmail(email)
             auth.sendPasswordResetEmail(email).await()
-            println("AUTH SERVICE: ✅ Password reset email sent to $email")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Password reset email sent to $email") }
         } catch (e: Exception) {
-            println("AUTH SERVICE: ❌ Password reset failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Password reset failed: ${e.message}") }
             handleAuthError(e)
             throw e
         }
@@ -327,7 +328,7 @@ class AuthService {
         businessCategory: AdCategory? = null
     ) {
         try {
-            println("AUTH SERVICE: 📝 Creating user profile for ${firebaseUser.uid} (${accountType.rawValue})")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: 📝 Creating user profile for ${firebaseUser.uid} (${accountType.rawValue})") }
 
             val resolvedUsername = when {
                 accountType == AccountType.BUSINESS && !brandName.isNullOrBlank() ->
@@ -384,10 +385,10 @@ class AuthService {
                 .set(userData, SetOptions.merge())
                 .await()
 
-            println("AUTH SERVICE: ✅ User profile created for ${firebaseUser.email} (${accountType.rawValue})")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User profile created for ${firebaseUser.email} (${accountType.rawValue})") }
 
         } catch (e: Exception) {
-            println("AUTH SERVICE: ❌ Failed to create user profile - ${e.message}")
+            if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Failed to create user profile - ${e.message}") }
             throw StitchError.ProcessingError("Failed to create user profile")
         }
     }
@@ -417,7 +418,7 @@ class AuthService {
         }
         _lastError.value = error
         _authState.value = AuthState.ERROR
-        println("AUTH SERVICE: ❌ Error - ${error.message}")
+        if (BuildConfig.DEBUG) { println("AUTH SERVICE: ❌ Error - ${error.message}") }
     }
 
     private fun validateEmail(email: String) {

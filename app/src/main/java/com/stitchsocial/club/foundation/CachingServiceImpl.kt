@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Simplified high-performance caching system for Stitch Social
@@ -121,10 +122,10 @@ class SimplifiedCachingService(
                     evictOldestVideo()
                 }
 
-                println("CACHE SERVICE: Cached video ${video.id} with priority ${priority.name}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Cached video ${video.id} with priority ${priority.name}") }
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error caching video ${video.id}: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error caching video ${video.id}: ${e.message}") }
             }
         }
     }
@@ -151,7 +152,7 @@ class SimplifiedCachingService(
                 null
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error retrieving video $id: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error retrieving video $id: ${e.message}") }
                 null
             }
         }
@@ -179,10 +180,10 @@ class SimplifiedCachingService(
                     evictOldestUser()
                 }
 
-                println("CACHE SERVICE: Cached user ${user.id} (@${user.username}) with priority ${priority.name}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Cached user ${user.id} (@${user.username}) with priority ${priority.name}") }
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error caching user ${user.id}: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error caching user ${user.id}: ${e.message}") }
             }
         }
     }
@@ -209,7 +210,7 @@ class SimplifiedCachingService(
                 null
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error retrieving user $id: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error retrieving user $id: ${e.message}") }
                 null
             }
         }
@@ -243,10 +244,10 @@ class SimplifiedCachingService(
                     evictOldestThread()
                 }
 
-                println("CACHE SERVICE: Cached thread ${thread.id} with ${thread.childVideos.size} children")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Cached thread ${thread.id} with ${thread.childVideos.size} children") }
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error caching thread ${thread.id}: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error caching thread ${thread.id}: ${e.message}") }
             }
         }
     }
@@ -273,7 +274,7 @@ class SimplifiedCachingService(
                 null
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error retrieving thread $id: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error retrieving thread $id: ${e.message}") }
                 null
             }
         }
@@ -297,7 +298,7 @@ class SimplifiedCachingService(
             hasSufficientContent && isFreshEnough
 
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error checking instant feed for $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error checking instant feed for $userID: ${e.message}") }
             false
         }
     }
@@ -325,12 +326,12 @@ class SimplifiedCachingService(
                 }
             }
 
-            println("CACHE SERVICE: Instant feed for $userID - ${availableThreads.size}/${threadIds.size} threads available")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Instant feed for $userID - ${availableThreads.size}/${threadIds.size} threads available") }
 
             if (availableThreads.size >= 3) availableThreads else null
 
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error loading instant feed for $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error loading instant feed for $userID: ${e.message}") }
             null
         }
     }
@@ -354,10 +355,10 @@ class SimplifiedCachingService(
                 .putLong("instant_feed_${userID}_timestamp", System.currentTimeMillis())
                 .apply()
 
-            println("CACHE SERVICE: Preloaded ${threads.size} threads for user $userID instant startup")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Preloaded ${threads.size} threads for user $userID instant startup") }
 
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error preloading feed for $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error preloading feed for $userID: ${e.message}") }
         }
     }
 
@@ -393,11 +394,11 @@ class SimplifiedCachingService(
                 }
 
                 if (removedCount > 0) {
-                    println("CACHE SERVICE: Cleared $removedCount expired entries")
+                    if (BuildConfig.DEBUG) { println("CACHE SERVICE: Cleared $removedCount expired entries") }
                 }
 
             } catch (e: Exception) {
-                println("CACHE SERVICE: Error clearing expired entries: ${e.message}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error clearing expired entries: ${e.message}") }
             }
         }
     }
@@ -431,7 +432,7 @@ class SimplifiedCachingService(
 
             metrics = CacheMetrics()
 
-            println("CACHE SERVICE: All caches cleared")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: All caches cleared") }
         }
     }
 
@@ -447,10 +448,10 @@ class SimplifiedCachingService(
             oldestEntry?.let { entry ->
                 videoCache.remove(entry.key)
                 metrics = metrics.copy(evictions = metrics.evictions + 1)
-                println("CACHE SERVICE: Evicted video ${entry.key}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Evicted video ${entry.key}") }
             }
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error evicting video: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error evicting video: ${e.message}") }
         }
     }
 
@@ -463,10 +464,10 @@ class SimplifiedCachingService(
             oldestEntry?.let { entry ->
                 userCache.remove(entry.key)
                 metrics = metrics.copy(evictions = metrics.evictions + 1)
-                println("CACHE SERVICE: Evicted user ${entry.key}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Evicted user ${entry.key}") }
             }
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error evicting user: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error evicting user: ${e.message}") }
         }
     }
 
@@ -479,16 +480,16 @@ class SimplifiedCachingService(
             oldestEntry?.let { entry ->
                 threadCache.remove(entry.key)
                 metrics = metrics.copy(evictions = metrics.evictions + 1)
-                println("CACHE SERVICE: Evicted thread ${entry.key}")
+                if (BuildConfig.DEBUG) { println("CACHE SERVICE: Evicted thread ${entry.key}") }
             }
         } catch (e: Exception) {
-            println("CACHE SERVICE: Error evicting thread: ${e.message}")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Error evicting thread: ${e.message}") }
         }
     }
 
     fun helloWorldTest() {
-        println("CACHE SERVICE: Hello World - Simplified high-performance caching ready!")
-        println("CACHE SERVICE: Features: Memory cache, TTL expiration, Instant feed")
-        println("CACHE SERVICE: Performance: <2s startup target, >80% hit rate goal")
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Hello World - Simplified high-performance caching ready!") }
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Features: Memory cache, TTL expiration, Instant feed") }
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Performance: <2s startup target, >80% hit rate goal") }
     }
 }

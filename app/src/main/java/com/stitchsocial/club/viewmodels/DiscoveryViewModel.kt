@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Discovery categories matching Swift
@@ -62,21 +63,21 @@ class DiscoveryViewModel(
             _error.value = null
 
             try {
-                println("DISCOVERY VM: Loading real content for ${_selectedCategory.value.displayName}")
+                if (BuildConfig.DEBUG) { println("DISCOVERY VM: Loading real content for ${_selectedCategory.value.displayName}") }
 
                 val content = loadContentForCategory(_selectedCategory.value)
                 _discoveryContent.value = content
 
-                println("DISCOVERY VM: ✅ Loaded ${content.size} real videos from Firebase")
+                if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Loaded ${content.size} real videos from Firebase") }
 
                 if (content.isEmpty()) {
                     _error.value = "No videos found for ${_selectedCategory.value.displayName}"
-                    println("DISCOVERY VM: ⚠️ No content found - check Firebase database")
+                    if (BuildConfig.DEBUG) { println("DISCOVERY VM: ⚠️ No content found - check Firebase database") }
                 }
 
             } catch (e: Exception) {
                 _error.value = "Failed to load content: ${e.message}"
-                println("DISCOVERY VM: ❌ Error loading content: ${e.message}")
+                if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ Error loading content: ${e.message}") }
                 _discoveryContent.value = emptyList()
             } finally {
                 _isLoading.value = false
@@ -93,7 +94,7 @@ class DiscoveryViewModel(
             _discoveryContent.value = emptyList()
             _error.value = null
 
-            println("DISCOVERY VM: Selected category: ${category.displayName}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: Selected category: ${category.displayName}") }
             loadInitialDiscovery()
         }
     }
@@ -109,7 +110,7 @@ class DiscoveryViewModel(
      * Track video view for analytics
      */
     fun trackVideoView(videoID: String) {
-        println("DISCOVERY VM: 📊 Video viewed: $videoID")
+        if (BuildConfig.DEBUG) { println("DISCOVERY VM: 📊 Video viewed: $videoID") }
         // TODO: Track analytics to Firebase
     }
 
@@ -134,16 +135,16 @@ class DiscoveryViewModel(
      */
     private suspend fun loadForYouContent(): List<CoreVideoMetadata> {
         return try {
-            println("DISCOVERY VM: 🎯 Loading For You content from Firebase")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: 🎯 Loading For You content from Firebase") }
 
             // FIXED: Use HybridHomeFeedService method that exists
             val videos = feedService.getAllDiscoveryVideos(20)
 
-            println("DISCOVERY VM: ✅ Found ${videos.size} For You videos")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Found ${videos.size} For You videos") }
             return videos
 
         } catch (e: Exception) {
-            println("DISCOVERY VM: ❌ For You content failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ For You content failed: ${e.message}") }
             throw e
         }
     }
@@ -153,16 +154,16 @@ class DiscoveryViewModel(
      */
     private suspend fun loadTrendingContent(): List<CoreVideoMetadata> {
         return try {
-            println("DISCOVERY VM: 🔥 Loading trending content from Firebase")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: 🔥 Loading trending content from Firebase") }
 
             // FIXED: Use HybridHomeFeedService method that exists
             val videos = feedService.getTrendingVideos(20)
 
-            println("DISCOVERY VM: ✅ Found ${videos.size} trending videos")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Found ${videos.size} trending videos") }
             return videos
 
         } catch (e: Exception) {
-            println("DISCOVERY VM: ❌ Trending content failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ Trending content failed: ${e.message}") }
             throw e
         }
     }
@@ -172,16 +173,16 @@ class DiscoveryViewModel(
      */
     private suspend fun loadViralContent(): List<CoreVideoMetadata> {
         return try {
-            println("DISCOVERY VM: 🚀 Loading viral content from Firebase")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: 🚀 Loading viral content from Firebase") }
 
             // FIXED: Use HybridHomeFeedService method that exists
             val videos = feedService.getViralVideos(20)
 
-            println("DISCOVERY VM: ✅ Found ${videos.size} viral videos")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Found ${videos.size} viral videos") }
             return videos
 
         } catch (e: Exception) {
-            println("DISCOVERY VM: ❌ Viral content failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ Viral content failed: ${e.message}") }
             throw e
         }
     }
@@ -191,16 +192,16 @@ class DiscoveryViewModel(
      */
     private suspend fun loadFreshContent(): List<CoreVideoMetadata> {
         return try {
-            println("DISCOVERY VM: 🌱 Loading fresh content from Firebase")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: 🌱 Loading fresh content from Firebase") }
 
             // FIXED: Use HybridHomeFeedService method that exists
             val videos = feedService.getFreshVideos(20)
 
-            println("DISCOVERY VM: ✅ Found ${videos.size} fresh videos")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Found ${videos.size} fresh videos") }
             return videos
 
         } catch (e: Exception) {
-            println("DISCOVERY VM: ❌ Fresh content failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ Fresh content failed: ${e.message}") }
             throw e
         }
     }
@@ -210,22 +211,22 @@ class DiscoveryViewModel(
      */
     private suspend fun loadQualityContent(): List<CoreVideoMetadata> {
         return try {
-            println("DISCOVERY VM: ⭐ Loading quality content from Firebase")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ⭐ Loading quality content from Firebase") }
 
             // FIXED: Use HybridHomeFeedService method that exists
             val videos = feedService.getQualityVideos(20)
 
-            println("DISCOVERY VM: ✅ Found ${videos.size} quality videos")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Found ${videos.size} quality videos") }
             return videos
 
         } catch (e: Exception) {
-            println("DISCOVERY VM: ❌ Quality content failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("DISCOVERY VM: ❌ Quality content failed: ${e.message}") }
             throw e
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        println("DISCOVERY VM: 🧹 Cleaning up resources")
+        if (BuildConfig.DEBUG) { println("DISCOVERY VM: 🧹 Cleaning up resources") }
     }
 }

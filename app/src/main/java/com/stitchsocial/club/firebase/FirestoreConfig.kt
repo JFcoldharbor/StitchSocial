@@ -68,10 +68,10 @@ object FirestoreConfig {
 
     fun validateConfiguration(): Boolean {
         if (DATABASE_NAME.isEmpty() || PROJECT_ID.isEmpty()) {
-            println("❌ FIRESTORE CONFIG: Invalid config")
+            if (BuildConfig.DEBUG) { println("❌ FIRESTORE CONFIG: Invalid config") }
             return false
         }
-        println("✅ FIRESTORE CONFIG: $DATABASE_NAME / $PROJECT_ID")
+        if (BuildConfig.DEBUG) { println("✅ FIRESTORE CONFIG: $DATABASE_NAME / $PROJECT_ID") }
         return true
     }
 
@@ -94,18 +94,18 @@ object FirestoreConfig {
     fun printConfigurationStatus() {
         val v = validateEnvironmentConfiguration()
         val e = getEnvironmentConfig()
-        println("🔧 FIRESTORE CONFIG STATUS:")
-        println("   Environment: ${Environment.current.description}")
-        println("   Database: $DATABASE_NAME  Project: $PROJECT_ID")
-        println("   Cache: ${CACHE_SIZE_BYTES / (1024 * 1024)}MB  Logging: ${e.enableDebugLogging}")
+        if (BuildConfig.DEBUG) { println("🔧 FIRESTORE CONFIG STATUS:") }
+        if (BuildConfig.DEBUG) { println("   Environment: ${Environment.current.description}") }
+        if (BuildConfig.DEBUG) { println("   Database: $DATABASE_NAME  Project: $PROJECT_ID") }
+        if (BuildConfig.DEBUG) { println("   Cache: ${CACHE_SIZE_BYTES / (1024 * 1024)}MB  Logging: ${e.enableDebugLogging}") }
         if (!v.isValid) v.issues.forEach { println("   ⚠️ $it") }
         else println("   ✅ Config valid")
     }
 
     fun initializeFirestoreConfig(): Boolean {
-        println("🔧 FIRESTORE CONFIG: Initializing stitchfin...")
+        if (BuildConfig.DEBUG) { println("🔧 FIRESTORE CONFIG: Initializing stitchfin...") }
         val ok = validateConfiguration() && validateEnvironmentConfiguration().isValid
-        println(if (ok) "✅ FIRESTORE CONFIG: Ready" else "❌ FIRESTORE CONFIG: Failed")
+        if (BuildConfig.DEBUG) { println(if (ok) "✅ FIRESTORE CONFIG: Ready" else "❌ FIRESTORE CONFIG: Failed") }
         return ok
     }
 

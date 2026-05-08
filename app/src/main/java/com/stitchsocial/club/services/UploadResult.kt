@@ -22,6 +22,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.Temperature
+import com.stitchsocial.club.BuildConfig
 /**
  * Upload processing coordinator - FIXED all missing references
  */
@@ -43,17 +44,17 @@ class UploadCoordinator(
     ): VideoUploadResult {
         return withContext(Dispatchers.IO) {
             try {
-                println("UPLOAD: Processing video upload - $videoPath")
+                if (BuildConfig.DEBUG) { println("UPLOAD: Processing video upload - $videoPath") }
 
                 // Step 1: Determine if AI should be used - FIXED: Use direct tier check
                 val shouldUseAI = shouldUseAIForTier(userTier) && aiAnalyzer.isAIAvailable()
 
                 // Step 2: Get video analysis - FIXED: Use correct method names
                 val analysisResult = if (shouldUseAI && manualTitle.isNullOrBlank()) {
-                    println("UPLOAD: Using AI analysis")
+                    if (BuildConfig.DEBUG) { println("UPLOAD: Using AI analysis") }
                     aiAnalyzer.analyzeVideoSimple(recordingContext, "")
                 } else {
-                    println("UPLOAD: Using manual/fallback content")
+                    if (BuildConfig.DEBUG) { println("UPLOAD: Using manual/fallback content") }
                     aiAnalyzer.generateFallbackContent(recordingContext)
                 }
 
@@ -120,7 +121,7 @@ class UploadCoordinator(
                 )
 
             } catch (e: Exception) {
-                println("UPLOAD: Error processing video - ${e.message}")
+                if (BuildConfig.DEBUG) { println("UPLOAD: Error processing video - ${e.message}") }
                 VideoUploadResult(
                     success = false,
                     videoMetadata = null,

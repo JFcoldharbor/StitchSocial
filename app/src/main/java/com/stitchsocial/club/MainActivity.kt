@@ -76,6 +76,7 @@ import com.stitchsocial.club.services.AnnouncementService
 import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.views.AnnouncementOverlayView
 import com.stitchsocial.club.community.CommunityListItem
+import com.stitchsocial.club.BuildConfig
 
 
 class MainActivity : ComponentActivity() {
@@ -846,14 +847,14 @@ private fun ModalOverlay(
                 ModalState.RECORDING -> {
                     val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
                     val parentVideo = modalData["parentVideo"] as? CoreVideoMetadata
-                    println("🎬 MAINACT: RECORDING Modal active - context: $recordingContext")
+                    if (BuildConfig.DEBUG) { println("🎬 MAINACT: RECORDING Modal active - context: $recordingContext") }
                     CameraView(
                         recordingContext = recordingContext,
                         parentVideo = parentVideo,
                         onVideoRecorded = { recordedVideo ->
                             try {
-                                println("📹 MAINACT: Video recorded, going to VIDEO_REVIEW")
-                                println("📹 MAINACT: Video path: ${recordedVideo.videoURL}")
+                                if (BuildConfig.DEBUG) { println("📹 MAINACT: Video recorded, going to VIDEO_REVIEW") }
+                                if (BuildConfig.DEBUG) { println("📹 MAINACT: Video path: ${recordedVideo.videoURL}") }
 
                                 // Go to VIDEO_REVIEW for editing before processing
                                 navigationCoordinator.showModal(
@@ -864,14 +865,14 @@ private fun ModalOverlay(
                                         "metadata" to recordedVideo
                                     )
                                 )
-                                println("📹 MAINACT: VIDEO_REVIEW modal shown")
+                                if (BuildConfig.DEBUG) { println("📹 MAINACT: VIDEO_REVIEW modal shown") }
                             } catch (e: Exception) {
-                                println("❌ MAINACT: EXCEPTION in onVideoRecorded: ${e.message}")
+                                if (BuildConfig.DEBUG) { println("❌ MAINACT: EXCEPTION in onVideoRecorded: ${e.message}") }
                                 e.printStackTrace()
                             }
                         },
                         onCancel = {
-                            println("❌ MAINACT: Camera CANCELLED - dismissing modal")
+                            if (BuildConfig.DEBUG) { println("❌ MAINACT: Camera CANCELLED - dismissing modal") }
                             navigationCoordinator.dismissModal()
                         },
                         onStopAllVideos = {},
@@ -904,8 +905,8 @@ private fun ModalOverlay(
                     val recordingContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
                     val metadata = modalData["metadata"] as? CoreVideoMetadata
 
-                    println("✂️ MAINACT: VIDEO_REVIEW Modal active")
-                    println("✂️ MAINACT: Video path: $videoPath")
+                    if (BuildConfig.DEBUG) { println("✂️ MAINACT: VIDEO_REVIEW Modal active") }
+                    if (BuildConfig.DEBUG) { println("✂️ MAINACT: Video path: $videoPath") }
 
                     if (videoPath != null) {
                         // Properly parse video path to URI
@@ -916,7 +917,7 @@ private fun ModalOverlay(
                             Uri.fromFile(java.io.File(videoPath))
                         }
 
-                        println("✂️ MAINACT: Parsed video URI: $videoUri")
+                        if (BuildConfig.DEBUG) { println("✂️ MAINACT: Parsed video URI: $videoUri") }
 
                         VideoReviewView(
                             initialState = VideoEditState.create(
@@ -924,9 +925,9 @@ private fun ModalOverlay(
                                 duration = 0.0
                             ),
                             onContinueToThread = { editedState ->
-                                println("✅ MAINACT: Video editing complete, starting processing")
-                                println("✅ MAINACT: hasEdits=${editedState.hasEdits}, hasTrimEdits=${editedState.hasTrimEdits}")
-                                println("✅ MAINACT: processedVideoUri=${editedState.processedVideoUri}")
+                                if (BuildConfig.DEBUG) { println("✅ MAINACT: Video editing complete, starting processing") }
+                                if (BuildConfig.DEBUG) { println("✅ MAINACT: hasEdits=${editedState.hasEdits}, hasTrimEdits=${editedState.hasTrimEdits}") }
+                                if (BuildConfig.DEBUG) { println("✅ MAINACT: processedVideoUri=${editedState.processedVideoUri}") }
 
                                 // Use processed video if available, otherwise original
                                 // Convert URI to file path (VideoCoordinator expects raw path, not URI)
@@ -948,15 +949,15 @@ private fun ModalOverlay(
                                         Uri.parse(videoPath).path ?: videoPath
                                     }
                                 }
-                                println("✅ MAINACT: Using finalVideoPath=$finalVideoPath")
+                                if (BuildConfig.DEBUG) { println("✅ MAINACT: Using finalVideoPath=$finalVideoPath") }
 
                                 navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
 
                                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                     try {
-                                        println("🔄 MAINACT: Starting parallel processing after edit...")
-                                        println("🔄 MAINACT: finalVideoPath = $finalVideoPath")
-                                        println("🔄 MAINACT: File exists = ${java.io.File(finalVideoPath).exists()}")
+                                        if (BuildConfig.DEBUG) { println("🔄 MAINACT: Starting parallel processing after edit...") }
+                                        if (BuildConfig.DEBUG) { println("🔄 MAINACT: finalVideoPath = $finalVideoPath") }
+                                        if (BuildConfig.DEBUG) { println("🔄 MAINACT: File exists = ${java.io.File(finalVideoPath).exists()}") }
 
                                         val finalMetadata = metadata ?: CoreVideoMetadata(
                                             id = "temp_${System.currentTimeMillis()}",
@@ -997,23 +998,23 @@ private fun ModalOverlay(
                                             finalMetadata,
                                             recordingContext
                                         )
-                                        println("✅ MAINACT: Parallel processing completed!")
+                                        if (BuildConfig.DEBUG) { println("✅ MAINACT: Parallel processing completed!") }
                                         // ParallelProcessingView will auto-transition when complete
 
                                     } catch (e: Exception) {
-                                        println("❌ MAINACT: Processing EXCEPTION: ${e.message}")
+                                        if (BuildConfig.DEBUG) { println("❌ MAINACT: Processing EXCEPTION: ${e.message}") }
                                         e.printStackTrace()
                                     }
                                 }
                             },
                             onCancel = {
-                                println("❌ MAINACT: Video editing CANCELLED")
+                                if (BuildConfig.DEBUG) { println("❌ MAINACT: Video editing CANCELLED") }
                                 navigationCoordinator.dismissModal()
                             },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        println("❌ MAINACT: No video path for VIDEO_REVIEW")
+                        if (BuildConfig.DEBUG) { println("❌ MAINACT: No video path for VIDEO_REVIEW") }
                         navigationCoordinator.dismissModal()
                     }
                 }
@@ -1027,11 +1028,11 @@ private fun ModalOverlay(
                     val reactionContext = (modalData["context"] as? RecordingContext) ?: RecordingContext.NewThread
                     com.stitchsocial.club.views.ReactionCameraView(
                         onCancel = {
-                            println("🎬 REACTION: cancelled")
+                            if (BuildConfig.DEBUG) { println("🎬 REACTION: cancelled") }
                             navigationCoordinator.dismissModal()
                         },
                         onComplete = { resultUri ->
-                            println("🎬 REACTION: completed → $resultUri, routing to VIDEO_REVIEW")
+                            if (BuildConfig.DEBUG) { println("🎬 REACTION: completed → $resultUri, routing to VIDEO_REVIEW") }
                             navigationCoordinator.showModal(
                                 ModalState.VIDEO_REVIEW,
                                 mapOf(

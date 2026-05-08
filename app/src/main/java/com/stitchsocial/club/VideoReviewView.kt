@@ -41,6 +41,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 @Composable
 fun VideoReviewView(
@@ -98,10 +99,10 @@ fun VideoReviewView(
                 editState = editState.copy(
                     captions = captions.toMutableList()
                 )
-                println("✅ REVIEW: Auto-generated ${captions.size} caption(s)")
+                if (BuildConfig.DEBUG) { println("✅ REVIEW: Auto-generated ${captions.size} caption(s)") }
             }
         } catch (e: Exception) {
-            println("⚠️ REVIEW: Auto-caption failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ REVIEW: Auto-caption failed — ${e.message}") }
         }
     }
 
@@ -641,10 +642,10 @@ private suspend fun loadVideoProperties(
         retriever.release()
         onLoaded(duration, finalWidth, finalHeight)
 
-        println("📐 VIDEO PROPS: ${finalWidth}x${finalHeight}, ${duration}s, rotation: $rotation")
+        if (BuildConfig.DEBUG) { println("📐 VIDEO PROPS: ${finalWidth}x${finalHeight}, ${duration}s, rotation: $rotation") }
 
     } catch (e: Exception) {
-        println("⚠️ VIDEO PROPS: Failed to load - ${e.message}")
+        if (BuildConfig.DEBUG) { println("⚠️ VIDEO PROPS: Failed to load - ${e.message}") }
         onLoaded(0.0, 1080, 1920)
     }
 }

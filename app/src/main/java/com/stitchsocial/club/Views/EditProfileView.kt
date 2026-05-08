@@ -50,6 +50,7 @@ import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -168,7 +169,7 @@ fun EditProfileView(
 
             } catch (e: Exception) {
                 errorMessage = "Failed to save profile: ${e.message}"
-                println("❌ EDIT PROFILE: Save failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ EDIT PROFILE: Save failed: ${e.message}") }
             } finally {
                 isSaving = false
             }
@@ -495,6 +496,6 @@ private suspend fun uploadProfileImage(
 
     uploadTask.await()
     val downloadURL = ref.downloadUrl.await()
-    println("✅ EDIT PROFILE: Image uploaded → $downloadURL")
+    if (BuildConfig.DEBUG) { println("✅ EDIT PROFILE: Image uploaded → $downloadURL") }
     return downloadURL.toString()
 }

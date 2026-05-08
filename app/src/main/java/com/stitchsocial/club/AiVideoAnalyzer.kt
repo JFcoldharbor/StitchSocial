@@ -24,6 +24,7 @@ import java.io.File as JavaFile
 import java.util.concurrent.TimeUnit
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.AppConfig
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Enhanced VideoAnalysisResult with transcript data
@@ -62,14 +63,14 @@ class AIVideoAnalyzer {
         val aiEnabled = AppConfig.Features.enableAIAnalysis
         val apiConfigured = AppConfig.API.OpenAI.isConfigured()
 
-        println("🤖 AI AVAILABLE CHECK:")
-        println("   - enableAIAnalysis: $aiEnabled")
-        println("   - API isConfigured: $apiConfigured")
-        println("   - API Key length: ${openAIApiKey.length}")
-        println("   - API Key prefix: ${openAIApiKey.take(10)}...")
+        if (BuildConfig.DEBUG) { println("🤖 AI AVAILABLE CHECK:") }
+        if (BuildConfig.DEBUG) { println("   - enableAIAnalysis: $aiEnabled") }
+        if (BuildConfig.DEBUG) { println("   - API isConfigured: $apiConfigured") }
+        if (BuildConfig.DEBUG) { println("   - API Key length: ${openAIApiKey.length}") }
+        if (BuildConfig.DEBUG) { println("   - API Key prefix: ${openAIApiKey.take(10)}...") }
 
         val available = aiEnabled && apiConfigured
-        println("   - RESULT: $available")
+        if (BuildConfig.DEBUG) { println("   - RESULT: $available") }
 
         return available
     }
@@ -88,26 +89,26 @@ class AIVideoAnalyzer {
             try {
                 // UPDATED: Check configuration before proceeding
                 if (!isAIAvailable()) {
-                    println("⚠️ AI: Analysis disabled or not configured - using fallback")
+                    if (BuildConfig.DEBUG) { println("⚠️ AI: Analysis disabled or not configured - using fallback") }
                     return@withContext generateFallbackContent(recordingContext)
                 }
 
-                println("🎵 AI AUDIO: Starting audio-only analysis")
+                if (BuildConfig.DEBUG) { println("🎵 AI AUDIO: Starting audio-only analysis") }
 
                 // Step 1: Transcribe audio
                 val transcript = transcribeAudio(audioPath)
                 if (transcript.isNullOrBlank()) {
-                    println("⚠️ AI AUDIO: No transcript - using context analysis")
+                    if (BuildConfig.DEBUG) { println("⚠️ AI AUDIO: No transcript - using context analysis") }
                     return@withContext analyzeUserInputOnly("", recordingContext)
                 }
 
-                println("✅ AI AUDIO: Transcript complete - ${transcript.length} chars")
+                if (BuildConfig.DEBUG) { println("✅ AI AUDIO: Transcript complete - ${transcript.length} chars") }
 
                 // Step 2: Generate content from transcript
                 val result = generateContentFromTranscript(transcript, recordingContext)
                 if (result != null) {
                     val processingTime = System.currentTimeMillis() - startTime
-                    println("✅ AI AUDIO: Analysis complete in ${processingTime}ms")
+                    if (BuildConfig.DEBUG) { println("✅ AI AUDIO: Analysis complete in ${processingTime}ms") }
                     return@withContext result.copy(
                         transcript = transcript,
                         analysisType = "audio_ai",
@@ -116,12 +117,12 @@ class AIVideoAnalyzer {
                 }
 
                 // Fallback to context analysis
-                println("⚠️ AI AUDIO: Generation failed - using context analysis")
+                if (BuildConfig.DEBUG) { println("⚠️ AI AUDIO: Generation failed - using context analysis") }
                 return@withContext analyzeUserInputOnly(transcript, recordingContext)
 
             } catch (e: Exception) {
                 val processingTime = System.currentTimeMillis() - startTime
-                println("⛔ AI AUDIO: Exception - ${e.message}")
+                if (BuildConfig.DEBUG) { println("⛔ AI AUDIO: Exception - ${e.message}") }
                 return@withContext generateFallbackContent(recordingContext).copy(
                     processingTimeMs = processingTime
                 )
@@ -141,11 +142,11 @@ class AIVideoAnalyzer {
             try {
                 // UPDATED: Check configuration
                 if (!isAIAvailable()) {
-                    println("⚠️ AI: Analysis disabled - using fallback")
+                    if (BuildConfig.DEBUG) { println("⚠️ AI: Analysis disabled - using fallback") }
                     return@withContext generateFallbackContent(recordingContext)
                 }
 
-                println("🧠 SIMPLE AI: Analyzing with context")
+                if (BuildConfig.DEBUG) { println("🧠 SIMPLE AI: Analyzing with context") }
 
                 // Create enhanced context-based prompt
                 val contextPrompt = createEnhancedContextPrompt(recordingContext, userInput)
@@ -153,15 +154,15 @@ class AIVideoAnalyzer {
                 // Generate content with GPT
                 val result = generateContentWithGPT(contextPrompt)
                 if (result != null) {
-                    println("✅ AI: Analysis complete")
+                    if (BuildConfig.DEBUG) { println("✅ AI: Analysis complete") }
                     result.copy(analysisType = "context_ai")
                 } else {
-                    println("⚠️ AI: Using fallback")
+                    if (BuildConfig.DEBUG) { println("⚠️ AI: Using fallback") }
                     generateFallbackContent(recordingContext)
                 }
 
             } catch (e: Exception) {
-                println("⛔ AI: Error - ${e.message}")
+                if (BuildConfig.DEBUG) { println("⛔ AI: Error - ${e.message}") }
                 generateFallbackContent(recordingContext)
             }
         }
@@ -175,7 +176,7 @@ class AIVideoAnalyzer {
         return try {
             val file = JavaFile(filePath)
             if (!file.exists()) {
-                println("⛔ WHISPER: File not found: $filePath")
+                if (BuildConfig.DEBUG) { println("⛔ WHISPER: File not found: $filePath") }
                 return null
             }
 
@@ -192,9 +193,9 @@ class AIVideoAnalyzer {
                 else -> "video/mp4"  // Default to video/mp4 for unknown
             }
 
-            println("🎵 WHISPER: Transcribing ${file.length() / 1024}KB file ($extension -> $mediaType)")
-            println("🎵 WHISPER: API Key configured: ${openAIApiKey.isNotEmpty()}")
-            println("🎵 WHISPER: URL: $whisperUrl")
+            if (BuildConfig.DEBUG) { println("🎵 WHISPER: Transcribing ${file.length() / 1024}KB file ($extension -> $mediaType)") }
+            if (BuildConfig.DEBUG) { println("🎵 WHISPER: API Key configured: ${openAIApiKey.isNotEmpty()}") }
+            if (BuildConfig.DEBUG) { println("🎵 WHISPER: URL: $whisperUrl") }
 
             val requestBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
@@ -213,11 +214,11 @@ class AIVideoAnalyzer {
                 .post(requestBody)
                 .build()
 
-            println("🎵 WHISPER: Sending request...")
+            if (BuildConfig.DEBUG) { println("🎵 WHISPER: Sending request...") }
             val response = client.newCall(request).execute()
             val responseBody = response.body?.string()
 
-            println("🎵 WHISPER: Response code: ${response.code}")
+            if (BuildConfig.DEBUG) { println("🎵 WHISPER: Response code: ${response.code}") }
 
             if (response.isSuccessful && responseBody != null) {
                 // Whisper returns plain text when response_format is "text"
@@ -230,17 +231,17 @@ class AIVideoAnalyzer {
                     responseBody.trim()
                 }
 
-                println("✅ WHISPER: Transcription complete - ${transcript.length} chars")
-                println("✅ WHISPER: \"${transcript.take(100)}...\"")
+                if (BuildConfig.DEBUG) { println("✅ WHISPER: Transcription complete - ${transcript.length} chars") }
+                if (BuildConfig.DEBUG) { println("✅ WHISPER: \"${transcript.take(100)}...\"") }
                 transcript.takeIf { it.isNotBlank() }
             } else {
-                println("⛔ WHISPER: API error - ${response.code}: ${response.message}")
-                println("⛔ WHISPER: Response body - $responseBody")
+                if (BuildConfig.DEBUG) { println("⛔ WHISPER: API error - ${response.code}: ${response.message}") }
+                if (BuildConfig.DEBUG) { println("⛔ WHISPER: Response body - $responseBody") }
                 null
             }
 
         } catch (e: Exception) {
-            println("⛔ WHISPER: Exception - ${e.message}")
+            if (BuildConfig.DEBUG) { println("⛔ WHISPER: Exception - ${e.message}") }
             e.printStackTrace()
             null
         }
@@ -258,7 +259,7 @@ class AIVideoAnalyzer {
             generateContentWithGPT(enhancedPrompt)
 
         } catch (e: Exception) {
-            println("⛔ TRANSCRIPT AI: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("⛔ TRANSCRIPT AI: Error - ${e.message}") }
             null
         }
     }
@@ -318,15 +319,15 @@ class AIVideoAnalyzer {
             if (response.isSuccessful && responseBody != null) {
                 parseGPTResponse(responseBody)
             } else {
-                println("⛔ GPT: API error - ${response.code}: ${response.message}")
+                if (BuildConfig.DEBUG) { println("⛔ GPT: API error - ${response.code}: ${response.message}") }
                 if (AppConfig.Features.enableDebugLogging) {
-                    println("⛔ GPT: Response body - $responseBody")
+                    if (BuildConfig.DEBUG) { println("⛔ GPT: Response body - $responseBody") }
                 }
                 null
             }
 
         } catch (e: Exception) {
-            println("⛔ GPT: Exception - ${e.message}")
+            if (BuildConfig.DEBUG) { println("⛔ GPT: Exception - ${e.message}") }
             if (AppConfig.Features.enableDebugLogging) {
                 e.printStackTrace()
             }
@@ -342,7 +343,7 @@ class AIVideoAnalyzer {
             val response = JSONObject(responseBody)
             val choices = response.getJSONArray("choices")
             if (choices.length() == 0) {
-                println("⛔ GPT PARSE: No choices in response")
+                if (BuildConfig.DEBUG) { println("⛔ GPT PARSE: No choices in response") }
                 return null
             }
 
@@ -368,11 +369,11 @@ class AIVideoAnalyzer {
 
             // Validate parsed content
             if (title.isBlank()) {
-                println("⛔ GPT PARSE: Empty title")
+                if (BuildConfig.DEBUG) { println("⛔ GPT PARSE: Empty title") }
                 return null
             }
 
-            println("✅ GPT PARSE: Success - '$title' with ${hashtags.size} hashtags")
+            if (BuildConfig.DEBUG) { println("✅ GPT PARSE: Success - '$title' with ${hashtags.size} hashtags") }
 
             VideoAnalysisResult(
                 title = title,
@@ -383,9 +384,9 @@ class AIVideoAnalyzer {
             )
 
         } catch (e: Exception) {
-            println("⛔ GPT PARSE: Failed to parse response - ${e.message}")
+            if (BuildConfig.DEBUG) { println("⛔ GPT PARSE: Failed to parse response - ${e.message}") }
             if (AppConfig.Features.enableDebugLogging) {
-                println("⛔ GPT PARSE: Raw response - $responseBody")
+                if (BuildConfig.DEBUG) { println("⛔ GPT PARSE: Raw response - $responseBody") }
             }
             null
         }
@@ -453,7 +454,7 @@ class AIVideoAnalyzer {
     fun generateFallbackContent(recordingContext: RecordingContext): VideoAnalysisResult {
         // Return BLANK fields - let user fill in manually
         // This matches iOS behavior when AI analysis fails or is unavailable
-        println("⚠️ AI FALLBACK: Returning blank fields for manual entry")
+        if (BuildConfig.DEBUG) { println("⚠️ AI FALLBACK: Returning blank fields for manual entry") }
 
         return VideoAnalysisResult(
             title = "",  // Blank - user enters manually

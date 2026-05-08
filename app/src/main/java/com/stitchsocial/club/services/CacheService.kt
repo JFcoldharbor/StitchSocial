@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.*
 import kotlin.collections.LinkedHashMap
+import com.stitchsocial.club.BuildConfig
 
 class CacheService(private val context: Context) {
 
@@ -284,7 +285,7 @@ class CacheService(private val context: Context) {
             }
 
             lastCleanup = now
-            println("CACHE SERVICE: Cleanup completed - removed ${expiredKeys.size} expired entries")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Cleanup completed - removed ${expiredKeys.size} expired entries") }
         }
     }
 
@@ -340,7 +341,7 @@ class CacheService(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            println("CACHE SERVICE: Failed to store persistent data: $e")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Failed to store persistent data: $e") }
         }
     }
 
@@ -361,7 +362,7 @@ class CacheService(private val context: Context) {
                 else -> null
             }
         } catch (e: Exception) {
-            println("CACHE SERVICE: Failed to load persistent data: $e")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Failed to load persistent data: $e") }
             return null
         }
     }
@@ -373,7 +374,7 @@ class CacheService(private val context: Context) {
                 .remove("${key}_expires")
                 .apply()
         } catch (e: Exception) {
-            println("CACHE SERVICE: Failed to remove persistent data: $e")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Failed to remove persistent data: $e") }
         }
     }
 
@@ -388,7 +389,7 @@ class CacheService(private val context: Context) {
 
             editor.apply()
         } catch (e: Exception) {
-            println("CACHE SERVICE: Failed to clear persistent type: $e")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Failed to clear persistent type: $e") }
         }
     }
 
@@ -410,14 +411,14 @@ class CacheService(private val context: Context) {
 
             editor.apply()
         } catch (e: Exception) {
-            println("CACHE SERVICE: Failed to cleanup persistent storage: $e")
+            if (BuildConfig.DEBUG) { println("CACHE SERVICE: Failed to cleanup persistent storage: $e") }
         }
     }
 
     fun helloWorldTest() {
-        println("CACHE SERVICE: Hello World - Two-tier caching ready!")
-        println("CACHE SERVICE: Features: Memory + Persistent storage, TTL, Metrics")
-        println("CACHE SERVICE: Performance: Thread-safe operations with LRU eviction")
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Hello World - Two-tier caching ready!") }
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Features: Memory + Persistent storage, TTL, Metrics") }
+        if (BuildConfig.DEBUG) { println("CACHE SERVICE: Performance: Thread-safe operations with LRU eviction") }
     }
 
     suspend fun getCacheStatus(): String {

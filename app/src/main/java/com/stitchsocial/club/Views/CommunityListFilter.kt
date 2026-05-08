@@ -55,6 +55,7 @@ import com.stitchsocial.club.community.GlobalXPService
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Filter (matches iOS CommunityListFilter exactly — now includes FAVORITES)
 
@@ -116,10 +117,10 @@ fun CommunityListView(
 
             myCommunities = all.filter { joinedIDs.contains(it.id) }
             allCommunities = all
-            println("🏘️ COMMUNITIES: ${myCommunities.size} joined, ${allCommunities.size} total")
+            if (BuildConfig.DEBUG) { println("🏘️ COMMUNITIES: ${myCommunities.size} joined, ${allCommunities.size} total") }
         } catch (e: Exception) {
             errorMessage = e.message
-            println("❌ COMMUNITIES: Load failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ COMMUNITIES: Load failed — ${e.message}") }
         } finally {
             isLoading = false
         }
@@ -192,7 +193,7 @@ fun CommunityListView(
                                         joinCommunity(db, userID, item.id)
                                         myCommunities = myCommunities + item
                                     } catch (e: Exception) {
-                                        println("⚠️ COMMUNITY: Join failed — ${e.message}")
+                                        if (BuildConfig.DEBUG) { println("⚠️ COMMUNITY: Join failed — ${e.message}") }
                                     }
                                 }
                             })
@@ -241,7 +242,7 @@ fun CommunityListView(
                                     showingJoinDialog = false
                                     joinCreatorID = ""
                                 } catch (e: Exception) {
-                                    println("❌ JOIN: ${e.message}")
+                                    if (BuildConfig.DEBUG) { println("❌ JOIN: ${e.message}") }
                                 } finally {
                                     isJoining = false
                                 }
@@ -448,7 +449,7 @@ private fun CommunityEmptyState() {
 
 private fun parseCommunityListItem(id: String, data: Map<String, Any>): CommunityListItem? {
     val creatorUsername = data["creatorUsername"] as? String ?: run {
-        println("⚠️ COMMUNITIES: Doc $id missing creatorUsername")
+        if (BuildConfig.DEBUG) { println("⚠️ COMMUNITIES: Doc $id missing creatorUsername") }
         return null
     }
     val creatorDisplayName = data["creatorDisplayName"] as? String ?: creatorUsername
@@ -479,5 +480,5 @@ private suspend fun joinCommunity(db: FirebaseFirestore, userID: String, communi
     )).await()
     db.collection("communities").document(communityID)
         .update("memberCount", com.google.firebase.firestore.FieldValue.increment(1L)).await()
-    println("✅ COMMUNITY: Joined $communityID")
+    if (BuildConfig.DEBUG) { println("✅ COMMUNITY: Joined $communityID") }
 }

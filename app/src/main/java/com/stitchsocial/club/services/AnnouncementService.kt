@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Singleton service for managing platform announcements
@@ -51,17 +52,17 @@ class AnnouncementService private constructor() {
     // MARK: - Firebase References
 
     private val db: FirebaseFirestore by lazy {
-        println("🔥 FIRESTORE: Connecting to NAMED database: stitchfin")
+        if (BuildConfig.DEBUG) { println("🔥 FIRESTORE: Connecting to NAMED database: stitchfin") }
         val firebaseApp = com.google.firebase.FirebaseApp.getInstance()
         com.google.firebase.firestore.FirebaseFirestore.getInstance(firebaseApp, "stitchfin").apply {
-            println("🔥 FIRESTORE: App name = ${app.name}")
-            println("🔥 FIRESTORE: Project ID = ${app.options.projectId}")
-            println("🔥 FIRESTORE: Database = stitchfin (NAMED DATABASE - SAME AS iOS)")
+            if (BuildConfig.DEBUG) { println("🔥 FIRESTORE: App name = ${app.name}") }
+            if (BuildConfig.DEBUG) { println("🔥 FIRESTORE: Project ID = ${app.options.projectId}") }
+            if (BuildConfig.DEBUG) { println("🔥 FIRESTORE: Database = stitchfin (NAMED DATABASE - SAME AS iOS)") }
         }
     }
 
     private val announcementsCollection by lazy {
-        println("📁 COLLECTION: Accessing announcements collection")
+        if (BuildConfig.DEBUG) { println("📁 COLLECTION: Accessing announcements collection") }
         db.collection("announcements")
     }
 
@@ -77,7 +78,7 @@ class AnnouncementService private constructor() {
     )
 
     init {
-        println("📢 ANNOUNCEMENT SERVICE: Initialized with repeat support")
+        if (BuildConfig.DEBUG) { println("📢 ANNOUNCEMENT SERVICE: Initialized with repeat support") }
     }
 
     // MARK: - Fetch Announcements (with repeat logic)
@@ -91,25 +92,25 @@ class AnnouncementService private constructor() {
         accountAge: Int
     ): List<Announcement> {
         _isLoading.value = true
-        println("📢 FETCH: Querying collection with: isActive = true")
+        if (BuildConfig.DEBUG) { println("📢 FETCH: Querying collection with: isActive = true") }
 
         try {
-            println("📢 FETCH: Looking for announcements for user $userId")
-            println("📢 ========================================")
-            println("📢 DIAGNOSTIC VERSION 3.0 - JAN 15 11:30AM")
-            println("📢 ========================================")
+            if (BuildConfig.DEBUG) { println("📢 FETCH: Looking for announcements for user $userId") }
+            if (BuildConfig.DEBUG) { println("📢 ========================================") }
+            if (BuildConfig.DEBUG) { println("📢 DIAGNOSTIC VERSION 3.0 - JAN 15 11:30AM") }
+            if (BuildConfig.DEBUG) { println("📢 ========================================") }
             // ✅ DIAGNOSTIC: Check if ANY documents exist in collection (no filters)
             try {
-                println("📢 DIAGNOSTIC: Checking if announcements collection has ANY documents...")
+                if (BuildConfig.DEBUG) { println("📢 DIAGNOSTIC: Checking if announcements collection has ANY documents...") }
                 val allDocsSnapshot = announcementsCollection.limit(10).get().await()
-                println("📢 DIAGNOSTIC: Total documents in collection (any status): ${allDocsSnapshot.documents.size}")
+                if (BuildConfig.DEBUG) { println("📢 DIAGNOSTIC: Total documents in collection (any status): ${allDocsSnapshot.documents.size}") }
                 if (allDocsSnapshot.documents.isNotEmpty()) {
                     allDocsSnapshot.documents.forEachIndexed { index, doc ->
-                        println("📢 DIAGNOSTIC: Doc $index: id=${doc.id}, isActive=${doc.get("isActive")}")
+                        if (BuildConfig.DEBUG) { println("📢 DIAGNOSTIC: Doc $index: id=${doc.id}, isActive=${doc.get("isActive")}") }
                     }
                 }
             } catch (diagE: Exception) {
-                println("📢 DIAGNOSTIC: ❌ Query failed: ${diagE.message}")
+                if (BuildConfig.DEBUG) { println("📢 DIAGNOSTIC: ❌ Query failed: ${diagE.message}") }
                 diagE.printStackTrace()
             }
 
@@ -119,32 +120,32 @@ class AnnouncementService private constructor() {
                 .get()
                 .await()
 
-            println("📢 FETCH: Found ${snapshot.documents.size} active announcements")
+            if (BuildConfig.DEBUG) { println("📢 FETCH: Found ${snapshot.documents.size} active announcements") }
 
             // ✅ DEBUG: Log each document found
             snapshot.documents.forEachIndexed { index, doc ->
-                println("📢 FETCH: Document $index: id=${doc.id}, isActive=${doc.getBoolean("isActive")}, title=${doc.getString("title")}")
-                println("📢 FETCH:   creatorEmail=${doc.getString("creatorEmail")}, targetAudience=${doc.get("targetAudience")}")
-                println("📢 FETCH:   startDate=${doc.getTimestamp("startDate")}, endDate=${doc.getTimestamp("endDate")}")
+                if (BuildConfig.DEBUG) { println("📢 FETCH: Document $index: id=${doc.id}, isActive=${doc.getBoolean("isActive")}, title=${doc.getString("title")}") }
+                if (BuildConfig.DEBUG) { println("📢 FETCH:   creatorEmail=${doc.getString("creatorEmail")}, targetAudience=${doc.get("targetAudience")}") }
+                if (BuildConfig.DEBUG) { println("📢 FETCH:   startDate=${doc.getTimestamp("startDate")}, endDate=${doc.getTimestamp("endDate")}") }
             }
 
             val activeAnnouncements = mutableListOf<Announcement>()
 
             for (doc in snapshot.documents) {
                 try {
-                    println("📢 FETCH: Parsing document ${doc.id}...")
+                    if (BuildConfig.DEBUG) { println("📢 FETCH: Parsing document ${doc.id}...") }
                     val announcement = doc.toObject<Announcement>() ?: continue
-                    println("📢 FETCH: Successfully parsed announcement: " + announcement.title)
+                    if (BuildConfig.DEBUG) { println("📢 FETCH: Successfully parsed announcement: " + announcement.title) }
 
                     // Check if still active (not expired)
                     if (!announcement.isCurrentlyActive) {
-                        println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - not currently active")
+                        if (BuildConfig.DEBUG) { println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - not currently active") }
                         continue
                     }
 
                     // Check if user is in target audience
                     if (!isUserInAudience(announcement.audienceEnum, userTier, accountAge, userId)) {
-                        println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - user not in target audience")
+                        if (BuildConfig.DEBUG) { println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - user not in target audience") }
                         continue
                     }
 
@@ -153,14 +154,14 @@ class AnnouncementService private constructor() {
 
                     // Check if user can see this announcement based on repeat rules
                     if (canShowAnnouncement(announcement, status)) {
-                        println("📢 FETCH: ✅ Adding '${announcement.title}' to pending list")
+                        if (BuildConfig.DEBUG) { println("📢 FETCH: ✅ Adding '${announcement.title}' to pending list") }
                         activeAnnouncements.add(announcement)
                     } else {
-                        println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - repeat rules not met")
+                        if (BuildConfig.DEBUG) { println("📢 FETCH: ⏭️ Skipping '${announcement.title}' - repeat rules not met") }
                     }
 
                 } catch (e: Exception) {
-                    println("📢 FETCH: ❌ Failed to decode announcement ${doc.id}: ${e.message}")
+                    if (BuildConfig.DEBUG) { println("📢 FETCH: ❌ Failed to decode announcement ${doc.id}: ${e.message}") }
                 }
             }
 
@@ -168,12 +169,12 @@ class AnnouncementService private constructor() {
             val sorted = activeAnnouncements.sortedBy { it.priorityEnum.sortOrder }
             _pendingAnnouncements.value = sorted
 
-            println("📢 FETCH: Final pending count = ${sorted.size}")
+            if (BuildConfig.DEBUG) { println("📢 FETCH: Final pending count = ${sorted.size}") }
 
             return sorted
 
         } catch (e: Exception) {
-            println("📢 FETCH: ❌ Query FAILED: ${e.message}")
+            if (BuildConfig.DEBUG) { println("📢 FETCH: ❌ Query FAILED: ${e.message}") }
             throw e
         } finally {
             _isLoading.value = false
@@ -187,13 +188,13 @@ class AnnouncementService private constructor() {
 
         // If no status, user has never seen it - show it
         if (status == null) {
-            println("📢 REPEAT: No status - first time showing")
+            if (BuildConfig.DEBUG) { println("📢 REPEAT: No status - first time showing") }
             return true
         }
 
         // Check if permanently dismissed
         if (status.permanentlyDismissed) {
-            println("📢 REPEAT: Permanently dismissed - skip")
+            if (BuildConfig.DEBUG) { println("📢 REPEAT: Permanently dismissed - skip") }
             return false
         }
 
@@ -201,7 +202,7 @@ class AnnouncementService private constructor() {
         return when (announcement.repeatModeEnum) {
             AnnouncementRepeatMode.ONCE -> {
                 val canShow = status.completedAt == null
-                println("📢 REPEAT [once]: completed=${status.completedAt != null}, canShow=$canShow")
+                if (BuildConfig.DEBUG) { println("📢 REPEAT [once]: completed=${status.completedAt != null}, canShow=$canShow") }
                 canShow
             }
             AnnouncementRepeatMode.DAILY -> canShowDaily(announcement, status, now)
@@ -221,7 +222,7 @@ class AnnouncementService private constructor() {
         // Check lifetime cap
         val maxTotal = announcement.maxTotalShows
         if (maxTotal != null && status.totalShowCount >= maxTotal) {
-            println("📢 REPEAT [daily]: Lifetime cap reached (${status.totalShowCount}/$maxTotal)")
+            if (BuildConfig.DEBUG) { println("📢 REPEAT [daily]: Lifetime cap reached (${status.totalShowCount}/$maxTotal)") }
             return false
         }
 
@@ -248,13 +249,13 @@ class AnnouncementService private constructor() {
 
             if (todayStart > lastDateStart) {
                 showsTodayCount = 0 // New day, reset count
-                println("📢 REPEAT [daily]: New day - resetting daily count")
+                if (BuildConfig.DEBUG) { println("📢 REPEAT [daily]: New day - resetting daily count") }
             }
         }
 
         // Check daily limit
         if (showsTodayCount >= announcement.maxDailyShows) {
-            println("📢 REPEAT [daily]: Daily limit reached ($showsTodayCount/${announcement.maxDailyShows})")
+            if (BuildConfig.DEBUG) { println("📢 REPEAT [daily]: Daily limit reached ($showsTodayCount/${announcement.maxDailyShows})") }
             return false
         }
 
@@ -263,13 +264,13 @@ class AnnouncementService private constructor() {
             status.lastShownAt?.let { lastShown ->
                 val hoursSinceLastShow = (now.time - lastShown.toDate().time) / (1000.0 * 60 * 60)
                 if (hoursSinceLastShow < announcement.minHoursBetweenShows) {
-                    println("📢 REPEAT [daily]: Too soon - ${String.format("%.1f", hoursSinceLastShow)}h since last show (min: ${announcement.minHoursBetweenShows}h)")
+                    if (BuildConfig.DEBUG) { println("📢 REPEAT [daily]: Too soon - ${String.format("%.1f", hoursSinceLastShow)}h since last show (min: ${announcement.minHoursBetweenShows}h)") }
                     return false
                 }
             }
         }
 
-        println("📢 REPEAT [daily]: ✅ Can show (today: $showsTodayCount/${announcement.maxDailyShows})")
+        if (BuildConfig.DEBUG) { println("📢 REPEAT [daily]: ✅ Can show (today: $showsTodayCount/${announcement.maxDailyShows})") }
         return true
     }
 
@@ -284,7 +285,7 @@ class AnnouncementService private constructor() {
         // Check lifetime cap
         val maxTotal = announcement.maxTotalShows
         if (maxTotal != null && status.totalShowCount >= maxTotal) {
-            println("📢 REPEAT [scheduled]: Lifetime cap reached")
+            if (BuildConfig.DEBUG) { println("📢 REPEAT [scheduled]: Lifetime cap reached") }
             return false
         }
 
@@ -292,12 +293,12 @@ class AnnouncementService private constructor() {
         status.lastShownAt?.let { lastShown ->
             val hoursSinceLastShow = (now.time - lastShown.toDate().time) / (1000.0 * 60 * 60)
             if (hoursSinceLastShow < announcement.minHoursBetweenShows) {
-                println("📢 REPEAT [scheduled]: Too soon - ${String.format("%.1f", hoursSinceLastShow)}h < ${announcement.minHoursBetweenShows}h")
+                if (BuildConfig.DEBUG) { println("📢 REPEAT [scheduled]: Too soon - ${String.format("%.1f", hoursSinceLastShow)}h < ${announcement.minHoursBetweenShows}h") }
                 return false
             }
         }
 
-        println("📢 REPEAT [scheduled]: ✅ Can show")
+        if (BuildConfig.DEBUG) { println("📢 REPEAT [scheduled]: ✅ Can show") }
         return true
     }
 
@@ -338,7 +339,7 @@ class AnnouncementService private constructor() {
             }
 
             if (showsTodayCount >= announcement.maxDailyShows) {
-                println("📢 REPEAT [persistent]: Daily limit reached")
+                if (BuildConfig.DEBUG) { println("📢 REPEAT [persistent]: Daily limit reached") }
                 return false
             }
         }
@@ -348,13 +349,13 @@ class AnnouncementService private constructor() {
             status.lastShownAt?.let { lastShown ->
                 val hoursSinceLastShow = (now.time - lastShown.toDate().time) / (1000.0 * 60 * 60)
                 if (hoursSinceLastShow < announcement.minHoursBetweenShows) {
-                    println("📢 REPEAT [persistent]: Too soon")
+                    if (BuildConfig.DEBUG) { println("📢 REPEAT [persistent]: Too soon") }
                     return false
                 }
             }
         }
 
-        println("📢 REPEAT [persistent]: ✅ Can show")
+        if (BuildConfig.DEBUG) { println("📢 REPEAT [persistent]: ✅ Can show") }
         return true
     }
 
@@ -403,7 +404,7 @@ class AnnouncementService private constructor() {
                 null
             }
         } catch (e: Exception) {
-            println("📢 STATUS: Error getting status for $statusId: ${e.message}")
+            if (BuildConfig.DEBUG) { println("📢 STATUS: Error getting status for $statusId: ${e.message}") }
             null
         }
     }
@@ -454,12 +455,12 @@ class AnnouncementService private constructor() {
                 )
             ).await()
 
-            println("📢 STATUS: Updated show count for $statusId")
+            if (BuildConfig.DEBUG) { println("📢 STATUS: Updated show count for $statusId") }
         } else {
             // Create new status
             val status = UserAnnouncementStatus.create(userId, announcementId, now)
             userStatusCollection.document(statusId).set(status).await()
-            println("📢 STATUS: Created new status for $statusId")
+            if (BuildConfig.DEBUG) { println("📢 STATUS: Created new status for $statusId") }
         }
     }
 
@@ -519,7 +520,7 @@ class AnnouncementService private constructor() {
 
         userStatusCollection.document(statusId).set(updateData, com.google.firebase.firestore.SetOptions.merge()).await()
 
-        println("📢 STATUS: Marked as completed - $statusId")
+        if (BuildConfig.DEBUG) { println("📢 STATUS: Marked as completed - $statusId") }
 
         // Remove from pending list
         val updatedPending = _pendingAnnouncements.value.filter { it.id != announcementId }
@@ -527,11 +528,11 @@ class AnnouncementService private constructor() {
 
         // Check if there are more announcements
         if (updatedPending.isEmpty()) {
-            println("📢 STATUS: No more announcements, closing overlay")
+            if (BuildConfig.DEBUG) { println("📢 STATUS: No more announcements, closing overlay") }
             _isShowingAnnouncement.value = false
             _currentAnnouncement.value = null
         } else {
-            println("📢 STATUS: ${updatedPending.size} more announcement(s) to show")
+            if (BuildConfig.DEBUG) { println("📢 STATUS: ${updatedPending.size} more announcement(s) to show") }
             showNextAnnouncementIfNeeded()
         }
     }
@@ -553,7 +554,7 @@ class AnnouncementService private constructor() {
             com.google.firebase.firestore.SetOptions.merge()
         ).await()
 
-        println("📢 STATUS: Permanently dismissed - $statusId")
+        if (BuildConfig.DEBUG) { println("📢 STATUS: Permanently dismissed - $statusId") }
 
         // Remove from pending list
         val updatedPending = _pendingAnnouncements.value.filter { it.id != announcementId }
@@ -583,7 +584,7 @@ class AnnouncementService private constructor() {
         val pending = _pendingAnnouncements.value
 
         if (pending.isEmpty()) {
-            println("📢 DISPLAY: No pending announcements")
+            if (BuildConfig.DEBUG) { println("📢 DISPLAY: No pending announcements") }
             _isShowingAnnouncement.value = false
             _currentAnnouncement.value = null
             return
@@ -591,30 +592,30 @@ class AnnouncementService private constructor() {
 
         _currentAnnouncement.value = pending.first()
         _isShowingAnnouncement.value = true
-        println("📢 DISPLAY: Showing announcement '${_currentAnnouncement.value?.title ?: "unknown"}'")
+        if (BuildConfig.DEBUG) { println("📢 DISPLAY: Showing announcement '${_currentAnnouncement.value?.title ?: "unknown"}'") }
     }
 
     /**
      * Check and show announcements on app launch
      */
     suspend fun checkForCriticalAnnouncements(userId: String, userTier: String, accountAge: Int) {
-        println("📢 CHECK: Starting announcement check for user $userId")
+        if (BuildConfig.DEBUG) { println("📢 CHECK: Starting announcement check for user $userId") }
 
         try {
             val pending = fetchPendingAnnouncements(userId, userTier, accountAge)
 
-            println("📢 CHECK: Found ${pending.size} pending announcements")
+            if (BuildConfig.DEBUG) { println("📢 CHECK: Found ${pending.size} pending announcements") }
 
             if (pending.isNotEmpty()) {
                 val first = pending.first()
-                println("📢 CHECK: ✅ Will show '${first.title}' (repeat mode: ${first.repeatMode})")
+                if (BuildConfig.DEBUG) { println("📢 CHECK: ✅ Will show '${first.title}' (repeat mode: ${first.repeatMode})") }
                 _currentAnnouncement.value = first
                 _isShowingAnnouncement.value = true
             } else {
-                println("📢 CHECK: No announcements to show")
+                if (BuildConfig.DEBUG) { println("📢 CHECK: No announcements to show") }
             }
         } catch (e: Exception) {
-            println("❌ CHECK: Error checking announcements: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ CHECK: Error checking announcements: ${e.message}") }
         }
     }
 
@@ -642,12 +643,12 @@ class AnnouncementService private constructor() {
         minHoursBetweenShows: Double = 0.0,
         maxTotalShows: Int? = null
     ): Announcement {
-        println("📢 CREATE: Attempting to create announcement")
-        println("📢 CREATE: Creator email = $creatorEmail")
-        println("📢 CREATE: Repeat mode = ${repeatMode.value}")
+        if (BuildConfig.DEBUG) { println("📢 CREATE: Attempting to create announcement") }
+        if (BuildConfig.DEBUG) { println("📢 CREATE: Creator email = $creatorEmail") }
+        if (BuildConfig.DEBUG) { println("📢 CREATE: Repeat mode = ${repeatMode.value}") }
 
         if (!authorizedCreatorEmails.contains(creatorEmail.lowercase())) {
-            println("📢 CREATE: ❌ Unauthorized creator: $creatorEmail")
+            if (BuildConfig.DEBUG) { println("📢 CREATE: ❌ Unauthorized creator: $creatorEmail") }
             throw AnnouncementError.UnauthorizedCreator
         }
 
@@ -672,8 +673,8 @@ class AnnouncementService private constructor() {
 
         announcementsCollection.document(announcement.id).set(announcement).await()
 
-        println("✅ ANNOUNCEMENT: Created '${title}' with id ${announcement.id}")
-        println("✅ ANNOUNCEMENT: Repeat=${repeatMode.value}, MaxDaily=$maxDailyShows, MinHours=$minHoursBetweenShows")
+        if (BuildConfig.DEBUG) { println("✅ ANNOUNCEMENT: Created '${title}' with id ${announcement.id}") }
+        if (BuildConfig.DEBUG) { println("✅ ANNOUNCEMENT: Repeat=${repeatMode.value}, MaxDaily=$maxDailyShows, MinHours=$minHoursBetweenShows") }
 
         return announcement
     }
@@ -693,7 +694,7 @@ class AnnouncementService private constructor() {
             )
         ).await()
 
-        println("📕 Deactivated announcement: $announcementId")
+        if (BuildConfig.DEBUG) { println("📕 Deactivated announcement: $announcementId") }
     }
 
     /**

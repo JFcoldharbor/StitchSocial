@@ -38,6 +38,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.stitchsocial.club.foundation.BasicVideoInfo
 import com.stitchsocial.club.foundation.Temperature
+import com.stitchsocial.club.BuildConfig
 
 /**
  * VideoThumbnailView - Improved thumbnail loading with fallbacks
@@ -91,8 +92,8 @@ fun VideoThumbnailView(
                     is AsyncImagePainter.State.Error -> {
                         // Log error for debugging
                         LaunchedEffect(Unit) {
-                            println("THUMBNAIL ERROR: Failed to load - $imageUrl")
-                            println("THUMBNAIL ERROR: ${state.result.throwable.message}")
+                            if (BuildConfig.DEBUG) { println("THUMBNAIL ERROR: Failed to load - $imageUrl") }
+                            if (BuildConfig.DEBUG) { println("THUMBNAIL ERROR: ${state.result.throwable.message}") }
                         }
                         PlaceholderView()
                     }

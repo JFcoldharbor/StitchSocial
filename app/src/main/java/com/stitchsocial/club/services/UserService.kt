@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Enhanced UserService with complete profile editing, social features, and search capabilities
@@ -69,7 +70,7 @@ class UserService(private val context: Context) {
     ): BasicUserInfo? {
         return try {
             _isLoading.value = true
-            println("USER SERVICE: Creating user with email: $email")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Creating user with email: $email") }
 
             // Generate username if not provided
             val finalUsername = username ?: generateUsername(email, id)
@@ -89,7 +90,7 @@ class UserService(private val context: Context) {
             val isSpecialUser = specialUserEntry != null
             val initialBio = specialUserEntry?.customBio ?: ""
 
-            println("USER SERVICE: Creating user with tier ${initialTier.displayName}, clout: $initialClout")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Creating user with tier ${initialTier.displayName}, clout: $initialClout") }
 
             // Create user document
             val userData = hashMapOf<String, Any>(
@@ -133,11 +134,11 @@ class UserService(private val context: Context) {
             // Auto-follow James Fortune (founder) for all new users
             performAutoFollow(id, email)
 
-            println("USER SERVICE: ✅ Created user ${finalUsername} with tier ${initialTier.displayName}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Created user ${finalUsername} with tier ${initialTier.displayName}") }
             user
 
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error creating user: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Error creating user: ${e.message}") }
             handleError("Failed to create user: ${e.message}")
             null
         } finally {
@@ -163,12 +164,12 @@ class UserService(private val context: Context) {
 
                 // Don't auto-follow yourself
                 if (newUserID != founderID) {
-                    println("USER SERVICE: Auto-following founder for new user")
+                    if (BuildConfig.DEBUG) { println("USER SERVICE: Auto-following founder for new user") }
                     followUser(newUserID, founderID)
                 }
             }
         } catch (e: Exception) {
-            println("USER SERVICE: ⚠️ Auto-follow failed (non-critical): ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ⚠️ Auto-follow failed (non-critical): ${e.message}") }
         }
     }
 
@@ -215,7 +216,7 @@ class UserService(private val context: Context) {
      */
     suspend fun getFollowingIDs(userID: String): List<String> {
         return try {
-            println("USER SERVICE: Loading following IDs for user $userID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Loading following IDs for user $userID") }
 
             val followDocs = db.collection("users")
                 .document(userID)
@@ -225,11 +226,11 @@ class UserService(private val context: Context) {
 
             val followingIDs = followDocs.documents.map { it.id }
 
-            println("USER SERVICE: ✅ Found ${followingIDs.size} following IDs")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Found ${followingIDs.size} following IDs") }
             followingIDs
 
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error loading following IDs: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Error loading following IDs: ${e.message}") }
             emptyList()
         }
     }
@@ -262,7 +263,7 @@ class UserService(private val context: Context) {
                 null
             }
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error in updateProfile: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Error in updateProfile: ${e.message}") }
             null
         }
     }
@@ -274,26 +275,26 @@ class UserService(private val context: Context) {
      */
     suspend fun getUserProfile(userID: String): BasicUserInfo? {
         return try {
-            println("USER SERVICE: Loading profile for user: $userID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Loading profile for user: $userID") }
 
             val userDoc = db.collection("users").document(userID).get().await()
 
             if (!userDoc.exists()) {
-                println("USER SERVICE: ❌ User document not found: $userID")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ User document not found: $userID") }
                 return null
             }
 
             val user = BasicUserInfo.fromFirebaseDocument(userDoc)
             if (user != null) {
-                println("USER SERVICE: ✅ Successfully loaded user: ${user.username}")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Successfully loaded user: ${user.username}") }
             } else {
-                println("USER SERVICE: ❌ Failed to parse user document")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Failed to parse user document") }
             }
 
             user
 
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Error loading user profile: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Error loading user profile: ${e.message}") }
             e.printStackTrace()
             null
         }
@@ -314,7 +315,7 @@ class UserService(private val context: Context) {
         if (userIDs.isEmpty()) return emptyMap()
 
         return try {
-            println("USER SERVICE: Batch loading ${userIDs.size} users")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Batch loading ${userIDs.size} users") }
 
             val users = mutableMapOf<String, BasicUserInfo>()
 
@@ -332,11 +333,11 @@ class UserService(private val context: Context) {
                 }
             }
 
-            println("USER SERVICE: Loaded ${users.size}/${userIDs.size} users")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Loaded ${users.size}/${userIDs.size} users") }
             users
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error in batch load: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error in batch load: ${e.message}") }
             emptyMap()
         }
     }
@@ -355,7 +356,7 @@ class UserService(private val context: Context) {
     ): Boolean {
         return try {
             _isLoading.value = true
-            println("USER SERVICE: Updating profile for user: $userID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Updating profile for user: $userID") }
 
             val updates = mutableMapOf<String, Any>()
 
@@ -403,11 +404,11 @@ class UserService(private val context: Context) {
             if (updates.isNotEmpty()) {
                 updates["updatedAt"] = FieldValue.serverTimestamp()
                 db.collection("users").document(userID).update(updates).await()
-                println("USER SERVICE: ✅ Profile updated successfully")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Profile updated successfully") }
                 invalidateUserCache(userID)
                 true
             } else {
-                println("USER SERVICE: No valid updates to apply")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: No valid updates to apply") }
                 false
             }
 
@@ -451,11 +452,11 @@ class UserService(private val context: Context) {
             val isAvailable = existingUser.documents.isEmpty() ||
                     existingUser.documents.first().id == excludeUserID
 
-            println("USER SERVICE: Username '$username' available: $isAvailable")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Username '$username' available: $isAvailable") }
             isAvailable
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error checking username: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error checking username: ${e.message}") }
             false
         }
     }
@@ -471,11 +472,11 @@ class UserService(private val context: Context) {
             val uploadTask = imageRef.putBytes(imageData).await()
             val downloadUrl = imageRef.downloadUrl.await()
 
-            println("USER SERVICE: Profile image uploaded for user $userID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Profile image uploaded for user $userID") }
             downloadUrl.toString()
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error uploading profile image: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error uploading profile image: ${e.message}") }
             null
         }
     }
@@ -513,11 +514,11 @@ class UserService(private val context: Context) {
                 resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
                 val imageData = outputStream.toByteArray()
 
-                println("USER SERVICE: Image compressed to ${imageData.size / 1024}KB")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: Image compressed to ${imageData.size / 1024}KB") }
                 imageData
 
             } catch (e: Exception) {
-                println("USER SERVICE: Error compressing image: ${e.message}")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: Error compressing image: ${e.message}") }
                 null
             }
         }
@@ -531,7 +532,7 @@ class UserService(private val context: Context) {
      */
     suspend fun followUser(followerID: String, followeeID: String): Boolean {
         return try {
-            println("USER SERVICE: User $followerID following $followeeID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: User $followerID following $followeeID") }
 
             // Create follow relationship in follower's subcollection
             val followData = hashMapOf(
@@ -570,7 +571,7 @@ class UserService(private val context: Context) {
                 .await()
 
             updateUserCaches(followerID, followeeID)
-            println("USER SERVICE: ✅ Follow relationship created")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Follow relationship created") }
             true
 
         } catch (e: Exception) {
@@ -590,12 +591,12 @@ class UserService(private val context: Context) {
             val followeeEmail = followeeDoc.getString("email")
 
             if (followeeEmail == "james@stitchsocial.me") {
-                println("USER SERVICE: ⚠️ Cannot unfollow founder (James Fortune)")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ⚠️ Cannot unfollow founder (James Fortune)") }
                 handleError("You cannot unfollow the founder")
                 return false
             }
 
-            println("USER SERVICE: User $followerID unfollowing $followeeID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: User $followerID unfollowing $followeeID") }
 
             // Delete follow relationship from follower's subcollection
             db.collection("users")
@@ -624,7 +625,7 @@ class UserService(private val context: Context) {
                 .await()
 
             updateUserCaches(followerID, followeeID)
-            println("USER SERVICE: ✅ Unfollow completed")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Unfollow completed") }
             true
 
         } catch (e: Exception) {
@@ -655,7 +656,7 @@ class UserService(private val context: Context) {
             followDoc.exists()
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error checking follow status: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error checking follow status: ${e.message}") }
             false
         }
     }
@@ -679,7 +680,7 @@ class UserService(private val context: Context) {
             batchLoadUsers(followeeIDs).values.toList()
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error loading following list: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error loading following list: ${e.message}") }
             emptyList()
         }
     }
@@ -703,7 +704,7 @@ class UserService(private val context: Context) {
             batchLoadUsers(followerIDs).values.toList()
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error loading followers list: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error loading followers list: ${e.message}") }
             emptyList()
         }
     }
@@ -715,7 +716,7 @@ class UserService(private val context: Context) {
      */
     suspend fun refreshFollowerCounts(userID: String) {
         try {
-            println("🔄 USER SERVICE: Refreshing follower counts for user $userID")
+            if (BuildConfig.DEBUG) { println("🔄 USER SERVICE: Refreshing follower counts for user $userID") }
 
             // Count actual followers
             val followersSnapshot = db.collection("users")
@@ -746,10 +747,10 @@ class UserService(private val context: Context) {
                 )
                 .await()
 
-            println("✅ USER SERVICE: Updated counts - Followers: $actualFollowerCount, Following: $actualFollowingCount")
+            if (BuildConfig.DEBUG) { println("✅ USER SERVICE: Updated counts - Followers: $actualFollowerCount, Following: $actualFollowingCount") }
 
         } catch (e: Exception) {
-            println("⚠️ USER SERVICE: Failed to refresh follower counts for $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ USER SERVICE: Failed to refresh follower counts for $userID: ${e.message}") }
             throw e
         }
     }
@@ -778,14 +779,14 @@ class UserService(private val context: Context) {
                 updates["updatedAt"] = FieldValue.serverTimestamp()
                 db.collection("users").document(userID).update(updates).await()
                 invalidateUserCache(userID)
-                println("USER SERVICE: ✅ Engagement stats updated for $userID")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Engagement stats updated for $userID") }
                 true
             } else {
                 false
             }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Error updating engagement stats: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error updating engagement stats: ${e.message}") }
             false
         }
     }
@@ -823,10 +824,10 @@ class UserService(private val context: Context) {
                     )
                 ).await()
                 invalidateUserCache(userID)
-                println("USER SERVICE: Tier advanced for $userID: ${currentTier.displayName} -> ${correctTier.displayName} (clout: $currentClout)")
+                if (BuildConfig.DEBUG) { println("USER SERVICE: Tier advanced for $userID: ${currentTier.displayName} -> ${correctTier.displayName} (clout: $currentClout)") }
             }
         } catch (e: Exception) {
-            println("USER SERVICE: Tier check failed (non-fatal): ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Tier check failed (non-fatal): ${e.message}") }
         }
     }
 
@@ -838,7 +839,7 @@ class UserService(private val context: Context) {
             val userDoc = db.collection("users").document(userID).get().await()
             (userDoc.getLong("clout") ?: 0).toInt()
         } catch (e: Exception) {
-            println("USER SERVICE: Error getting user clout: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Error getting user clout: ${e.message}") }
             0
         }
     }
@@ -852,13 +853,13 @@ class UserService(private val context: Context) {
         return try {
             if (query.length < 2) return emptyList()
 
-            println("USER SERVICE: 🔍 Searching users with query: '$query'")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: 🔍 Searching users with query: '$query'") }
 
             // Check cache first
             val cacheKey = "${query.lowercase()}_$limit"
             searchCache[cacheKey]?.let { (cachedResults, timestamp) ->
                 if (System.currentTimeMillis() - timestamp < cacheExpiration) {
-                    println("USER SERVICE: ✅ Returning cached search results (${cachedResults.size})")
+                    if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Returning cached search results (${cachedResults.size})") }
                     return cachedResults
                 }
             }
@@ -892,11 +893,11 @@ class UserService(private val context: Context) {
             }
             searchCache[cacheKey] = Pair(finalResults, System.currentTimeMillis())
 
-            println("USER SERVICE: ✅ Found ${finalResults.size} users for '$query'")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Found ${finalResults.size} users for '$query'") }
             finalResults
 
         } catch (e: Exception) {
-            println("USER SERVICE: ❌ Search error: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: ❌ Search error: ${e.message}") }
             emptyList()
         }
     }
@@ -918,7 +919,7 @@ class UserService(private val context: Context) {
             users.documents.mapNotNull { BasicUserInfo.fromFirebaseDocument(it) }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Username search error: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Username search error: ${e.message}") }
             emptyList()
         }
     }
@@ -940,7 +941,7 @@ class UserService(private val context: Context) {
             }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Display name search error: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Display name search error: ${e.message}") }
             emptyList()
         }
     }
@@ -961,7 +962,7 @@ class UserService(private val context: Context) {
             }
 
         } catch (e: Exception) {
-            println("USER SERVICE: Bio search error: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Bio search error: ${e.message}") }
             emptyList()
         }
     }
@@ -971,7 +972,7 @@ class UserService(private val context: Context) {
      */
     private fun clearSearchCache() {
         searchCache.clear()
-        println("USER SERVICE: Search cache cleared")
+        if (BuildConfig.DEBUG) { println("USER SERVICE: Search cache cleared") }
     }
 
     /**
@@ -980,7 +981,7 @@ class UserService(private val context: Context) {
      */
     suspend fun getSuggestedUsers(forUserID: String, limit: Int = 20): List<BasicUserInfo> {
         return try {
-            println("USER SERVICE: Getting suggested users for $forUserID")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Getting suggested users for $forUserID") }
 
             // Get users the current user is already following
             val followingDocs = db.collection("users")
@@ -1007,11 +1008,11 @@ class UserService(private val context: Context) {
                 }
             }.take(limit)
 
-            println("USER SERVICE: Found ${users.size} suggested users")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Found ${users.size} suggested users") }
             users
 
         } catch (e: Exception) {
-            println("USER SERVICE: Failed to get suggested users: ${e.message}")
+            if (BuildConfig.DEBUG) { println("USER SERVICE: Failed to get suggested users: ${e.message}") }
             emptyList()
         }
     }
@@ -1032,13 +1033,13 @@ class UserService(private val context: Context) {
     }
 
     private fun invalidateUserCache(userID: String) {
-        println("USER SERVICE: Invalidated cache for user $userID")
+        if (BuildConfig.DEBUG) { println("USER SERVICE: Invalidated cache for user $userID") }
     }
 
     private fun handleError(message: String) {
         val error = StitchError.NetworkError(message)
         _lastError.value = error
-        println("USER SERVICE: $message")
+        if (BuildConfig.DEBUG) { println("USER SERVICE: $message") }
     }
 
     fun clearError() {
@@ -1046,9 +1047,9 @@ class UserService(private val context: Context) {
     }
 
     fun helloWorldTest() {
-        println("USER SERVICE: Hello World - Enhanced user management ready!")
-        println("USER SERVICE: Features: Profile editing, image upload, social following, engagement stats, user search, discovery")
-        println("USER SERVICE: Integration: Cache-aware, atomic updates, social discovery, search optimization")
-        println("USER SERVICE: ✅ FIXED: Now using subcollection structure users/{userID}/following/{followeeID}")
+        if (BuildConfig.DEBUG) { println("USER SERVICE: Hello World - Enhanced user management ready!") }
+        if (BuildConfig.DEBUG) { println("USER SERVICE: Features: Profile editing, image upload, social following, engagement stats, user search, discovery") }
+        if (BuildConfig.DEBUG) { println("USER SERVICE: Integration: Cache-aware, atomic updates, social discovery, search optimization") }
+        if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ FIXED: Now using subcollection structure users/{userID}/following/{followeeID}") }
     }
 }

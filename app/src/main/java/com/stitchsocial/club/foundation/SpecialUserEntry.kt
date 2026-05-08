@@ -13,6 +13,7 @@
  */
 
 package com.stitchsocial.club.foundation
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Configuration for special users with custom privileges and starting benefits
@@ -418,17 +419,17 @@ object SpecialUsersConfig {
      */
     fun printConfigurationSummary() {
         val stats = getStatistics()
-        println("🌟 SPECIAL USERS CONFIG SUMMARY:")
-        println("   Total Special Users: ${stats.totalSpecialUsers}")
-        println("   Founders: ${stats.foundersCount}")
-        println("   Co-Founders: ${stats.coFoundersCount}")
-        println("   Influencers: ${stats.influencersCount}")
-        println("   Advisors: ${stats.advisorsCount}")
-        println("   Celebrities: ${stats.celebritiesCount}")
-        println("   Affiliates: ${stats.affiliatesCount}")
-        println("   Auto-Follow Users: ${stats.autoFollowCount}")
-        println("   Total Starting Clout: ${stats.totalStartingClout}")
-        println("   Average Starting Clout: ${stats.averageStartingClout.toInt()}")
+        if (BuildConfig.DEBUG) { println("🌟 SPECIAL USERS CONFIG SUMMARY:") }
+        if (BuildConfig.DEBUG) { println("   Total Special Users: ${stats.totalSpecialUsers}") }
+        if (BuildConfig.DEBUG) { println("   Founders: ${stats.foundersCount}") }
+        if (BuildConfig.DEBUG) { println("   Co-Founders: ${stats.coFoundersCount}") }
+        if (BuildConfig.DEBUG) { println("   Influencers: ${stats.influencersCount}") }
+        if (BuildConfig.DEBUG) { println("   Advisors: ${stats.advisorsCount}") }
+        if (BuildConfig.DEBUG) { println("   Celebrities: ${stats.celebritiesCount}") }
+        if (BuildConfig.DEBUG) { println("   Affiliates: ${stats.affiliatesCount}") }
+        if (BuildConfig.DEBUG) { println("   Auto-Follow Users: ${stats.autoFollowCount}") }
+        if (BuildConfig.DEBUG) { println("   Total Starting Clout: ${stats.totalStartingClout}") }
+        if (BuildConfig.DEBUG) { println("   Average Starting Clout: ${stats.averageStartingClout.toInt()}") }
     }
     
     /**
@@ -481,9 +482,9 @@ object SpecialUsersConfig {
         val isValid = autoFollowUsers.size == 1 && autoFollowUsers.first().email == "james@stitchsocial.me"
         
         if (!isValid) {
-            println("⚠️ AUTO-FOLLOW CONFIG ERROR: Only James Fortune should have auto-follow enabled")
+            if (BuildConfig.DEBUG) { println("⚠️ AUTO-FOLLOW CONFIG ERROR: Only James Fortune should have auto-follow enabled") }
         } else {
-            println("✅ AUTO-FOLLOW CONFIG: Correctly configured for James Fortune only")
+            if (BuildConfig.DEBUG) { println("✅ AUTO-FOLLOW CONFIG: Correctly configured for James Fortune only") }
         }
         
         return isValid

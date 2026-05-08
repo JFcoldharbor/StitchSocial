@@ -40,6 +40,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.UUID
+import com.stitchsocial.club.BuildConfig
 
 class AutoCaptionService private constructor(private val context: Context) {
 
@@ -71,7 +72,7 @@ class AutoCaptionService private constructor(private val context: Context) {
         try {
             val uid = auth.currentUser?.uid
             if (uid.isNullOrEmpty()) {
-                println("⚠️ AUTO CAPTION: not signed in — skipping")
+                if (BuildConfig.DEBUG) { println("⚠️ AUTO CAPTION: not signed in — skipping") }
                 return@withContext emptyList()
             }
 
@@ -79,7 +80,7 @@ class AutoCaptionService private constructor(private val context: Context) {
             _transcriptionProgress.value = 0.1
             val audioFile = extractAudio(videoUri)
             if (audioFile == null || !audioFile.exists() || audioFile.length() == 0L) {
-                println("ℹ️ AUTO CAPTION: no audio track in video")
+                if (BuildConfig.DEBUG) { println("ℹ️ AUTO CAPTION: no audio track in video") }
                 return@withContext emptyList()
             }
 
@@ -90,9 +91,9 @@ class AutoCaptionService private constructor(private val context: Context) {
             val ref = storage.reference.child(storagePath)
             try {
                 ref.putFile(Uri.fromFile(audioFile)).await()
-                println("📤 AUTO CAPTION: uploaded audio to $storagePath (${audioFile.length() / 1024} KB)")
+                if (BuildConfig.DEBUG) { println("📤 AUTO CAPTION: uploaded audio to $storagePath (${audioFile.length() / 1024} KB)") }
             } catch (e: Exception) {
-                println("⚠️ AUTO CAPTION: upload failed — ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ AUTO CAPTION: upload failed — ${e.message}") }
                 audioFile.delete()
                 return@withContext emptyList()
             } finally {
@@ -106,7 +107,7 @@ class AutoCaptionService private constructor(private val context: Context) {
                     .call(mapOf("audioPath" to storagePath, "languageCode" to "en-US"))
                     .await()
             } catch (e: Exception) {
-                println("⚠️ AUTO CAPTION: function call failed — ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ AUTO CAPTION: function call failed — ${e.message}") }
                 // Best-effort cleanup if the function didn't run / didn't delete.
                 try { ref.delete().await() } catch (_: Exception) {}
                 return@withContext emptyList()
@@ -115,10 +116,10 @@ class AutoCaptionService private constructor(private val context: Context) {
             // 4) Parse response into VideoCaption list
             _transcriptionProgress.value = 0.9
             val captions = parseCaptions(response.data)
-            println("✅ AUTO CAPTION: received ${captions.size} caption(s) from cloud")
+            if (BuildConfig.DEBUG) { println("✅ AUTO CAPTION: received ${captions.size} caption(s) from cloud") }
             return@withContext captions
         } catch (e: Exception) {
-            println("⚠️ AUTO CAPTION: unexpected — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ AUTO CAPTION: unexpected — ${e.message}") }
             return@withContext emptyList()
         } finally {
             _isTranscribing.value = false
@@ -165,7 +166,7 @@ class AutoCaptionService private constructor(private val context: Context) {
             }
             return outputFile
         } catch (e: Exception) {
-            println("⚠️ AUTO CAPTION: audio extraction failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ AUTO CAPTION: audio extraction failed — ${e.message}") }
             return null
         } finally {
             try { extractor.release() } catch (_: Exception) {}

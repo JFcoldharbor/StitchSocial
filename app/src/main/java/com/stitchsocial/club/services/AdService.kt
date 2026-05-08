@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 // ============================================================================
 // REVENUE SHARE CONFIGURATION
@@ -357,7 +358,7 @@ class AdService private constructor() {
         _availableOpportunities.value = _availableOpportunities.value.filter { it.id != opportunity.id }
         _activePartnerships.value = _activePartnerships.value + partnership
 
-        println("✅ AD: Partnership created with ${opportunity.campaign.brandName}")
+        if (BuildConfig.DEBUG) { println("✅ AD: Partnership created with ${opportunity.campaign.brandName}") }
         return partnership
     }
 
@@ -367,7 +368,7 @@ class AdService private constructor() {
         db.collection(Collections.OPPORTUNITIES).document(opportunity.id)
             .update("status", AdOpportunityStatus.DECLINED.value).await()
         _availableOpportunities.value = _availableOpportunities.value.filter { it.id != opportunity.id }
-        println("❌ AD: Declined opportunity from ${opportunity.campaign.brandName}")
+        if (BuildConfig.DEBUG) { println("❌ AD: Declined opportunity from ${opportunity.campaign.brandName}") }
     }
 
     // MARK: - Get Ad for Thread
@@ -375,7 +376,7 @@ class AdService private constructor() {
     suspend fun getAdForThread(threadID: String, creatorID: String, viewerID: String): AdPartnership? {
         val isSubscribed = checkSubscriptionStatus(viewerID, creatorID)
         if (isSubscribed) {
-            println("💎 AD: Viewer is subscribed - skipping ad")
+            if (BuildConfig.DEBUG) { println("💎 AD: Viewer is subscribed - skipping ad") }
             return null
         }
 
@@ -498,7 +499,7 @@ class AdService private constructor() {
         db.collection(Collections.PARTNERSHIPS).document(partnership.id)
             .update("status", AdPartnershipStatus.ENDED.value).await()
         _activePartnerships.value = _activePartnerships.value.filter { it.id != partnership.id }
-        println("📚 AD: Partnership ended with ${partnership.brandName}")
+        if (BuildConfig.DEBUG) { println("📚 AD: Partnership ended with ${partnership.brandName}") }
     }
 
     // MARK: - Firestore Parsers
@@ -527,7 +528,7 @@ class AdService private constructor() {
                 lastPayoutAt = (data["lastPayoutAt"] as? Timestamp)?.toDate()
             )
         } catch (e: Exception) {
-            println("❌ AdService: Failed to parse partnership $id: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ AdService: Failed to parse partnership $id: ${e.message}") }
             null
         }
     }

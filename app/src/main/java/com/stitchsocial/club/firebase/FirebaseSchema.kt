@@ -1,4 +1,5 @@
 package com.stitchsocial.club.firebase
+import com.stitchsocial.club.BuildConfig
 
 /**
  * FirebaseSchema.kt - COMPLETE PARITY WITH iOS
@@ -39,10 +40,10 @@ object FirebaseSchema {
     /** Validate database configuration */
     fun validateDatabaseConfig(): Boolean {
         if (DATABASE_NAME.isEmpty()) {
-            println("❌ FIREBASE SCHEMA: Database name is empty")
+            if (BuildConfig.DEBUG) { println("❌ FIREBASE SCHEMA: Database name is empty") }
             return false
         }
-        println("✅ FIREBASE SCHEMA: Configured for database: $DATABASE_NAME")
+        if (BuildConfig.DEBUG) { println("✅ FIREBASE SCHEMA: Configured for database: $DATABASE_NAME") }
         return true
     }
 
@@ -118,9 +119,9 @@ object FirebaseSchema {
             val invalidCollections = collections.filter { it.isEmpty() }
 
             if (invalidCollections.isEmpty()) {
-                println("✅ FIREBASE SCHEMA: All ${collections.size} collections validated for $DATABASE_NAME")
+                if (BuildConfig.DEBUG) { println("✅ FIREBASE SCHEMA: All ${collections.size} collections validated for $DATABASE_NAME") }
             } else {
-                println("❌ FIREBASE SCHEMA: Invalid collections found: $invalidCollections")
+                if (BuildConfig.DEBUG) { println("❌ FIREBASE SCHEMA: Invalid collections found: $invalidCollections") }
             }
 
             return invalidCollections
@@ -1186,7 +1187,7 @@ object FirebaseSchema {
     // MARK: - Database Initialization
 
     fun initializeSchema(): Boolean {
-        println("🔧 FIREBASE SCHEMA: Initializing stitchfin database schema...")
+        if (BuildConfig.DEBUG) { println("🔧 FIREBASE SCHEMA: Initializing stitchfin database schema...") }
 
         val databaseValid        = validateDatabaseConfig()
         val collectionsValid     = Collections.validateCollections().isEmpty()
@@ -1197,34 +1198,34 @@ object FirebaseSchema {
 
         return if (databaseValid && collectionsValid && referralSchemaValid &&
             milestoneSchemaValid && collectionsSchemaValid && coinSchemaValid) {
-            println("✅ FIREBASE SCHEMA: stitchfin database schema initialized successfully")
-            println("📊 FIREBASE SCHEMA: Collections: ${Collections.validateCollections().size}")
-            println("🔍 FIREBASE SCHEMA: Indexes: ${RequiredIndexes.generateIndexCommands().size}")
-            println("🔗 FIREBASE SCHEMA: Referral system integrated")
-            println("🏷️ FIREBASE SCHEMA: User tagging system integrated")
-            println("🏅 FIREBASE SCHEMA: Milestone tracking system integrated")
-            println("📁 FIREBASE SCHEMA: Collections feature integrated")
-            println("💰 FIREBASE SCHEMA: HypeCoin system integrated")
-            println("🎟️ FIREBASE SCHEMA: Subscription system integrated")
+            if (BuildConfig.DEBUG) { println("✅ FIREBASE SCHEMA: stitchfin database schema initialized successfully") }
+            if (BuildConfig.DEBUG) { println("📊 FIREBASE SCHEMA: Collections: ${Collections.validateCollections().size}") }
+            if (BuildConfig.DEBUG) { println("🔍 FIREBASE SCHEMA: Indexes: ${RequiredIndexes.generateIndexCommands().size}") }
+            if (BuildConfig.DEBUG) { println("🔗 FIREBASE SCHEMA: Referral system integrated") }
+            if (BuildConfig.DEBUG) { println("🏷️ FIREBASE SCHEMA: User tagging system integrated") }
+            if (BuildConfig.DEBUG) { println("🏅 FIREBASE SCHEMA: Milestone tracking system integrated") }
+            if (BuildConfig.DEBUG) { println("📁 FIREBASE SCHEMA: Collections feature integrated") }
+            if (BuildConfig.DEBUG) { println("💰 FIREBASE SCHEMA: HypeCoin system integrated") }
+            if (BuildConfig.DEBUG) { println("🎟️ FIREBASE SCHEMA: Subscription system integrated") }
             true
         } else {
-            println("❌ FIREBASE SCHEMA: stitchfin database schema initialization failed")
+            if (BuildConfig.DEBUG) { println("❌ FIREBASE SCHEMA: stitchfin database schema initialization failed") }
             false
         }
     }
 
     private fun validateReferralSchema(): Boolean {
-        println("✅ REFERRAL SCHEMA: User fields + referral fields validated")
+        if (BuildConfig.DEBUG) { println("✅ REFERRAL SCHEMA: User fields + referral fields validated") }
         return true
     }
 
     private fun validateMilestoneSchema(): Boolean {
-        println("✅ MILESTONE SCHEMA: Milestone tracking fields validated")
+        if (BuildConfig.DEBUG) { println("✅ MILESTONE SCHEMA: Milestone tracking fields validated") }
         return true
     }
 
     private fun validateCollectionsSchema(): Boolean {
-        println("✅ COLLECTIONS SCHEMA: Video, collection, draft, progress fields validated")
+        if (BuildConfig.DEBUG) { println("✅ COLLECTIONS SCHEMA: Video, collection, draft, progress fields validated") }
         return true
     }
 
@@ -1243,8 +1244,8 @@ object FirebaseSchema {
             SubscriptionPlanDocument.CREATOR_ID, SubscriptionPlanDocument.IS_ENABLED,
             SubscriptionPlanDocument.SUBSCRIBER_COUNT
         )
-        println("✅ COIN SCHEMA: ${requiredCoinBalanceFields.size} balance fields + ${requiredTransactionFields.size} transaction fields validated")
-        println("✅ SUBSCRIPTION SCHEMA: ${requiredSubPlanFields.size} plan fields validated")
+        if (BuildConfig.DEBUG) { println("✅ COIN SCHEMA: ${requiredCoinBalanceFields.size} balance fields + ${requiredTransactionFields.size} transaction fields validated") }
+        if (BuildConfig.DEBUG) { println("✅ SUBSCRIPTION SCHEMA: ${requiredSubPlanFields.size} plan fields validated") }
         return true
     }
 }

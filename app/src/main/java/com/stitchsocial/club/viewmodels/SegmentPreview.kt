@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.concurrent.TimeUnit
 import androidx.compose.ui.graphics.Color
+import com.stitchsocial.club.BuildConfig
 
 // ─────────────────────────────────────────────
 // MARK: - SegmentPreview model
@@ -213,10 +214,10 @@ class CollectionRowViewModel(
                 }
 
                 _segmentPreviews.value = result
-                println("📚 COLLECTION ROW VM: Loaded ${result.size} previews for ${_collection.value.id.take(8)}")
+                if (BuildConfig.DEBUG) { println("📚 COLLECTION ROW VM: Loaded ${result.size} previews for ${_collection.value.id.take(8)}") }
             } catch (e: Exception) {
                 _error.value = "Failed to load previews"
-                println("❌ COLLECTION ROW VM: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ COLLECTION ROW VM: ${e.message}") }
             } finally {
                 _isLoadingPreviews.value = false
             }
@@ -225,7 +226,7 @@ class CollectionRowViewModel(
 
     fun toggleBookmark() {
         _isBookmarked.value = !_isBookmarked.value
-        println("📚 COLLECTION ROW VM: Bookmark → ${_isBookmarked.value} for ${_collection.value.id}")
+        if (BuildConfig.DEBUG) { println("📚 COLLECTION ROW VM: Bookmark → ${_isBookmarked.value} for ${_collection.value.id}") }
     }
 
     fun refresh() {
@@ -234,7 +235,7 @@ class CollectionRowViewModel(
                 val updated = collectionService.getCollection(_collection.value.id)
                 if (updated != null) _collection.value = updated
             } catch (e: Exception) {
-                println("❌ COLLECTION ROW VM: Refresh failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ COLLECTION ROW VM: Refresh failed: ${e.message}") }
             }
         }
     }

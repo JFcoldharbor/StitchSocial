@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Centralized manager for all follow/unfollow operations across the app with James Fortune protection
@@ -72,12 +73,12 @@ class FollowManager(private val context: Context) : ViewModel() {
             _followingStates.value = emptyMap()
             _loadingStates.value = emptySet()
             _lastError.value = null
-            println("🔗 FOLLOW MANAGER: cache reset on auth swap → ${newUID ?: "nil"}")
+            if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: cache reset on auth swap → ${newUID ?: "nil"}") }
         }
     }
 
     init {
-        println("🔗 FOLLOW MANAGER: Initialized with auto-follow protection")
+        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Initialized with auto-follow protection") }
         auth.addAuthStateListener(authStateListener)
     }
 
@@ -95,12 +96,12 @@ class FollowManager(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             val currentUserID = auth.currentUser?.uid
             if (currentUserID == null) {
-                println("❌ FOLLOW MANAGER: No current user ID")
+                if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: No current user ID") }
                 return@launch
             }
 
             if (currentUserID == userID) {
-                println("❌ FOLLOW MANAGER: Cannot follow yourself")
+                if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: Cannot follow yourself") }
                 return@launch
             }
 
@@ -115,7 +116,7 @@ class FollowManager(private val context: Context) : ViewModel() {
             if (wasFollowing && !newFollowingState) {
                 val isProtected = isProtectedFromUnfollow(userID)
                 if (isProtected) {
-                    println("🔒 FOLLOW MANAGER: Cannot unfollow protected account $userID")
+                    if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: Cannot unfollow protected account $userID") }
                     _lastError.value = "This official account cannot be unfollowed"
                     _loadingStates.value = _loadingStates.value - userID
 
@@ -132,8 +133,8 @@ class FollowManager(private val context: Context) : ViewModel() {
             // Haptic feedback for better UX
             triggerHapticFeedback()
 
-            println("🔗 FOLLOW MANAGER: ${if (newFollowingState) "Following" else "Unfollowing"} user $userID")
-            println("🔗 FOLLOW MANAGER: Optimistic state set to: $newFollowingState")
+            if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: ${if (newFollowingState) "Following" else "Unfollowing"} user $userID") }
+            if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Optimistic state set to: $newFollowingState") }
 
             try {
                 // Perform the actual follow/unfollow operation
@@ -144,16 +145,16 @@ class FollowManager(private val context: Context) : ViewModel() {
                 }
 
                 if (success) {
-                    println("✅ FOLLOW MANAGER: Successfully ${if (newFollowingState) "followed" else "unfollowed"} user $userID")
+                    if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: Successfully ${if (newFollowingState) "followed" else "unfollowed"} user $userID") }
 
 
                     // Send follow notification via Cloud Function (matches iOS)
                     if (newFollowingState) {
                         try {
                             notificationService.sendFollowNotification(recipientID = userID)
-                            println("FOLLOW MANAGER: Follow notification sent to $userID")
+                            if (BuildConfig.DEBUG) { println("FOLLOW MANAGER: Follow notification sent to $userID") }
                         } catch (e: Exception) {
-                            println("FOLLOW MANAGER: Follow notification failed (non-fatal) - ${e.message}")
+                            if (BuildConfig.DEBUG) { println("FOLLOW MANAGER: Follow notification failed (non-fatal) - ${e.message}") }
                         }
                     }
                     // Notify completion callback
@@ -162,16 +163,16 @@ class FollowManager(private val context: Context) : ViewModel() {
                     // Immediately refresh follow state to ensure UI consistency
                     refreshFollowState(userID)
 
-                    println("✅ FOLLOW MANAGER: Follow state updated - $userID is now ${if (newFollowingState) "FOLLOWED" else "UNFOLLOWED"}")
+                    if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: Follow state updated - $userID is now ${if (newFollowingState) "FOLLOWED" else "UNFOLLOWED"}") }
 
                     // REFRESH FOLLOWER COUNTS AFTER SUCCESSFUL FOLLOW/UNFOLLOW
                     viewModelScope.launch {
                         try {
                             userService.refreshFollowerCounts(currentUserID)
                             userService.refreshFollowerCounts(userID)
-                            println("✅ FOLLOW MANAGER: Refreshed follower counts after follow action")
+                            if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: Refreshed follower counts after follow action") }
                         } catch (e: Exception) {
-                            println("⚠️ FOLLOW MANAGER: Failed to refresh counts: ${e.message}")
+                            if (BuildConfig.DEBUG) { println("⚠️ FOLLOW MANAGER: Failed to refresh counts: ${e.message}") }
                         }
                     }
 
@@ -189,7 +190,7 @@ class FollowManager(private val context: Context) : ViewModel() {
                 val errorMessage = "Failed to ${if (newFollowingState) "follow" else "unfollow"} user: ${e.message}"
                 _lastError.value = errorMessage
 
-                println("❌ FOLLOW MANAGER: $errorMessage")
+                if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: $errorMessage") }
 
                 // Notify error callback
                 onFollowError?.invoke(userID, e)
@@ -207,7 +208,7 @@ class FollowManager(private val context: Context) : ViewModel() {
      */
     private suspend fun isProtectedFromUnfollow(userID: String): Boolean {
         return try {
-            println("🔒 FOLLOW MANAGER: Checking unfollow protection for user $userID")
+            if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: Checking unfollow protection for user $userID") }
 
             // Get user email to check against protected accounts
             val userProfile = userService.getUserProfile(userID)
@@ -215,15 +216,15 @@ class FollowManager(private val context: Context) : ViewModel() {
             val isProtected = SpecialUsersConfig.isProtectedFromUnfollow(userEmail)
 
             if (isProtected) {
-                println("🔒 FOLLOW MANAGER: User $userID ($userEmail) IS PROTECTED from unfollowing")
+                if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: User $userID ($userEmail) IS PROTECTED from unfollowing") }
             } else {
-                println("✅ FOLLOW MANAGER: User $userID ($userEmail) can be unfollowed")
+                if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: User $userID ($userEmail) can be unfollowed") }
             }
 
             isProtected
 
         } catch (e: Exception) {
-            println("⚠️ FOLLOW MANAGER: Could not check protection status for $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ FOLLOW MANAGER: Could not check protection status for $userID: ${e.message}") }
             // If we can't check, allow the unfollow (fail open)
             false
         }
@@ -263,10 +264,10 @@ class FollowManager(private val context: Context) : ViewModel() {
             try {
                 val isFollowing = userService.isFollowing(currentUserID, userID)
                 _followingStates.value = _followingStates.value + (userID to isFollowing)
-                println("🔗 FOLLOW MANAGER: Loaded follow state for $userID: $isFollowing")
+                if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Loaded follow state for $userID: $isFollowing") }
             } catch (e: Exception) {
                 _followingStates.value = _followingStates.value + (userID to false)
-                println("❌ FOLLOW MANAGER: Failed to load follow state for $userID: $e")
+                if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: Failed to load follow state for $userID: $e") }
             }
         }
     }
@@ -284,10 +285,10 @@ class FollowManager(private val context: Context) : ViewModel() {
             // crash synchronously on an empty path.
             val validIDs = userIDs.filter { it.isNotEmpty() }
             if (validIDs.size != userIDs.size) {
-                println("🔄 FOLLOW MANAGER: dropped ${userIDs.size - validIDs.size} empty user IDs")
+                if (BuildConfig.DEBUG) { println("🔄 FOLLOW MANAGER: dropped ${userIDs.size - validIDs.size} empty user IDs") }
             }
 
-            println("🔄 FOLLOW MANAGER: Loading follow states for ${validIDs.size} users from Firebase...")
+            if (BuildConfig.DEBUG) { println("🔄 FOLLOW MANAGER: Loading follow states for ${validIDs.size} users from Firebase...") }
 
             // Parallel loading using async/await
             val deferredResults = validIDs.map { userID ->
@@ -295,16 +296,16 @@ class FollowManager(private val context: Context) : ViewModel() {
                     try {
                         val isFollowing = userService.isFollowing(currentUserID, userID)
                         _followingStates.value = _followingStates.value + (userID to isFollowing)
-                        println("🔗 FOLLOW MANAGER: User $userID - Following: $isFollowing")
+                        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: User $userID - Following: $isFollowing") }
                     } catch (e: Exception) {
                         _followingStates.value = _followingStates.value + (userID to false)
-                        println("❌ FOLLOW MANAGER: Failed to load state for $userID: ${e.message}")
+                        if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: Failed to load state for $userID: ${e.message}") }
                     }
                 }
             }
 
             deferredResults.awaitAll()
-            println("✅ FOLLOW MANAGER: Finished loading follow states for ${validIDs.size} users")
+            if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: Finished loading follow states for ${validIDs.size} users") }
         }
     }
 
@@ -322,7 +323,7 @@ class FollowManager(private val context: Context) : ViewModel() {
         _followingStates.value = emptyMap()
         _loadingStates.value = emptySet()
         _lastError.value = null
-        println("🔗 FOLLOW MANAGER: Cache cleared")
+        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Cache cleared") }
     }
 
     /**
@@ -330,7 +331,7 @@ class FollowManager(private val context: Context) : ViewModel() {
      */
     fun updateFollowState(userID: String, isFollowing: Boolean) {
         _followingStates.value = _followingStates.value + (userID to isFollowing)
-        println("🔗 FOLLOW MANAGER: Manually updated follow state for $userID: $isFollowing")
+        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Manually updated follow state for $userID: $isFollowing") }
     }
 
     // MARK: - Batch Operations
@@ -357,11 +358,11 @@ class FollowManager(private val context: Context) : ViewModel() {
      */
     fun refreshFollowStates(userIDs: List<String>) {
         viewModelScope.launch {
-            println("🔄 FOLLOW MANAGER: Refreshing follow states for ${userIDs.size} users")
+            if (BuildConfig.DEBUG) { println("🔄 FOLLOW MANAGER: Refreshing follow states for ${userIDs.size} users") }
 
             val currentUserID = auth.currentUser?.uid
             if (currentUserID == null) {
-                println("❌ FOLLOW MANAGER: No current user for refresh")
+                if (BuildConfig.DEBUG) { println("❌ FOLLOW MANAGER: No current user for refresh") }
                 return@launch
             }
 
@@ -374,13 +375,13 @@ class FollowManager(private val context: Context) : ViewModel() {
                 userIDs.forEach { userID ->
                     val isFollowing = followingIDs.contains(userID)
                     _followingStates.value = _followingStates.value + (userID to isFollowing)
-                    println("🔄 FOLLOW MANAGER: Updated state for $userID: $isFollowing")
+                    if (BuildConfig.DEBUG) { println("🔄 FOLLOW MANAGER: Updated state for $userID: $isFollowing") }
                 }
 
-                println("✅ FOLLOW MANAGER: Refreshed follow states for ${userIDs.size} users")
+                if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: Refreshed follow states for ${userIDs.size} users") }
 
             } catch (e: Exception) {
-                println("⚠️ FOLLOW MANAGER: Failed to refresh follow states: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ FOLLOW MANAGER: Failed to refresh follow states: ${e.message}") }
             }
         }
     }
@@ -391,7 +392,7 @@ class FollowManager(private val context: Context) : ViewModel() {
     fun refreshAllFollowStates() {
         val userIDsToRefresh = _followingStates.value.keys.toList()
         refreshFollowStates(userIDsToRefresh)
-        println("🔄 FOLLOW MANAGER: Refreshing ALL cached follow states")
+        if (BuildConfig.DEBUG) { println("🔄 FOLLOW MANAGER: Refreshing ALL cached follow states") }
     }
 
     // MARK: - Statistics
@@ -417,7 +418,7 @@ class FollowManager(private val context: Context) : ViewModel() {
         try {
             vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (e: Exception) {
-            println("⚠️ FOLLOW MANAGER: Haptic feedback not available: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ FOLLOW MANAGER: Haptic feedback not available: ${e.message}") }
         }
     }
 
@@ -469,20 +470,20 @@ class FollowManager(private val context: Context) : ViewModel() {
      * Print current state for debugging
      */
     fun debugPrintState() {
-        println("🔗 FOLLOW MANAGER DEBUG:")
-        println("   Following states: ${_followingStates.value}")
-        println("   Loading states: ${_loadingStates.value}")
-        println("   Total following: $totalFollowing")
-        println("   Pending operations: $pendingOperations")
-        println("   Last error: ${_lastError.value ?: "none"}")
+        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER DEBUG:") }
+        if (BuildConfig.DEBUG) { println("   Following states: ${_followingStates.value}") }
+        if (BuildConfig.DEBUG) { println("   Loading states: ${_loadingStates.value}") }
+        if (BuildConfig.DEBUG) { println("   Total following: $totalFollowing") }
+        if (BuildConfig.DEBUG) { println("   Pending operations: $pendingOperations") }
+        if (BuildConfig.DEBUG) { println("   Last error: ${_lastError.value ?: "none"}") }
     }
 
     /**
      * Test follow manager functionality
      */
     fun helloWorldTest() {
-        println("🔗 FOLLOW MANAGER: Hello World - Ready for complete follow management!")
-        println("🔗 Features: Follow/Unfollow, Optimistic UI, James Fortune protection, Batch operations")
-        println("🔗 Status: UserService integration, Haptic feedback, Error handling, State management")
+        if (BuildConfig.DEBUG) { println("🔗 FOLLOW MANAGER: Hello World - Ready for complete follow management!") }
+        if (BuildConfig.DEBUG) { println("🔗 Features: Follow/Unfollow, Optimistic UI, James Fortune protection, Batch operations") }
+        if (BuildConfig.DEBUG) { println("🔗 Status: UserService integration, Haptic feedback, Error handling, State management") }
     }
 }

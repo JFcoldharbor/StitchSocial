@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 /** Snapshot of a user's stats used by the progress evaluator. Mirrors
  *  iOS RealUserStats — fields read from the user doc. */
@@ -68,7 +69,7 @@ class BadgeService private constructor() {
         val ref = db.collection("users").document(userID).collection("badges")
         val reg = ref.addSnapshotListener { snap, err ->
             if (err != null) {
-                println("🎖 BADGES: listen failed for $userID — ${err.message}")
+                if (BuildConfig.DEBUG) { println("🎖 BADGES: listen failed for $userID — ${err.message}") }
                 return@addSnapshotListener
             }
             val badges = snap?.documents.orEmpty().mapNotNull { d ->
@@ -112,7 +113,7 @@ class BadgeService private constructor() {
         } catch (e: Exception) {
             // Rollback on failure
             _earnedByUser.value = _earnedByUser.value + (userID to list)
-            println("🎖 BADGES: pin toggle failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("🎖 BADGES: pin toggle failed — ${e.message}") }
         }
     }
 
@@ -129,7 +130,7 @@ class BadgeService private constructor() {
                 .update("isNew", false)
                 .await()
         } catch (e: Exception) {
-            println("🎖 BADGES: markSeen failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("🎖 BADGES: markSeen failed — ${e.message}") }
         }
     }
 

@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import kotlin.math.*
+import com.stitchsocial.club.BuildConfig
 
 class PromoVideoExporter private constructor(private val context: Context) {
 
@@ -245,7 +246,7 @@ class PromoVideoExporter private constructor(private val context: Context) {
             // The actual decode/encode pipeline should use the pattern from VideoExportService.
             // This method focuses on the overlay composition.
 
-            println("🎬 PROMO: Starting export — ${videoWidth}x${videoHeight}, $totalFrames frames")
+            if (BuildConfig.DEBUG) { println("🎬 PROMO: Starting export — ${videoWidth}x${videoHeight}, $totalFrames frames") }
 
             // For each frame, compute overlay
             for (frameIndex in 0 until totalFrames) {
@@ -324,12 +325,12 @@ class PromoVideoExporter private constructor(private val context: Context) {
             _isExporting.value = false
             _progress.value = 1.0
 
-            println("✅ PROMO: Export completed — ${outputFile.name}")
+            if (BuildConfig.DEBUG) { println("✅ PROMO: Export completed — ${outputFile.name}") }
             PromoResult(success = true, outputFile = outputFile)
 
         } catch (e: Exception) {
             _isExporting.value = false
-            println("❌ PROMO: Export failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ PROMO: Export failed — ${e.message}") }
             PromoResult(success = false, error = e.message)
         }
     }

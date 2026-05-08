@@ -19,6 +19,7 @@ import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 data class LastEngagementFeedback(
     val cloutAwarded: Int,
@@ -139,7 +140,7 @@ class EngagementViewModel(
                 _tapProgress.value = _currentVideoState.value?.getHypeProgress() ?: 0.0
 
             } catch (e: Exception) {
-                println("Hype tap error: ${e.message}")
+                if (BuildConfig.DEBUG) { println("Hype tap error: ${e.message}") }
             }
 
             _isProcessing.value = false
@@ -171,7 +172,7 @@ class EngagementViewModel(
                 _tapProgress.value = _currentVideoState.value?.getCoolProgress() ?: 0.0
 
             } catch (e: Exception) {
-                println("Cool tap error: ${e.message}")
+                if (BuildConfig.DEBUG) { println("Cool tap error: ${e.message}") }
             }
 
             _isProcessing.value = false
@@ -187,7 +188,7 @@ class EngagementViewModel(
     fun trackView(videoID: String) {
         viewModelScope.launch {
             try {
-                println("👁 VIEW: Video $videoID viewed by user $currentUserID")
+                if (BuildConfig.DEBUG) { println("👁 VIEW: Video $videoID viewed by user $currentUserID") }
 
                 val userData = try {
                     userService?.getBasicUserInfo(currentUserID)
@@ -204,7 +205,7 @@ class EngagementViewModel(
 
                 videoService?.recordVideoView(videoID, currentUserID, userDataMap)
             } catch (e: Exception) {
-                println("❌ VIEW TRACKING ERROR: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ VIEW TRACKING ERROR: ${e.message}") }
             }
         }
     }

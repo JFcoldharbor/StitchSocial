@@ -1,6 +1,7 @@
 package com.stitchsocial.club.firebase
 
 import com.stitchsocial.club.firebase.FirebaseSchema.Collections
+import com.stitchsocial.club.BuildConfig
 
 /**
  * DocumentPaths.kt - COMPLETE WITH HASHTAG SUPPORT
@@ -471,26 +472,26 @@ object DocumentPaths {
 
     /** Print path diagnostics for debugging */
     fun printPathDiagnostics() {
-        println("🔍 DOCUMENT PATHS: Path diagnostics for stitchfin database")
-        println("   Base Path: $BASE_PROJECT_PATH")
-        println("   Collections: ${getAllCollectionNames().size}")
-        println("   Hashtag Queries: ${getAllHashtagQueryTypes().size}")
-        println("   Example Video Path: ${videoDocument("test123")}")
-        println("   Example User Path: ${userDocument("user456")}")
-        println("   Example Hashtag Query: ${videosByHashtagQuery("cooking").build()}")
-        println("   Example Trending Query: ${videosByHashtagTrendingQuery("food").build()}")
+        if (BuildConfig.DEBUG) { println("🔍 DOCUMENT PATHS: Path diagnostics for stitchfin database") }
+        if (BuildConfig.DEBUG) { println("   Base Path: $BASE_PROJECT_PATH") }
+        if (BuildConfig.DEBUG) { println("   Collections: ${getAllCollectionNames().size}") }
+        if (BuildConfig.DEBUG) { println("   Hashtag Queries: ${getAllHashtagQueryTypes().size}") }
+        if (BuildConfig.DEBUG) { println("   Example Video Path: ${videoDocument("test123")}") }
+        if (BuildConfig.DEBUG) { println("   Example User Path: ${userDocument("user456")}") }
+        if (BuildConfig.DEBUG) { println("   Example Hashtag Query: ${videosByHashtagQuery("cooking").build()}") }
+        if (BuildConfig.DEBUG) { println("   Example Trending Query: ${videosByHashtagTrendingQuery("food").build()}") }
     }
 
     /** Print hashtag query examples */
     fun printHashtagQueryExamples() {
-        println("🏷️ HASHTAG QUERIES: Available query patterns")
-        println("   Basic Search: ${videosByHashtagQuery("cooking").build()}")
-        println("   Trending Sort: ${videosByHashtagTrendingQuery("food").build()}")
-        println("   Engagement Sort: ${videosByHashtagEngagementQuery("recipe").build()}")
-        println("   Discovery Feed: ${hashtagDiscoveryQuery("chef").build()}")
-        println("   User Videos: ${userVideosByHashtagQuery("user123", "cooking").build()}")
-        println("   Content Type: ${videosByHashtagAndTypeQuery("music", "SHORT").build()}")
-        println("   Popularity: ${hashtagPopularityQuery("viral").build()}")
+        if (BuildConfig.DEBUG) { println("🏷️ HASHTAG QUERIES: Available query patterns") }
+        if (BuildConfig.DEBUG) { println("   Basic Search: ${videosByHashtagQuery("cooking").build()}") }
+        if (BuildConfig.DEBUG) { println("   Trending Sort: ${videosByHashtagTrendingQuery("food").build()}") }
+        if (BuildConfig.DEBUG) { println("   Engagement Sort: ${videosByHashtagEngagementQuery("recipe").build()}") }
+        if (BuildConfig.DEBUG) { println("   Discovery Feed: ${hashtagDiscoveryQuery("chef").build()}") }
+        if (BuildConfig.DEBUG) { println("   User Videos: ${userVideosByHashtagQuery("user123", "cooking").build()}") }
+        if (BuildConfig.DEBUG) { println("   Content Type: ${videosByHashtagAndTypeQuery("music", "SHORT").build()}") }
+        if (BuildConfig.DEBUG) { println("   Popularity: ${hashtagPopularityQuery("viral").build()}") }
     }
 }
 

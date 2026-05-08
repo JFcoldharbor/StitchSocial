@@ -24,6 +24,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Notification service matching iOS implementation exactly.
@@ -41,8 +42,8 @@ class NotificationService {
     private val functionPrefix = "stitchnoti_"
 
     init {
-        println("NOTIFICATION SERVICE: Initialized (Cloud Functions mode)")
-        println("  REGION: us-central1 | PREFIX: $functionPrefix")
+        if (BuildConfig.DEBUG) { println("NOTIFICATION SERVICE: Initialized (Cloud Functions mode)") }
+        if (BuildConfig.DEBUG) { println("  REGION: us-central1 | PREFIX: $functionPrefix") }
     }
 
     // ========================================================================
@@ -61,19 +62,19 @@ class NotificationService {
             ?: throw IllegalStateException("User not authenticated")
 
         val functionName = "$functionPrefix$name"
-        println("CALLING: $functionName (uid: ${user.uid})")
+        if (BuildConfig.DEBUG) { println("CALLING: $functionName (uid: ${user.uid})") }
 
         return try {
             val callable = functions.getHttpsCallable(functionName)
             val result = callable.call(data).await()
 
-            println("SUCCESS: $functionName")
+            if (BuildConfig.DEBUG) { println("SUCCESS: $functionName") }
 
             @Suppress("UNCHECKED_CAST")
             result.data as? Map<String, Any>
 
         } catch (e: Exception) {
-            println("ERROR: $functionName failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("ERROR: $functionName failed - ${e.message}") }
             throw e
         }
     }
@@ -93,7 +94,7 @@ class NotificationService {
         engagementType: String,
         videoTitle: String
     ) {
-        println("ENGAGEMENT: Sending $engagementType notification")
+        if (BuildConfig.DEBUG) { println("ENGAGEMENT: Sending $engagementType notification") }
 
         val data = mapOf(
             "recipientID" to recipientID,
@@ -107,7 +108,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("ENGAGEMENT: Notification sent")
         } catch (e: Exception) {
-            println("ENGAGEMENT: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("ENGAGEMENT: Failed - ${e.message}") }
         }
     }
 
@@ -124,7 +125,7 @@ class NotificationService {
         videoID: String,
         videoTitle: String
     ) {
-        println("REPLY: Sending reply notification")
+        if (BuildConfig.DEBUG) { println("REPLY: Sending reply notification") }
 
         val data = mapOf(
             "recipientID" to recipientID,
@@ -137,7 +138,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("REPLY: Notification sent")
         } catch (e: Exception) {
-            println("REPLY: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("REPLY: Failed - ${e.message}") }
         }
     }
 
@@ -146,7 +147,7 @@ class NotificationService {
      * Matches iOS: sendFollowNotification(to:)
      */
     suspend fun sendFollowNotification(recipientID: String) {
-        println("FOLLOW: Sending follow notification")
+        if (BuildConfig.DEBUG) { println("FOLLOW: Sending follow notification") }
 
         val data = mapOf("recipientID" to recipientID)
 
@@ -155,7 +156,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("FOLLOW: Notification sent")
         } catch (e: Exception) {
-            println("FOLLOW: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("FOLLOW: Failed - ${e.message}") }
         }
     }
 
@@ -169,7 +170,7 @@ class NotificationService {
         videoTitle: String,
         mentionContext: String = "video"
     ) {
-        println("MENTION: Sending mention notification")
+        if (BuildConfig.DEBUG) { println("MENTION: Sending mention notification") }
 
         val data = mapOf(
             "recipientID" to recipientID,
@@ -183,7 +184,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("MENTION: Notification sent")
         } catch (e: Exception) {
-            println("MENTION: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("MENTION: Failed - ${e.message}") }
         }
     }
 
@@ -202,7 +203,7 @@ class NotificationService {
         parentCreatorID: String?,
         threadUserIDs: List<String>
     ) {
-        println("STITCH: Sending stitch notification to ${threadUserIDs.size} thread users")
+        if (BuildConfig.DEBUG) { println("STITCH: Sending stitch notification to ${threadUserIDs.size} thread users") }
 
         val data = mapOf(
             "videoID" to videoID,
@@ -217,7 +218,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("STITCH: Notifications sent")
         } catch (e: Exception) {
-            println("STITCH: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("STITCH: Failed - ${e.message}") }
         }
     }
 
@@ -237,7 +238,7 @@ class NotificationService {
         followerIDs: List<String>,
         engagerIDs: List<String>
     ) {
-        println("MILESTONE: Sending $milestone-hype milestone notification")
+        if (BuildConfig.DEBUG) { println("MILESTONE: Sending $milestone-hype milestone notification") }
 
         val data = mapOf(
             "milestone" to milestone,
@@ -253,7 +254,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("MILESTONE: Notifications sent")
         } catch (e: Exception) {
-            println("MILESTONE: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("MILESTONE: Failed - ${e.message}") }
         }
     }
 
@@ -272,7 +273,7 @@ class NotificationService {
         videoTitle: String,
         followerIDs: List<String>
     ) {
-        println("NEW VIDEO: Notifying ${followerIDs.size} followers")
+        if (BuildConfig.DEBUG) { println("NEW VIDEO: Notifying ${followerIDs.size} followers") }
 
         val data = mapOf(
             "creatorID" to creatorID,
@@ -287,7 +288,7 @@ class NotificationService {
             val success = result?.get("success") as? Boolean ?: false
             if (success) println("NEW VIDEO: Notifications sent")
         } catch (e: Exception) {
-            println("NEW VIDEO: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("NEW VIDEO: Failed - ${e.message}") }
         }
     }
 
@@ -306,7 +307,7 @@ class NotificationService {
             if (success) println("TEST PUSH: Sent successfully")
             success
         } catch (e: Exception) {
-            println("TEST PUSH: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("TEST PUSH: Failed - ${e.message}") }
             false
         }
     }
@@ -318,10 +319,10 @@ class NotificationService {
     suspend fun checkToken(): Map<String, Any>? {
         return try {
             val result = callFunction("checkToken")
-            println("TOKEN CHECK: $result")
+            if (BuildConfig.DEBUG) { println("TOKEN CHECK: $result") }
             result
         } catch (e: Exception) {
-            println("TOKEN CHECK: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("TOKEN CHECK: Failed - ${e.message}") }
             null
         }
     }
@@ -364,10 +365,10 @@ class NotificationService {
                 )
             )
             db.collection(notificationsCollection).document(notificationID).set(notification).await()
-            println("✅ SUB NOTIF: Subscription notification written for $recipientID")
+            if (BuildConfig.DEBUG) { println("✅ SUB NOTIF: Subscription notification written for $recipientID") }
             true
         } catch (e: Exception) {
-            println("⚠️ SUB NOTIF: write failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ SUB NOTIF: write failed — ${e.message}") }
             false
         }
     }
@@ -408,7 +409,7 @@ class NotificationService {
             true
 
         } catch (e: Exception) {
-            println("NOTIFICATION DIRECT WRITE: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("NOTIFICATION DIRECT WRITE: Failed - ${e.message}") }
             false
         }
     }
@@ -445,7 +446,7 @@ class NotificationService {
             )
 
         } catch (e: Exception) {
-            println("LOAD NOTIFICATIONS: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("LOAD NOTIFICATIONS: Failed - ${e.message}") }
             NotificationLoadResult(emptyList(), false, null)
         }
     }
@@ -466,7 +467,7 @@ class NotificationService {
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    println("NOTIFICATION LISTENER: Error - ${error.message}")
+                    if (BuildConfig.DEBUG) { println("NOTIFICATION LISTENER: Error - ${error.message}") }
                     return@addSnapshotListener
                 }
 
@@ -498,7 +499,7 @@ class NotificationService {
                 .await()
             true
         } catch (e: Exception) {
-            println("MARK READ: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("MARK READ: Failed - ${e.message}") }
             false
         }
     }
@@ -521,7 +522,7 @@ class NotificationService {
             batch.commit().await()
             true
         } catch (e: Exception) {
-            println("MARK ALL READ: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("MARK ALL READ: Failed - ${e.message}") }
             false
         }
     }
@@ -590,11 +591,11 @@ class NotificationService {
     }
 
     fun debugConfiguration() {
-        println("DEBUG: Notification Service Configuration")
-        println("  - Database: stitchfin")
-        println("  - Region: us-central1")
-        println("  - Function Prefix: $functionPrefix")
-        println("  - User: ${auth.currentUser?.uid ?: "none"}")
+        if (BuildConfig.DEBUG) { println("DEBUG: Notification Service Configuration") }
+        if (BuildConfig.DEBUG) { println("  - Database: stitchfin") }
+        if (BuildConfig.DEBUG) { println("  - Region: us-central1") }
+        if (BuildConfig.DEBUG) { println("  - Function Prefix: $functionPrefix") }
+        if (BuildConfig.DEBUG) { println("  - User: ${auth.currentUser?.uid ?: "none"}") }
     }
 }
 

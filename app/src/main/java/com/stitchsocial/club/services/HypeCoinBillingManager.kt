@@ -50,6 +50,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.stitchsocial.club.BuildConfig
 
 class HypeCoinBillingManager private constructor(context: Context) {
 
@@ -92,17 +93,17 @@ class HypeCoinBillingManager private constructor(context: Context) {
                 }
             }
             BillingClient.BillingResponseCode.USER_CANCELED -> {
-                println("ℹ️ BILLING: Purchase cancelled by user")
+                if (BuildConfig.DEBUG) { println("ℹ️ BILLING: Purchase cancelled by user") }
                 _purchaseState.value = PurchaseState.Cancelled
             }
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
                 // Can happen if a previous purchase wasn't acknowledged — reprocess
-                println("⚠️ BILLING: Item already owned — checking pending purchases")
+                if (BuildConfig.DEBUG) { println("⚠️ BILLING: Item already owned — checking pending purchases") }
                 scope.launch { reprocessPendingPurchases() }
             }
             else -> {
                 val error = "Billing error ${billingResult.responseCode}: ${billingResult.debugMessage}"
-                println("❌ BILLING: $error")
+                if (BuildConfig.DEBUG) { println("❌ BILLING: $error") }
                 _purchaseState.value = PurchaseState.Failed(error)
             }
         }
@@ -129,20 +130,20 @@ class HypeCoinBillingManager private constructor(context: Context) {
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(billingResult: BillingResult) {
                 if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                    println("✅ BILLING: Connected to Google Play")
+                    if (BuildConfig.DEBUG) { println("✅ BILLING: Connected to Google Play") }
                     _billingState.value = BillingState.Connected
                     scope.launch {
                         loadProducts()
                         reprocessPendingPurchases()
                     }
                 } else {
-                    println("❌ BILLING: Setup failed - ${billingResult.debugMessage}")
+                    if (BuildConfig.DEBUG) { println("❌ BILLING: Setup failed - ${billingResult.debugMessage}") }
                     _billingState.value = BillingState.Error(billingResult.debugMessage)
                 }
             }
 
             override fun onBillingServiceDisconnected() {
-                println("⚠️ BILLING: Disconnected — will retry on next operation")
+                if (BuildConfig.DEBUG) { println("⚠️ BILLING: Disconnected — will retry on next operation") }
                 _billingState.value = BillingState.Disconnected
                 // BillingClient retries automatically; no manual reconnect needed
             }
@@ -155,7 +156,7 @@ class HypeCoinBillingManager private constructor(context: Context) {
         productDetailsCache.clear()
         scope.cancel()
         _billingState.value = BillingState.Disconnected
-        println("🔌 BILLING: Disconnected")
+        if (BuildConfig.DEBUG) { println("🔌 BILLING: Disconnected") }
     }
 
     // MARK: - Load Products
@@ -185,9 +186,9 @@ class HypeCoinBillingManager private constructor(context: Context) {
             result.productDetailsList?.forEach { details ->
                 productDetailsCache[details.productId] = details
             }
-            println("✅ BILLING: Loaded ${productDetailsCache.size}/${HypeCoinPackage.entries.size} products")
+            if (BuildConfig.DEBUG) { println("✅ BILLING: Loaded ${productDetailsCache.size}/${HypeCoinPackage.entries.size} products") }
         } else {
-            println("❌ BILLING: Failed to load products - ${result.billingResult.debugMessage}")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: Failed to load products - ${result.billingResult.debugMessage}") }
         }
     }
 
@@ -226,7 +227,7 @@ class HypeCoinBillingManager private constructor(context: Context) {
      */
     fun launchPurchase(activity: Activity, pkg: HypeCoinPackage): Boolean {
         if (!billingClient.isReady) {
-            println("❌ BILLING: Client not ready — reconnecting")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: Client not ready — reconnecting") }
             connect()
             _purchaseState.value = PurchaseState.Failed("Billing not ready. Please try again.")
             return false
@@ -234,7 +235,7 @@ class HypeCoinBillingManager private constructor(context: Context) {
 
         val details = productDetailsCache[pkg.playBillingProductId]
         if (details == null) {
-            println("❌ BILLING: ProductDetails not loaded for ${pkg.playBillingProductId}")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: ProductDetails not loaded for ${pkg.playBillingProductId}") }
             _purchaseState.value = PurchaseState.Failed("Product not available. Please try again.")
             return false
         }
@@ -254,11 +255,11 @@ class HypeCoinBillingManager private constructor(context: Context) {
         val result = billingClient.launchBillingFlow(activity, billingFlowParams)
 
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-            println("🛒 BILLING: Launched purchase flow for ${pkg.displayName}")
+            if (BuildConfig.DEBUG) { println("🛒 BILLING: Launched purchase flow for ${pkg.displayName}") }
             _purchaseState.value = PurchaseState.Purchasing(pkg)
             true
         } else {
-            println("❌ BILLING: Failed to launch - ${result.debugMessage}")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: Failed to launch - ${result.debugMessage}") }
             _purchaseState.value = PurchaseState.Failed(result.debugMessage)
             false
         }
@@ -281,14 +282,14 @@ class HypeCoinBillingManager private constructor(context: Context) {
      */
     private suspend fun handlePurchase(purchase: Purchase) {
         if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) {
-            println("ℹ️ BILLING: Purchase pending — waiting for completion")
+            if (BuildConfig.DEBUG) { println("ℹ️ BILLING: Purchase pending — waiting for completion") }
             _purchaseState.value = PurchaseState.Pending
             return
         }
 
         val userID = currentUserID
         if (userID == null) {
-            println("❌ BILLING: No userID set — cannot credit purchase")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: No userID set — cannot credit purchase") }
             _purchaseState.value = PurchaseState.Failed("User not signed in")
             return
         }
@@ -298,7 +299,7 @@ class HypeCoinBillingManager private constructor(context: Context) {
         val pkg       = HypeCoinPackage.entries.firstOrNull { it.playBillingProductId == productId }
 
         if (pkg == null) {
-            println("❌ BILLING: Unknown productId: $productId")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: Unknown productId: $productId") }
             _purchaseState.value = PurchaseState.Failed("Unknown product")
             return
         }
@@ -312,12 +313,12 @@ class HypeCoinBillingManager private constructor(context: Context) {
             val ackResult = billingClient.acknowledgePurchase(ackParams)
 
             if (ackResult.responseCode != BillingClient.BillingResponseCode.OK) {
-                println("❌ BILLING: Acknowledge failed - ${ackResult.debugMessage}")
+                if (BuildConfig.DEBUG) { println("❌ BILLING: Acknowledge failed - ${ackResult.debugMessage}") }
                 _purchaseState.value = PurchaseState.Failed("Purchase acknowledgment failed")
                 return
             }
 
-            println("✅ BILLING: Purchase acknowledged with Play")
+            if (BuildConfig.DEBUG) { println("✅ BILLING: Purchase acknowledged with Play") }
         }
 
         // Credit Firestore via HypeCoinService
@@ -329,11 +330,11 @@ class HypeCoinBillingManager private constructor(context: Context) {
                 packageRawValue  = pkg.rawValue
             )
 
-            println("💰 BILLING: Credited ${pkg.coins} coins to $userID for ${pkg.displayName}")
+            if (BuildConfig.DEBUG) { println("💰 BILLING: Credited ${pkg.coins} coins to $userID for ${pkg.displayName}") }
             _purchaseState.value = PurchaseState.Success(pkg)
 
         } catch (e: Exception) {
-            println("❌ BILLING: Credit failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ BILLING: Credit failed - ${e.message}") }
             _purchaseState.value = PurchaseState.Failed(e.message ?: "Credit failed")
         }
     }
@@ -357,14 +358,14 @@ class HypeCoinBillingManager private constructor(context: Context) {
         val result = billingClient.queryPurchasesAsync(params)
 
         if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
-            println("⚠️ BILLING: Could not query pending purchases")
+            if (BuildConfig.DEBUG) { println("⚠️ BILLING: Could not query pending purchases") }
             return
         }
 
         val unprocessed = result.purchasesList.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
 
         if (unprocessed.isNotEmpty()) {
-            println("🔄 BILLING: Reprocessing ${unprocessed.size} pending purchase(s)")
+            if (BuildConfig.DEBUG) { println("🔄 BILLING: Reprocessing ${unprocessed.size} pending purchase(s)") }
             unprocessed.forEach { purchase -> handlePurchase(purchase) }
         }
     }

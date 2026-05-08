@@ -13,6 +13,7 @@ import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 /**
  * VideoService implementation with FIXED database configuration
@@ -24,11 +25,11 @@ class VideoService {
     private val db: FirebaseFirestore by lazy {
         try {
             Firebase.firestore("stitchfin").also {
-                println("VIDEO SERVICE: Connecting to 'stitchfin' database")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Connecting to 'stitchfin' database") }
             }
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Failed to connect to 'stitchfin' database: ${e.message}")
-            println("VIDEO SERVICE: Falling back to mock data")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to connect to 'stitchfin' database: ${e.message}") }
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Falling back to mock data") }
             throw e
         }
     }
@@ -38,7 +39,7 @@ class VideoService {
      */
     suspend fun getFeedVideos(followingUsers: List<String>): List<SimpleThreadData> {
         return try {
-            println("VIDEO SERVICE: Loading videos from stitchfin database")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Loading videos from stitchfin database") }
 
             // Try to query the correct database
             val snapshot = db.collection("videos")
@@ -47,7 +48,7 @@ class VideoService {
                 .await()
 
             if (snapshot.documents.isNotEmpty()) {
-                println("VIDEO SERVICE: Found ${snapshot.documents.size} videos in stitchfin database")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Found ${snapshot.documents.size} videos in stitchfin database") }
 
                 // Convert Firebase documents to our data structure
                 snapshot.documents.mapIndexed { index, doc ->
@@ -65,13 +66,13 @@ class VideoService {
                     )
                 }
             } else {
-                println("VIDEO SERVICE: No videos found in stitchfin database, using mock data")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: No videos found in stitchfin database, using mock data") }
                 generateMockData()
             }
 
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Error connecting to stitchfin database: ${e.message}")
-            println("VIDEO SERVICE: Using mock data instead")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Error connecting to stitchfin database: ${e.message}") }
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Using mock data instead") }
             generateMockData()
         }
     }
@@ -80,7 +81,7 @@ class VideoService {
      * Generate mock data when database is unavailable
      */
     private fun generateMockData(): List<SimpleThreadData> {
-        println("VIDEO SERVICE: Generating mock data with real video URLs")
+        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Generating mock data with real video URLs") }
 
         return listOf(
             SimpleThreadData(

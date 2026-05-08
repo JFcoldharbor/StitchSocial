@@ -23,6 +23,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Data class for viewer information
@@ -48,16 +49,16 @@ class VideoServiceImpl {
 
     suspend fun getVideoById(videoID: String): CoreVideoMetadata? {
         return try {
-            println("VIDEO SERVICE: ðŸ“± Loading video by ID: $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“± Loading video by ID: $videoID") }
             val doc = db.collection("videos").document(videoID).get().await()
             if (!doc.exists()) {
-                println("VIDEO SERVICE: âŒ Video not found: $videoID")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Video not found: $videoID") }
                 return null
             }
             val videos = convertFirebaseToVideoMetadata(listOf(doc))
             videos.firstOrNull()
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Error loading video $videoID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Error loading video $videoID: ${e.message}") }
             null
         }
     }
@@ -70,9 +71,9 @@ class VideoServiceImpl {
                 "lastEngagementAt" to (com.google.firebase.firestore.FieldValue.serverTimestamp() as Any)
             )
             db.collection("videos").document(videoID).update(updates).await()
-            println("VIDEO SERVICE: âœ… Updated engagement counts for $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Updated engagement counts for $videoID") }
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to update counts: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to update counts: ${e.message}") }
             throw e
         }
     }
@@ -83,11 +84,11 @@ class VideoServiceImpl {
      */
     suspend fun deleteVideo(videoID: String) {
         try {
-            println("VIDEO SERVICE: Deleting video: $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Deleting video: $videoID") }
 
             val videoDoc = db.collection("videos").document(videoID).get().await()
             if (!videoDoc.exists()) {
-                println("VIDEO SERVICE: Video not found: $videoID")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Video not found: $videoID") }
                 return
             }
 
@@ -100,10 +101,10 @@ class VideoServiceImpl {
                 deleteSingleVideo(videoID, videoData)
             }
 
-            println("VIDEO SERVICE: Video deleted: $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Video deleted: $videoID") }
 
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Failed to delete video: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to delete video: ${e.message}") }
             throw e
         }
     }
@@ -162,7 +163,7 @@ class VideoServiceImpl {
                 for (doc in coolShards.documents) { doc.reference.delete().await() }
             } catch (_: Exception) { }
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Cleanup failed (non-fatal): ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Cleanup failed (non-fatal): ${e.message}") }
         }
     }
 
@@ -172,7 +173,7 @@ class VideoServiceImpl {
             val ref = storage.getReferenceFromUrl(url)
             ref.delete().await()
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Storage delete failed (non-fatal): ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Storage delete failed (non-fatal): ${e.message}") }
         }
     }
 
@@ -183,11 +184,11 @@ class VideoServiceImpl {
      */
     suspend fun getFeedVideos(followingIDs: List<String>, limit: Int): List<CoreVideoMetadata> {
         if (followingIDs.isEmpty()) {
-            println("VIDEO SERVICE: ðŸ“­ No following users - returning empty feed")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“­ No following users - returning empty feed") }
             return emptyList()
         }
 
-        println("VIDEO SERVICE: ðŸ“± Loading feed for ${followingIDs.size} followed users")
+        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“± Loading feed for ${followingIDs.size} followed users") }
 
         val allVideos = mutableListOf<CoreVideoMetadata>()
 
@@ -199,19 +200,19 @@ class VideoServiceImpl {
                     .get()
                     .await()
 
-                println("VIDEO SERVICE: ðŸ“Š Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents") }
 
                 val videos = convertFirebaseToVideoMetadata(snapshot.documents)
                 val parentVideos = videos.filter { it.conversationDepth == 0 && !it.isDeleted }
                 allVideos.addAll(parentVideos)
 
             } catch (e: Exception) {
-                println("VIDEO SERVICE: âŒ Chunk query failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Chunk query failed: ${e.message}") }
             }
         }
 
         val sorted = allVideos.sortedByDescending { it.createdAt }.take(limit)
-        println("VIDEO SERVICE: âœ… Loaded ${sorted.size} videos from followed users")
+        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Loaded ${sorted.size} videos from followed users") }
         return sorted
     }
 
@@ -220,7 +221,7 @@ class VideoServiceImpl {
      */
     suspend fun getFeedVideos(limit: Int = 50): List<CoreVideoMetadata> {
         return try {
-            println("VIDEO SERVICE: ðŸ“± Loading general feed")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“± Loading general feed") }
             val snapshot = db.collection("videos")
                 .limit(limit.toLong())
                 .get()
@@ -230,10 +231,10 @@ class VideoServiceImpl {
                 .filter { it.conversationDepth == 0 && !it.isDeleted }
                 .sortedByDescending { it.createdAt }
 
-            println("VIDEO SERVICE: âœ… Loaded ${videos.size} feed videos")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Loaded ${videos.size} feed videos") }
             videos
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Feed query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Feed query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -244,7 +245,7 @@ class VideoServiceImpl {
      */
     suspend fun getTimestampedReplies(videoID: String): List<CoreVideoMetadata> {
         return try {
-            println("VIDEO SERVICE: Getting timestamped replies for: $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Getting timestamped replies for: $videoID") }
 
             val snapshot = db.collection("videos")
                 .whereEqualTo("replyToVideoID", videoID)
@@ -255,10 +256,10 @@ class VideoServiceImpl {
                 .filter { !it.isDeleted }
                 .sortedBy { it.createdAt }
 
-            println("VIDEO SERVICE: Found ${replies.size} timestamped replies")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Found ${replies.size} timestamped replies") }
             replies
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Failed to get timestamped replies: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to get timestamped replies: ${e.message}") }
             emptyList()
         }
     }
@@ -281,7 +282,7 @@ class VideoServiceImpl {
 
     suspend fun getThreadChildren(threadID: String): List<CoreVideoMetadata> {
         return try {
-            println("VIDEO SERVICE: ðŸ” Querying children for threadID: $threadID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ” Querying children for threadID: $threadID") }
 
             val snapshot = db.collection("videos")
                 .whereEqualTo("threadID", threadID)
@@ -289,7 +290,7 @@ class VideoServiceImpl {
                 .get()
                 .await()
 
-            println("VIDEO SERVICE: ðŸ“Š Raw query returned ${snapshot.documents.size} documents for threadID: $threadID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š Raw query returned ${snapshot.documents.size} documents for threadID: $threadID") }
 
             // Log each document's details for debugging
             snapshot.documents.forEach { doc ->
@@ -297,19 +298,19 @@ class VideoServiceImpl {
                 val docThreadID = data?.get("threadID") as? String
                 val docDepth = (data?.get("conversationDepth") as? Long)?.toInt() ?: 0
                 val docDeleted = data?.get("isDeleted") as? Boolean ?: false
-                println("VIDEO SERVICE: ðŸ“„ Doc ${doc.id}: threadID=$docThreadID, depth=$docDepth, deleted=$docDeleted")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“„ Doc ${doc.id}: threadID=$docThreadID, depth=$docDepth, deleted=$docDeleted") }
             }
 
             val allVideos = convertFirebaseToVideoMetadata(snapshot.documents)
-            println("VIDEO SERVICE: ðŸ“Š Converted ${allVideos.size} videos")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š Converted ${allVideos.size} videos") }
 
             val children = allVideos.filter { it.conversationDepth > 0 && !it.isDeleted }
                 .sortedBy { it.createdAt }
 
-            println("VIDEO SERVICE: âœ… Found ${children.size} children (depth > 0, not deleted) for thread $threadID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children (depth > 0, not deleted) for thread $threadID") }
             children
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Children query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Children query failed: ${e.message}") }
             e.printStackTrace()
             emptyList()
         }
@@ -320,7 +321,7 @@ class VideoServiceImpl {
      */
     suspend fun getThreadChildrenByReplyTo(parentVideoID: String): List<CoreVideoMetadata> {
         return try {
-            println("VIDEO SERVICE: ðŸ” Querying children by replyToVideoID: $parentVideoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ” Querying children by replyToVideoID: $parentVideoID") }
 
             val snapshot = db.collection("videos")
                 .whereEqualTo("replyToVideoID", parentVideoID)
@@ -328,16 +329,16 @@ class VideoServiceImpl {
                 .get()
                 .await()
 
-            println("VIDEO SERVICE: ðŸ“Š ReplyTo query returned ${snapshot.documents.size} documents")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š ReplyTo query returned ${snapshot.documents.size} documents") }
 
             val allVideos = convertFirebaseToVideoMetadata(snapshot.documents)
             val children = allVideos.filter { !it.isDeleted }
                 .sortedBy { it.createdAt }
 
-            println("VIDEO SERVICE: âœ… Found ${children.size} children by replyToVideoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children by replyToVideoID") }
             children
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ ReplyTo query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ ReplyTo query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -356,10 +357,10 @@ class VideoServiceImpl {
                 .filter { !it.isDeleted }
                 .sortedByDescending { it.createdAt }
 
-            println("VIDEO SERVICE: âœ… Found ${videos.size} videos for user $userID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} videos for user $userID") }
             videos
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ User videos query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ User videos query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -387,7 +388,7 @@ class VideoServiceImpl {
         taggedUserIDs: List<String> = emptyList()
     ): CoreVideoMetadata? {
         return try {
-            println("VIDEO SERVICE: ðŸ”€ Creating spin-off thread from video $fromVideoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ”€ Creating spin-off thread from video $fromVideoID") }
 
             // Prepare video data for the new thread
             val videoData = hashMapOf<String, Any>(
@@ -447,13 +448,13 @@ class VideoServiceImpl {
             )
             db.collection("videos").document(fromVideoID).update(sourceUpdates).await()
 
-            println("VIDEO SERVICE: âœ… Spin-off thread created: $newVideoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Spin-off thread created: $newVideoID") }
 
             // Return the created video
             getVideoById(newVideoID)
 
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to create spin-off thread: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to create spin-off thread: ${e.message}") }
             null
         }
     }
@@ -463,7 +464,7 @@ class VideoServiceImpl {
      */
     suspend fun getSpinOffs(fromVideoID: String, limit: Int = 20): List<CoreVideoMetadata> {
         return try {
-            println("VIDEO SERVICE: ðŸ” Loading spin-offs from video $fromVideoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ” Loading spin-offs from video $fromVideoID") }
 
             val snapshot = db.collection("videos")
                 .whereEqualTo("spinOffFromVideoID", fromVideoID)
@@ -475,11 +476,11 @@ class VideoServiceImpl {
             val spinOffs = convertFirebaseToVideoMetadata(snapshot.documents)
                 .sortedByDescending { it.createdAt }
 
-            println("VIDEO SERVICE: âœ… Found ${spinOffs.size} spin-offs")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${spinOffs.size} spin-offs") }
             spinOffs
 
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to get spin-offs: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to get spin-offs: ${e.message}") }
             emptyList()
         }
     }
@@ -491,21 +492,21 @@ class VideoServiceImpl {
         return try {
             val video = getVideoById(videoID)
             if (video == null) {
-                println("VIDEO SERVICE: âŒ Video $videoID not found")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Video $videoID not found") }
                 return null
             }
 
             val sourceID = video.spinOffFromVideoID
             if (sourceID == null) {
-                println("VIDEO SERVICE: â„¹ï¸ Video $videoID is not a spin-off")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: â„¹ï¸ Video $videoID is not a spin-off") }
                 return null
             }
 
-            println("VIDEO SERVICE: ðŸ” Loading spin-off source: $sourceID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ” Loading spin-off source: $sourceID") }
             getVideoById(sourceID)
 
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Failed to get spin-off source: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to get spin-off source: ${e.message}") }
             null
         }
     }
@@ -523,10 +524,10 @@ class VideoServiceImpl {
                 .filter { it.conversationDepth == 0 && !it.isDeleted }
                 .sortedByDescending { it.trendingScore }
 
-            println("VIDEO SERVICE: âœ… Found ${videos.size} discovery videos")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} discovery videos") }
             videos
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Discovery query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Discovery query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -546,10 +547,10 @@ class VideoServiceImpl {
                 .filter { it.conversationDepth == 0 && !it.isDeleted }
                 .sortedByDescending { it.engagementRatio }
 
-            println("VIDEO SERVICE: âœ… Found ${videos.size} personalized videos")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} personalized videos") }
             videos
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Personalized query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Personalized query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -576,10 +577,10 @@ class VideoServiceImpl {
                         )
             }.take(limit)
 
-            println("VIDEO SERVICE: âœ… Found ${matching.size} search results")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${matching.size} search results") }
             matching
         } catch (e: Exception) {
-            println("VIDEO SERVICE: âŒ Search failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Search failed: ${e.message}") }
             emptyList()
         }
     }
@@ -651,9 +652,9 @@ class VideoServiceImpl {
                 .set(viewerData, com.google.firebase.firestore.SetOptions.merge())
                 .await()
 
-            println("VIDEO SERVICE: View recorded $videoID by $userID (first=$isFirstView, watch=${watchTime}s)")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: View recorded $videoID by $userID (first=$isFirstView, watch=${watchTime}s)") }
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Failed to record view: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to record view: ${e.message}") }
         }
     }
 
@@ -666,7 +667,7 @@ class VideoServiceImpl {
                 .update("viewCount", com.google.firebase.firestore.FieldValue.increment(1))
                 .await()
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Failed to increment view: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to increment view: ${e.message}") }
         }
     }
 
@@ -679,7 +680,7 @@ class VideoServiceImpl {
      */
     suspend fun getViewers(videoID: String): List<ViewerData> {
         return try {
-            println("VIDEO SERVICE: Loading viewers for $videoID")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Loading viewers for $videoID") }
 
             // Android-written viewers (full profile in views subcollection)
             val viewsSnapshot = db.collection("videos").document(videoID)
@@ -733,16 +734,16 @@ class VideoServiceImpl {
                                 ))
                             }
                     } catch (e: Exception) {
-                        println("VIDEO SERVICE: Batch profile fetch failed: ${e.message}")
+                        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Batch profile fetch failed: ${e.message}") }
                     }
                 }
             }
 
             val sorted = viewers.sortedByDescending { it.viewedAt }
-            println("VIDEO SERVICE: ${sorted.size} total viewers")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ${sorted.size} total viewers") }
             sorted
         } catch (e: Exception) {
-            println("VIDEO SERVICE: Viewers query failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Viewers query failed: ${e.message}") }
             emptyList()
         }
     }
@@ -793,7 +794,7 @@ class VideoServiceImpl {
                     taggedUserIDs = (data["taggedUserIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
                 )
             } catch (e: Exception) {
-                println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}")
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
                 null
             }
         }

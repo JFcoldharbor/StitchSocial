@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Video compression service - compresses before AI analysis
@@ -58,7 +59,7 @@ class VideoCompressionService(private val context: Context) {
             }
             
             val inputSizeMB = inputFile.length() / (1024 * 1024)
-            println("COMPRESSION: Input file size: ${inputSizeMB}MB")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Input file size: ${inputSizeMB}MB") }
             
             onProgress(0.1f, "Analyzing video...")
             
@@ -68,13 +69,13 @@ class VideoCompressionService(private val context: Context) {
                 return@withContext CompressionResult.failure("Could not read video metadata")
             }
             
-            println("COMPRESSION: Duration: ${metadata.duration}ms, Resolution: ${metadata.width}x${metadata.height}")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Duration: ${metadata.duration}ms, Resolution: ${metadata.width}x${metadata.height}") }
             
             onProgress(0.2f, "Preparing compression...")
             
             // Step 3: Check if compression needed
             if (inputSizeMB <= MAX_FILE_SIZE_MB && metadata.duration <= MAX_DURATION_MS) {
-                println("COMPRESSION: File already optimal, copying...")
+                if (BuildConfig.DEBUG) { println("COMPRESSION: File already optimal, copying...") }
                 inputFile.copyTo(File(outputPath))
                 onProgress(1.0f, "Compression complete!")
                 return@withContext CompressionResult.success(outputPath, inputSizeMB.toFloat())
@@ -108,14 +109,14 @@ class VideoCompressionService(private val context: Context) {
             }
             
             val outputSizeMB = outputFile.length() / (1024 * 1024).toFloat()
-            println("COMPRESSION: Complete - ${inputSizeMB}MB → ${outputSizeMB}MB")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Complete - ${inputSizeMB}MB → ${outputSizeMB}MB") }
             
             onProgress(1.0f, "Compression complete!")
             
             CompressionResult.success(outputPath, outputSizeMB)
             
         } catch (e: Exception) {
-            println("COMPRESSION: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Error - ${e.message}") }
             CompressionResult.failure("Compression error: ${e.message}")
         }
     }
@@ -130,7 +131,7 @@ class VideoCompressionService(private val context: Context) {
         val thumbnailPath = "${context.cacheDir}/thumb_${System.currentTimeMillis()}.jpg"
         
         try {
-            println("THUMBNAIL: Generating from $videoPath")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Generating from $videoPath") }
             
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(videoPath)
@@ -153,7 +154,7 @@ class VideoCompressionService(private val context: Context) {
                 resizedBitmap.recycle()
                 
                 if (success) {
-                    println("THUMBNAIL: Generated successfully")
+                    if (BuildConfig.DEBUG) { println("THUMBNAIL: Generated successfully") }
                     ThumbnailResult.success(thumbnailPath)
                 } else {
                     ThumbnailResult.failure("Failed to save thumbnail")
@@ -163,7 +164,7 @@ class VideoCompressionService(private val context: Context) {
             }
             
         } catch (e: Exception) {
-            println("THUMBNAIL: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Error - ${e.message}") }
             ThumbnailResult.failure("Thumbnail error: ${e.message}")
         }
     }
@@ -190,7 +191,7 @@ class VideoCompressionService(private val context: Context) {
             )
             
         } catch (e: Exception) {
-            println("METADATA: Error reading video metadata - ${e.message}")
+            if (BuildConfig.DEBUG) { println("METADATA: Error reading video metadata - ${e.message}") }
             null
         }
     }
@@ -249,7 +250,7 @@ class VideoCompressionService(private val context: Context) {
             // - FFmpeg Android 
             // - or custom MediaCodec implementation
             
-            println("COMPRESSION: Using config - bitrate: ${config.videoBitrate}, resolution: ${config.width}x${config.height}")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Using config - bitrate: ${config.videoBitrate}, resolution: ${config.width}x${config.height}") }
             
             // For now, simulate compression with file copy and progress
             val inputFile = File(inputPath)
@@ -277,7 +278,7 @@ class VideoCompressionService(private val context: Context) {
             true
             
         } catch (e: Exception) {
-            println("COMPRESSION: Perform compression failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("COMPRESSION: Perform compression failed - ${e.message}") }
             false
         }
     }
@@ -293,7 +294,7 @@ class VideoCompressionService(private val context: Context) {
             }
             true
         } catch (e: Exception) {
-            println("SAVE BITMAP: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("SAVE BITMAP: Error - ${e.message}") }
             false
         }
     }

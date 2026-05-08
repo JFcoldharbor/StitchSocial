@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Firebase Cloud Messaging service for handling push notifications
@@ -80,7 +81,7 @@ class FCMService : FirebaseMessagingService() {
 
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.createNotificationChannel(channel)
-                println("✅ FCM: Notification channel created/verified")
+                if (BuildConfig.DEBUG) { println("✅ FCM: Notification channel created/verified") }
             }
         }
 
@@ -91,17 +92,17 @@ class FCMService : FirebaseMessagingService() {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val token = FirebaseMessaging.getInstance().token.await()
-                    println("📱 FCM: Token retrieved: ${token.take(20)}...")
+                    if (BuildConfig.DEBUG) { println("📱 FCM: Token retrieved: ${token.take(20)}...") }
 
                     val userID = FirebaseAuth.getInstance().currentUser?.uid
                     if (userID != null) {
                         storeFCMToken(context, userID, token)
                     } else {
-                        println("⚠️ FCM: No authenticated user for token storage")
+                        if (BuildConfig.DEBUG) { println("⚠️ FCM: No authenticated user for token storage") }
                     }
 
                 } catch (e: Exception) {
-                    println("❌ FCM: Failed to get token - ${e.message}")
+                    if (BuildConfig.DEBUG) { println("❌ FCM: Failed to get token - ${e.message}") }
                 }
             }
         }
@@ -126,10 +127,10 @@ class FCMService : FirebaseMessagingService() {
                     .set(tokenData)
                     .await()
 
-                println("✅ FCM: Token stored for user: $userID")
+                if (BuildConfig.DEBUG) { println("✅ FCM: Token stored for user: $userID") }
 
             } catch (e: Exception) {
-                println("❌ FCM: Failed to store token - ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ FCM: Failed to store token - ${e.message}") }
             }
         }
 
@@ -151,21 +152,21 @@ class FCMService : FirebaseMessagingService() {
     override fun onCreate() {
         super.onCreate()
         ensureChannelExists(this)
-        println("📱 FCM SERVICE: Service created")
+        if (BuildConfig.DEBUG) { println("📱 FCM SERVICE: Service created") }
     }
 
     // MARK: - Token Management
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        println("📱 FCM: New token received: ${token.take(20)}...")
+        if (BuildConfig.DEBUG) { println("📱 FCM: New token received: ${token.take(20)}...") }
 
         serviceScope.launch {
             val userID = auth.currentUser?.uid
             if (userID != null) {
                 storeFCMToken(applicationContext, userID, token)
             } else {
-                println("⚠️ FCM: No user authenticated for new token")
+                if (BuildConfig.DEBUG) { println("⚠️ FCM: No user authenticated for new token") }
             }
         }
     }
@@ -175,13 +176,13 @@ class FCMService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
 
-        println("📱 FCM: Message received")
-        println("📱 FCM: From: ${remoteMessage.from}")
-        println("📱 FCM: Data: ${remoteMessage.data}")
+        if (BuildConfig.DEBUG) { println("📱 FCM: Message received") }
+        if (BuildConfig.DEBUG) { println("📱 FCM: From: ${remoteMessage.from}") }
+        if (BuildConfig.DEBUG) { println("📱 FCM: Data: ${remoteMessage.data}") }
 
         // Handle notification payload (foreground)
         remoteMessage.notification?.let { notification ->
-            println("📱 FCM: Notification - ${notification.title}: ${notification.body}")
+            if (BuildConfig.DEBUG) { println("📱 FCM: Notification - ${notification.title}: ${notification.body}") }
             showNotification(
                 title = notification.title ?: "Stitch Social",
                 body = notification.body ?: "",
@@ -191,7 +192,7 @@ class FCMService : FirebaseMessagingService() {
 
         // Handle data-only payload (no notification field)
         if (remoteMessage.notification == null && remoteMessage.data.isNotEmpty()) {
-            println("📱 FCM: Data-only payload - ${remoteMessage.data}")
+            if (BuildConfig.DEBUG) { println("📱 FCM: Data-only payload - ${remoteMessage.data}") }
             handleDataPayload(remoteMessage.data)
         }
     }
@@ -199,7 +200,7 @@ class FCMService : FirebaseMessagingService() {
     // MARK: - Notification Display
 
     private fun showNotification(title: String, body: String, data: Map<String, String> = emptyMap()) {
-        println("📱 FCM: Building notification - $title")
+        if (BuildConfig.DEBUG) { println("📱 FCM: Building notification - $title") }
 
         // Ensure channel exists before every notification
         ensureChannelExists(this)
@@ -247,7 +248,7 @@ class FCMService : FirebaseMessagingService() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, notification)
 
-        println("✅ FCM: Notification displayed (id=$notificationId)")
+        if (BuildConfig.DEBUG) { println("✅ FCM: Notification displayed (id=$notificationId)") }
     }
 
     /**
@@ -258,7 +259,7 @@ class FCMService : FirebaseMessagingService() {
         val title = data["title"] ?: "Stitch Social"
         val body = data["body"] ?: ""
 
-        println("📱 FCM: Handling data payload - Type: $notificationType")
+        if (BuildConfig.DEBUG) { println("📱 FCM: Handling data payload - Type: $notificationType") }
         showNotification(title, body, data)
     }
 
@@ -266,7 +267,7 @@ class FCMService : FirebaseMessagingService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        println("🔴 FCM SERVICE: Service destroyed")
+        if (BuildConfig.DEBUG) { println("🔴 FCM SERVICE: Service destroyed") }
     }
 }
 
@@ -276,7 +277,7 @@ class FCMService : FirebaseMessagingService() {
 object FCMManager {
 
     fun initialize(context: Context) {
-        println("📱 FCM MANAGER: Initializing...")
+        if (BuildConfig.DEBUG) { println("📱 FCM MANAGER: Initializing...") }
         // ✅ Create channel early so system-delivered notifications work
         FCMService.ensureChannelExists(context)
         FCMService.registerFCMToken(context)
@@ -302,27 +303,27 @@ object FCMManager {
     suspend fun deleteToken() {
         try {
             FirebaseMessaging.getInstance().deleteToken().await()
-            println("✅ FCM MANAGER: Token deleted")
+            if (BuildConfig.DEBUG) { println("✅ FCM MANAGER: Token deleted") }
         } catch (e: Exception) {
-            println("❌ FCM MANAGER: Failed to delete token - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FCM MANAGER: Failed to delete token - ${e.message}") }
         }
     }
 
     suspend fun subscribeToTopic(topic: String) {
         try {
             FirebaseMessaging.getInstance().subscribeToTopic(topic).await()
-            println("✅ FCM MANAGER: Subscribed to topic: $topic")
+            if (BuildConfig.DEBUG) { println("✅ FCM MANAGER: Subscribed to topic: $topic") }
         } catch (e: Exception) {
-            println("❌ FCM MANAGER: Failed to subscribe to topic - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FCM MANAGER: Failed to subscribe to topic - ${e.message}") }
         }
     }
 
     suspend fun unsubscribeFromTopic(topic: String) {
         try {
             FirebaseMessaging.getInstance().unsubscribeFromTopic(topic).await()
-            println("✅ FCM MANAGER: Unsubscribed from topic: $topic")
+            if (BuildConfig.DEBUG) { println("✅ FCM MANAGER: Unsubscribed from topic: $topic") }
         } catch (e: Exception) {
-            println("❌ FCM MANAGER: Failed to unsubscribe from topic - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FCM MANAGER: Failed to unsubscribe from topic - ${e.message}") }
         }
     }
 }

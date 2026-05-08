@@ -45,6 +45,7 @@ import com.stitchsocial.club.views.ContextualVideoOverlay
 import com.stitchsocial.club.views.OverlayContext
 import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.views.EngagementType
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - VideoInfo Data Class
 
@@ -106,7 +107,7 @@ fun FullscreenVideoPlayer(
             video = convertToMetadata(video),
             isActive = true,
             onEngagement = { interactionType ->
-                println("VIDEO: ${interactionType.name} on ${video.title}")
+                if (BuildConfig.DEBUG) { println("VIDEO: ${interactionType.name} on ${video.title}") }
             },
             onVideoClick = {
                 showControls = !showControls
@@ -126,13 +127,13 @@ fun FullscreenVideoPlayer(
             engagementViewModel = viewModel,
             iconManager = iconMgr,
             onAction = { action ->
-                println("FULLSCREEN: action received: $action")
+                if (BuildConfig.DEBUG) { println("FULLSCREEN: action received: $action") }
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {
                         // Route through the navigation coordinator's modal
                         // system so MainActivity can switch to USER_PROFILE.
                         // We dismiss this player so the new profile is on top.
-                        println("FULLSCREEN: Navigate to profile ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("FULLSCREEN: Navigate to profile ${video.creatorID}") }
                         navigationCoordinator?.showModal(
                             ModalState.USER_PROFILE,
                             mapOf("userID" to video.creatorID)
@@ -150,16 +151,16 @@ fun FullscreenVideoPlayer(
                         if (onShowThreadView != null) {
                             onShowThreadView.invoke(threadID, video.id)
                         } else {
-                            println("FULLSCREEN: ⚠️ Navigate to thread but no onShowThreadView handler wired — caller forgot to pass it")
+                            if (BuildConfig.DEBUG) { println("FULLSCREEN: ⚠️ Navigate to thread but no onShowThreadView handler wired — caller forgot to pass it") }
                         }
                     }
                     is OverlayAction.Follow -> {
-                        println("FULLSCREEN: Follow user ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("FULLSCREEN: Follow user ${video.creatorID}") }
                         followManager?.toggleFollow(video.creatorID)
                             ?: println("FULLSCREEN: ⚠️ followManager is null — Follow ignored")
                     }
                     is OverlayAction.Unfollow -> {
-                        println("FULLSCREEN: Unfollow user ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("FULLSCREEN: Unfollow user ${video.creatorID}") }
                         followManager?.toggleFollow(video.creatorID)
                             ?: println("FULLSCREEN: ⚠️ followManager is null — Unfollow ignored")
                     }
@@ -174,7 +175,7 @@ fun FullscreenVideoPlayer(
                         // Leave it to the overlay; do not duplicate.
                     }
                     is OverlayAction.Share -> {
-                        println("FULLSCREEN: Share video ${video.id}")
+                        if (BuildConfig.DEBUG) { println("FULLSCREEN: Share video ${video.id}") }
                     }
                     is OverlayAction.StitchRecording -> {
                         val isOwn = video.creatorID == currentUserID
@@ -193,7 +194,7 @@ fun FullscreenVideoPlayer(
                                 threadParentID, video.creatorName, video.title
                             )
                         }
-                        println("FULLSCREEN: Stitch from profile-launched video — threadParent=$threadParentID, isOwn=$isOwn")
+                        if (BuildConfig.DEBUG) { println("FULLSCREEN: Stitch from profile-launched video — threadParent=$threadParentID, isOwn=$isOwn") }
                         navigationCoordinator?.showModal(
                             ModalState.RECORDING,
                             mapOf(

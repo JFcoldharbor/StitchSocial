@@ -40,6 +40,7 @@ import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.BuildConfig
 
 class CollectionService {
 
@@ -88,7 +89,7 @@ class CollectionService {
             .take(limit)
 
         discoveryCache = CacheEntry(collections, System.currentTimeMillis())
-        println("📚 COLLECTION SERVICE: Loaded ${collections.size} discovery collections")
+        if (BuildConfig.DEBUG) { println("📚 COLLECTION SERVICE: Loaded ${collections.size} discovery collections") }
         return collections
     }
 
@@ -142,7 +143,7 @@ class CollectionService {
             .sortedByDescending { it.createdAt }
 
         userCollectionCache[userID] = CacheEntry(collections, System.currentTimeMillis())
-        println("📚 COLLECTION SERVICE: Loaded ${collections.size} collections for $userID")
+        if (BuildConfig.DEBUG) { println("📚 COLLECTION SERVICE: Loaded ${collections.size} collections for $userID") }
         return collections
     }
 
@@ -180,7 +181,7 @@ class CollectionService {
         // ImportSegmentsView writes segments HERE — primary write path for imported episodes.
         // Swift VideoService checks this before segmentIDs — Kotlin must match.
         if (segments.isEmpty()) {
-            println("🎬 COLLECTION SERVICE: primary query 0 — trying subcollection path")
+            if (BuildConfig.DEBUG) { println("🎬 COLLECTION SERVICE: primary query 0 — trying subcollection path") }
             val subSnap = db.collection("videoCollections")
                 .document(collectionID)
                 .collection("segments")
@@ -189,12 +190,12 @@ class CollectionService {
                 decodeSegment(doc.data ?: return@mapNotNull null, doc.id)
             }.sortedBy { it.segmentNumber ?: 0 }
             if (segments.isNotEmpty())
-                println("🎬 COLLECTION SERVICE: Found ${segments.size} segments in subcollection")
+                if (BuildConfig.DEBUG) { println("🎬 COLLECTION SERVICE: Found ${segments.size} segments in subcollection") }
         }
 
         // Fallback 2: fetch by segmentIDs array on the collection doc.
         if (segments.isEmpty()) {
-            println("🎬 COLLECTION SERVICE: collectionID query returned 0 — falling back to segmentIDs fetch")
+            if (BuildConfig.DEBUG) { println("🎬 COLLECTION SERVICE: collectionID query returned 0 — falling back to segmentIDs fetch") }
             val collDoc = db.collection("videoCollections").document(collectionID).get().await()
             @Suppress("UNCHECKED_CAST")
             val segmentIDs = (collDoc.data?.get("segmentIDs") as? List<*>)
@@ -210,12 +211,12 @@ class CollectionService {
                 segments = allDocs.mapNotNull { doc ->
                     decodeSegment(doc.data ?: return@mapNotNull null, doc.id)
                 }.sortedBy { it.segmentNumber ?: 0 }
-                println("🎬 COLLECTION SERVICE: Fetched ${segments.size} segments via segmentIDs fallback")
+                if (BuildConfig.DEBUG) { println("🎬 COLLECTION SERVICE: Fetched ${segments.size} segments via segmentIDs fallback") }
             }
         }
 
         segmentCache[collectionID] = CacheEntry(segments, System.currentTimeMillis())
-        println("🎬 COLLECTION SERVICE: Loaded ${segments.size} segments for $collectionID")
+        if (BuildConfig.DEBUG) { println("🎬 COLLECTION SERVICE: Loaded ${segments.size} segments for $collectionID") }
         return segments
     }
 
@@ -262,7 +263,7 @@ class CollectionService {
         db.collection("collectionProgress").document(progress.id)
             .set(data, com.google.firebase.firestore.SetOptions.merge()).await()
         progressCache[progress.id] = progress
-        println("📊 COLLECTION SERVICE: Progress saved for ${progress.collectionID}")
+        if (BuildConfig.DEBUG) { println("📊 COLLECTION SERVICE: Progress saved for ${progress.collectionID}") }
     }
 
     // ─────────────────────────────────────────────
@@ -283,7 +284,7 @@ class CollectionService {
             )).await()
         invalidateDiscoveryCache()
         userCollectionCache.clear()
-        println("🗑️ COLLECTION SERVICE: Deleted $collectionID")
+        if (BuildConfig.DEBUG) { println("🗑️ COLLECTION SERVICE: Deleted $collectionID") }
     }
 
     suspend fun incrementCollectionField(collectionID: String, field: String, delta: Long = 1) {
@@ -292,7 +293,7 @@ class CollectionService {
                 .update(mapOf(field to FieldValue.increment(delta), "updatedAt" to Timestamp(Date())))
                 .await()
         } catch (e: Exception) {
-            println("⚠️ COLLECTION SERVICE: Failed to increment $field on $collectionID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ COLLECTION SERVICE: Failed to increment $field on $collectionID: ${e.message}") }
         }
     }
 

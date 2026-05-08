@@ -56,6 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Full-screen announcement overlay view
@@ -134,7 +135,7 @@ fun AnnouncementOverlayView(
             player = exoPlayer
             isLoadingVideo = true
             loadError = null
-            println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer initialized for $videoUrl")
+            if (BuildConfig.DEBUG) { println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer initialized for $videoUrl") }
         } else {
             loadError = "No video URL provided"
             isLoadingVideo = false
@@ -143,7 +144,7 @@ fun AnnouncementOverlayView(
         onDispose {
             player?.release()
             player = null
-            println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer released")
+            if (BuildConfig.DEBUG) { println("ðŸ“¢ ANNOUNCEMENT: ExoPlayer released") }
         }
     }
 
@@ -164,7 +165,7 @@ fun AnnouncementOverlayView(
 
     // AGGRESSIVE PAUSE: Kill all background video playback when announcement shows
     LaunchedEffect(Unit) {
-        println("📢 ANNOUNCEMENT: KILLING ALL BACKGROUND ACTIVITY")
+        if (BuildConfig.DEBUG) { println("📢 ANNOUNCEMENT: KILLING ALL BACKGROUND ACTIVITY") }
 
         // Broadcast PAUSE_ALL signal to stop all video players
         val pauseIntent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
@@ -174,7 +175,7 @@ fun AnnouncementOverlayView(
         val killIntent = Intent("com.stitchsocial.club.KILL_ALL_VIDEOS")
         LocalBroadcastManager.getInstance(context).sendBroadcast(killIntent)
 
-        println("📢 ANNOUNCEMENT: Background videos killed")
+        if (BuildConfig.DEBUG) { println("📢 ANNOUNCEMENT: Background videos killed") }
     }
 
 
@@ -187,7 +188,7 @@ fun AnnouncementOverlayView(
             // Check if minimum watch time reached
             if (watchedSeconds >= announcement.minimumWatchSeconds && !canDismiss) {
                 canDismiss = true
-                println("ðŸ“¢ ANNOUNCEMENT: Minimum watch time reached (${watchedSeconds}s)")
+                if (BuildConfig.DEBUG) { println("ðŸ“¢ ANNOUNCEMENT: Minimum watch time reached (${watchedSeconds}s)") }
             }
         }
     }
@@ -640,9 +641,9 @@ fun AnnouncementOverlayContainer(
                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
                     try {
                         announcementService.markAsCompleted(userId, announcement.id, watchedSeconds)
-                        println("ðŸ“¢ OVERLAY: Completed announcement '${announcement.title}' after ${watchedSeconds}s")
+                        if (BuildConfig.DEBUG) { println("ðŸ“¢ OVERLAY: Completed announcement '${announcement.title}' after ${watchedSeconds}s") }
                     } catch (e: Exception) {
-                        println("ðŸ“¢ OVERLAY: Error completing announcement: ${e.message}")
+                        if (BuildConfig.DEBUG) { println("ðŸ“¢ OVERLAY: Error completing announcement: ${e.message}") }
                         announcementService.hideAnnouncement()
                     }
                 }
@@ -652,7 +653,7 @@ fun AnnouncementOverlayContainer(
                     try {
                         announcementService.dismissAnnouncement(userId, announcement.id)
                     } catch (e: Exception) {
-                        println("ðŸ“¢ OVERLAY: Error dismissing announcement: ${e.message}")
+                        if (BuildConfig.DEBUG) { println("ðŸ“¢ OVERLAY: Error dismissing announcement: ${e.message}") }
                         announcementService.hideAnnouncement()
                     }
                 }

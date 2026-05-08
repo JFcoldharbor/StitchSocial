@@ -20,6 +20,7 @@ import com.stitchsocial.club.VideoManager
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.camera.RecordingContext
 import java.util.UUID
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Supporting Enums and Data Classes
 
@@ -188,7 +189,7 @@ class NavigationCoordinator(
             _navigationEvents.emit(NavigationEvent.TabSelected(tab))
         }
 
-        println("🧭 TAB: ${tab.title}")
+        if (BuildConfig.DEBUG) { println("🧭 TAB: ${tab.title}") }
     }
 
     // MARK: - Gallery Picker
@@ -197,7 +198,7 @@ class NavigationCoordinator(
      * Request gallery picker launch
      */
     fun requestGalleryPicker() {
-        println("📱 NAV COORDINATOR: Requesting gallery picker")
+        if (BuildConfig.DEBUG) { println("📱 NAV COORDINATOR: Requesting gallery picker") }
         onGalleryPickerRequested?.invoke()
     }
 
@@ -215,7 +216,7 @@ class NavigationCoordinator(
             _navigationEvents.emit(NavigationEvent.ShowModal(modal, data))
         }
 
-        println("🧭 MODAL: Showing ${modal.name}")
+        if (BuildConfig.DEBUG) { println("🧭 MODAL: Showing ${modal.name}") }
     }
 
     /**
@@ -224,7 +225,7 @@ class NavigationCoordinator(
     fun showRecordingModal(context: VideoRecordingContext = VideoRecordingContext.NEW_THREAD) {
         _recordingContext.value = context
         showModal(ModalState.RECORDING, mapOf("context" to context))
-        println("🧭 RECORDING: Modal shown for ${context.displayName}")
+        if (BuildConfig.DEBUG) { println("🧭 RECORDING: Modal shown for ${context.displayName}") }
     }
 
     /**
@@ -236,7 +237,7 @@ class NavigationCoordinator(
         parentVideo?.let { data["parentVideo"] = it }
 
         showModal(ModalState.RECORDING, data)
-        println("🧭 RECORDING: Modal shown for stitch/continue with parentVideo=${parentVideo?.id}")
+        if (BuildConfig.DEBUG) { println("🧭 RECORDING: Modal shown for stitch/continue with parentVideo=${parentVideo?.id}") }
     }
 
     /**
@@ -252,7 +253,7 @@ class NavigationCoordinator(
             _navigationEvents.emit(NavigationEvent.DismissModal)
         }
 
-        println("🧭 MODAL: Dismissed $previousModal")
+        if (BuildConfig.DEBUG) { println("🧭 MODAL: Dismissed $previousModal") }
     }
 
     // MARK: - Video Processing Workflow
@@ -262,14 +263,14 @@ class NavigationCoordinator(
      * ✅ FIXED: Now properly uses camera.RecordingContext
      */
     fun onVideoCreated(videoData: Map<String, Any>) {
-        println("🧭 NAVIGATION: Video created, starting parallel processing")
+        if (BuildConfig.DEBUG) { println("🧭 NAVIGATION: Video created, starting parallel processing") }
 
         val videoPath = videoData["videoPath"] as? String
         val metadata = videoData["metadata"] as? CoreVideoMetadata
         val cameraRecordingContext = videoData["recordingContext"] as? RecordingContext
 
         if (videoPath == null || metadata == null || cameraRecordingContext == null) {
-            println("❌ NAVIGATION: Missing required video data")
+            if (BuildConfig.DEBUG) { println("❌ NAVIGATION: Missing required video data") }
             return
         }
 
@@ -283,7 +284,7 @@ class NavigationCoordinator(
                 _parallelProgress.value = 0.0
                 _parallelPhase.value = "Starting parallel processing..."
 
-                println("🧭 RECORDING: Starting VideoCoordinator parallel processing")
+                if (BuildConfig.DEBUG) { println("🧭 RECORDING: Starting VideoCoordinator parallel processing") }
 
                 // ✅ FIXED: Pass camera.RecordingContext directly (VideoCoordinator expects it)
                 videoCoordinator.startParallelProcessing(
@@ -292,10 +293,10 @@ class NavigationCoordinator(
                     recordingContext = cameraRecordingContext
                 )
 
-                println("🧭 RECORDING: Parallel processing complete")
+                if (BuildConfig.DEBUG) { println("🧭 RECORDING: Parallel processing complete") }
 
             } catch (e: Exception) {
-                println("❌ NAVIGATION: Processing failed - ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ NAVIGATION: Processing failed - ${e.message}") }
                 _isProcessing.value = false
                 dismissModal()
                 coordinatorScope.launch {
@@ -309,7 +310,7 @@ class NavigationCoordinator(
      * Handle parallel processing completion - show ThreadComposer
      */
     fun onParallelProcessingComplete() {
-        println("🧭 NAVIGATION: Parallel processing complete, showing composer")
+        if (BuildConfig.DEBUG) { println("🧭 NAVIGATION: Parallel processing complete, showing composer") }
 
         coordinatorScope.launch {
             try {
@@ -318,7 +319,7 @@ class NavigationCoordinator(
                 val aiResult = videoCoordinator.lastAIResult.value
 
                 if (videoPath == null) {
-                    println("❌ NAVIGATION: Missing processed video path")
+                    if (BuildConfig.DEBUG) { println("❌ NAVIGATION: Missing processed video path") }
                     dismissModal()
                     return@launch
                 }
@@ -331,10 +332,10 @@ class NavigationCoordinator(
                 showModal(ModalState.THREAD_COMPOSER, composerData)
 
                 _isProcessing.value = false
-                println("🧭 NAVIGATION: ThreadComposer ready for user input")
+                if (BuildConfig.DEBUG) { println("🧭 NAVIGATION: ThreadComposer ready for user input") }
 
             } catch (e: Exception) {
-                println("❌ NAVIGATION: Failed to show ThreadComposer - ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ NAVIGATION: Failed to show ThreadComposer - ${e.message}") }
                 dismissModal()
                 _isProcessing.value = false
             }
@@ -345,7 +346,7 @@ class NavigationCoordinator(
      * Handle recording cancellation
      */
     fun onRecordingCancelled() {
-        println("🧭 RECORDING: Cancelled")
+        if (BuildConfig.DEBUG) { println("🧭 RECORDING: Cancelled") }
         dismissModal()
     }
 
@@ -363,7 +364,7 @@ class NavigationCoordinator(
             _navigationEvents.emit(NavigationEvent.NavigateToDestination(destination))
         }
 
-        println("🧭 NAVIGATE: Push -> ${destination.route} (stack depth: ${currentStack.size})")
+        if (BuildConfig.DEBUG) { println("🧭 NAVIGATE: Push -> ${destination.route} (stack depth: ${currentStack.size})") }
     }
 
     fun navigateBack() {
@@ -378,7 +379,7 @@ class NavigationCoordinator(
                 _navigationEvents.emit(NavigationEvent.NavigateBack)
             }
 
-            println("🧭 NAVIGATE: Back (stack depth: ${currentStack.size})")
+            if (BuildConfig.DEBUG) { println("🧭 NAVIGATE: Back (stack depth: ${currentStack.size})") }
         }
     }
 
@@ -390,9 +391,9 @@ class NavigationCoordinator(
             if (destination != null) {
                 navigateTo(destination)
                 _navigationEvents.emit(NavigationEvent.HandleDeepLink(link))
-                println("🧭 DEEP LINK: Handled $link -> ${destination.route}")
+                if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Handled $link -> ${destination.route}") }
             } else {
-                println("🧭 DEEP LINK: Could not parse $link")
+                if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Could not parse $link") }
             }
         }
     }
@@ -415,7 +416,7 @@ class NavigationCoordinator(
                 else -> null
             }
         } catch (e: Exception) {
-            println("🧭 DEEP LINK: Parse error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Parse error - ${e.message}") }
             null
         }
     }
@@ -444,7 +445,7 @@ class NavigationCoordinator(
 
     fun handleNavigationError(error: StitchError) {
         coordinatorScope.launch {
-            println("🧭 ERROR: ${error.message}")
+            if (BuildConfig.DEBUG) { println("🧭 ERROR: ${error.message}") }
 
             when (error) {
                 is StitchError.NetworkError -> {
@@ -464,6 +465,6 @@ class NavigationCoordinator(
 
     fun cleanup() {
         coordinatorScope.cancel()
-        println("🧭 CLEANUP: NavigationCoordinator cleaned up")
+        if (BuildConfig.DEBUG) { println("🧭 CLEANUP: NavigationCoordinator cleaned up") }
     }
 }

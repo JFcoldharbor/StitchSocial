@@ -41,6 +41,7 @@ import androidx.media3.exoplayer.offline.DownloadService
 import kotlinx.coroutines.*
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import com.stitchsocial.club.BuildConfig
 
 @OptIn(UnstableApi::class)
 object VideoDiskCache {
@@ -69,7 +70,7 @@ object VideoDiskCache {
             LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
             databaseProvider!!
         )
-        println("💾 VIDEO CACHE: Initialized at ${cacheDir.absolutePath}")
+        if (BuildConfig.DEBUG) { println("💾 VIDEO CACHE: Initialized at ${cacheDir.absolutePath}") }
     }
 
     // ── CacheDataSource.Factory — use this in ExoPlayer.Builder ──
@@ -167,9 +168,9 @@ object VideoDiskCache {
                 bytesRead += read
             }
             dataSource.close()
-            println("💾 VIDEO CACHE: Prefetched ${formatBytes(bytesRead)} for ${url.takeLast(30)}")
+            if (BuildConfig.DEBUG) { println("💾 VIDEO CACHE: Prefetched ${formatBytes(bytesRead)} for ${url.takeLast(30)}") }
         } catch (e: Exception) {
-            println("⚠️ VIDEO CACHE: Prefetch failed for ${url.takeLast(30)}: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ VIDEO CACHE: Prefetch failed for ${url.takeLast(30)}: ${e.message}") }
         }
     }
 
@@ -189,9 +190,9 @@ object VideoDiskCache {
                     try { c.removeResource(key) } catch (_: Exception) {}
                 }
             }
-            println("🗑️ VIDEO CACHE: Cleared all cached videos")
+            if (BuildConfig.DEBUG) { println("🗑️ VIDEO CACHE: Cleared all cached videos") }
         } catch (e: Exception) {
-            println("⚠️ VIDEO CACHE: Clear failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ VIDEO CACHE: Clear failed: ${e.message}") }
         }
     }
 

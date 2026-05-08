@@ -27,6 +27,7 @@ import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 class HomeFeedService(
     private val videoService: VideoServiceImpl,
@@ -70,41 +71,41 @@ class HomeFeedService(
         isLoading = true
 
         try {
-            println("🔍 DEEP DISCOVERY: Loading diverse feed for user $userID")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loading diverse feed for user $userID") }
 
             val followingIDs = getCachedFollowingIDs(userID)
             if (followingIDs.isEmpty()) {
-                println("🔍 DEEP DISCOVERY: No following found")
+                if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: No following found") }
                 return emptyList()
             }
 
             allFollowerIDs = followingIDs
-            println("🔍 DEEP DISCOVERY: Found ${followingIDs.size} following users")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Found ${followingIDs.size} following users") }
 
             val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
-            println("🔍 DEEP DISCOVERY: Excluding ${recentlySeenIDs.size} recently seen videos")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Excluding ${recentlySeenIDs.size} recently seen videos") }
 
             val allThreads = mutableListOf<ThreadData>()
 
             // 40% recent (last 7 days)
             val recentThreads = getRecentContent(followingIDs, (limit * 0.4).toInt(), recentlySeenIDs)
             allThreads.addAll(recentThreads)
-            println("🔍 DEEP DISCOVERY: Loaded ${recentThreads.size} recent threads")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${recentThreads.size} recent threads") }
 
             // 30% medium-old (7-30 days)
             val mediumOldThreads = getMediumOldContent(followingIDs, (limit * 0.3).toInt(), recentlySeenIDs)
             allThreads.addAll(mediumOldThreads)
-            println("🔍 DEEP DISCOVERY: Loaded ${mediumOldThreads.size} medium-old threads")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${mediumOldThreads.size} medium-old threads") }
 
             // 20% older (30-90 days)
             val olderThreads = getOlderContent(followingIDs, (limit * 0.2).toInt(), recentlySeenIDs)
             allThreads.addAll(olderThreads)
-            println("🔍 DEEP DISCOVERY: Loaded ${olderThreads.size} older threads")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${olderThreads.size} older threads") }
 
             // 10% deep cuts (90-365 days)
             val deepCutThreads = getDeepCutContent(followingIDs, (limit * 0.1).toInt(), recentlySeenIDs)
             allThreads.addAll(deepCutThreads)
-            println("🔍 DEEP DISCOVERY: Loaded ${deepCutThreads.size} deep cut threads")
+            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${deepCutThreads.size} deep cut threads") }
 
             val dedupedThreads = deduplicateThreads(allThreads)
             val shuffledThreads = dedupedThreads.shuffled()
@@ -113,7 +114,7 @@ class HomeFeedService(
             currentFeedVideoIDs.clear()
             currentFeedVideoIDs.addAll(shuffledThreads.map { it.parentVideo.id })
 
-            println("✅ DEEP DISCOVERY: Loaded ${shuffledThreads.size} total threads with diverse time range")
+            if (BuildConfig.DEBUG) { println("✅ DEEP DISCOVERY: Loaded ${shuffledThreads.size} total threads with diverse time range") }
             return shuffledThreads
 
         } finally {
@@ -191,7 +192,7 @@ class HomeFeedService(
             }
             threads
         } catch (e: Exception) {
-            println("⚠️ DEEP DISCOVERY: Time range query failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DEEP DISCOVERY: Time range query failed — ${e.message}") }
             emptyList()
         }
     }
@@ -216,7 +217,7 @@ class HomeFeedService(
         }
 
         followerRotationIndex += batchSize
-        println("🔄 FOLLOWER ROTATION: Using batch starting at $startIndex")
+        if (BuildConfig.DEBUG) { println("🔄 FOLLOWER ROTATION: Using batch starting at $startIndex") }
         return batch
     }
 
@@ -276,7 +277,7 @@ class HomeFeedService(
                     removed.forEach { currentFeedVideoIDs.remove(it.parentVideo.id) }
                 }
 
-                println("✅ DEEP DISCOVERY: Added ${shuffledNew.size} diverse threads")
+                if (BuildConfig.DEBUG) { println("✅ DEEP DISCOVERY: Added ${shuffledNew.size} diverse threads") }
             } else {
                 // No new content — recycle existing feed shuffled
                 // Never dead-end. Endless scroll.
@@ -309,7 +310,7 @@ class HomeFeedService(
         // Reset follower rotation to get different creator batches
         followerRotationIndex = 0
 
-        println("🔄 ENDLESS SCROLL: Recycled ${recycled.size} threads, reset rotation")
+        if (BuildConfig.DEBUG) { println("🔄 ENDLESS SCROLL: Recycled ${recycled.size} threads, reset rotation") }
     }
 
     // MARK: - Thread Creation from Document
@@ -389,7 +390,7 @@ class HomeFeedService(
             return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())
 
         } catch (e: Exception) {
-            println("⚠️ HOME FEED: Failed to parse document ${document.id} — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ HOME FEED: Failed to parse document ${document.id} — ${e.message}") }
             return null
         }
     }
@@ -414,10 +415,10 @@ class HomeFeedService(
 
             // Cache for preloading
             childrenCache[threadID] = children
-            println("✅ HOME FEED: Loaded ${children.size} children for thread $threadID")
+            if (BuildConfig.DEBUG) { println("✅ HOME FEED: Loaded ${children.size} children for thread $threadID") }
             children
         } catch (e: Exception) {
-            println("❌ HOME FEED: Failed to load children for $threadID — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ HOME FEED: Failed to load children for $threadID — ${e.message}") }
             emptyList()
         }
     }

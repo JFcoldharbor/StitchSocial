@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -53,7 +54,7 @@ fun AccountWebView(
             authToken = result.token
             if (authToken.isNullOrEmpty()) tokenError = true
         } catch (e: Exception) {
-            println("WEBVIEW: Token error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("WEBVIEW: Token error - ${e.message}") }
             tokenError = true
         }
     }

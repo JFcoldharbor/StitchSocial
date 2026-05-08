@@ -27,6 +27,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.DocumentSnapshot
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 
 // MARK: - SearchService
@@ -62,7 +63,7 @@ class SearchService {
                 .sortedWith(compareByDescending<BasicUserInfo> { it.isVerified }.thenByDescending { it.clout })
             users.take(limit)
         } catch (e: Exception) {
-            println("❌ SEARCH: getAllUsers failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ SEARCH: getAllUsers failed: ${e.message}") }
             emptyList()
         }
     }
@@ -86,7 +87,7 @@ class SearchService {
 
             if (users.size > limit) users.subList(0, limit) else users
         } catch (e: Exception) {
-            println("❌ SEARCH: searchUsersByText failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ SEARCH: searchUsersByText failed: ${e.message}") }
             searchUsersFallback(query, limit)
         }
     }
@@ -123,7 +124,7 @@ class SearchService {
                 seenIDs.add(user.id)
             }
         }
-        println("🤝 MUTUAL: Added ${mutual.size} mutual follow suggestions")
+        if (BuildConfig.DEBUG) { println("🤝 MUTUAL: Added ${mutual.size} mutual follow suggestions") }
 
         // 3. Fill remaining with trending users
         if (suggestions.size < limit) {
@@ -134,10 +135,10 @@ class SearchService {
                     seenIDs.add(user.id)
                 }
             }
-            println("💡 TRENDING: Added ${trending.size} trending users")
+            if (BuildConfig.DEBUG) { println("💡 TRENDING: Added ${trending.size} trending users") }
         }
 
-        println("✅ SUGGESTIONS: Returning ${suggestions.size} personalized suggestions")
+        if (BuildConfig.DEBUG) { println("✅ SUGGESTIONS: Returning ${suggestions.size} personalized suggestions") }
         return suggestions
     }
 
@@ -148,7 +149,7 @@ class SearchService {
                 .get().await()
             snap.documents.mapNotNull { it.getString("followingID") }.filter { it.isNotEmpty() }.toSet()
         } catch (e: Exception) {
-            println("❌ SEARCH: getFollowingIDs failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ SEARCH: getFollowingIDs failed: ${e.message}") }
             emptySet()
         }
     }
@@ -184,7 +185,7 @@ class SearchService {
             .take(limit)
             .map { it.key }
 
-        println("🤝 MUTUAL: ${topCandidates.size} candidates from ${sample.size} sampled follows")
+        if (BuildConfig.DEBUG) { println("🤝 MUTUAL: ${topCandidates.size} candidates from ${sample.size} sampled follows") }
         return fetchUsersByIDs(topCandidates)
     }
 
@@ -198,7 +199,7 @@ class SearchService {
                 .filter { !excludeIDs.contains(it.id) }
                 .take(limit)
         } catch (e: Exception) {
-            println("❌ SEARCH: getTrendingUsers failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ SEARCH: getTrendingUsers failed: ${e.message}") }
             emptyList()
         }
     }
@@ -216,7 +217,7 @@ class SearchService {
                     .get().await()
                 result.addAll(processUserDocs(snap.documents, currentUID))
             } catch (e: Exception) {
-                println("❌ SEARCH: fetchUsersByIDs batch failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SEARCH: fetchUsersByIDs batch failed: ${e.message}") }
             }
         }
         return result
@@ -355,7 +356,7 @@ class SearchService {
                     isDeleted = data["isDeleted"] as? Boolean ?: false
                 )
             } catch (e: Exception) {
-                println("⚠️ SEARCH: Failed to process video ${doc.id}: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ SEARCH: Failed to process video ${doc.id}: ${e.message}") }
                 null
             }
         }

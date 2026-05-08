@@ -58,6 +58,7 @@ import com.stitchsocial.club.FollowManager
 import com.stitchsocial.club.services.SocialSignalService
 import com.stitchsocial.club.foundation.SocialSignal
 import com.stitchsocial.club.views.ProfileView
+import com.stitchsocial.club.BuildConfig
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -140,7 +141,7 @@ fun HomeFeedView(
             followingCount = feedService.getFollowingCount()
             feedService.saveCurrentFeed(feedThreads)
             baseThreads = feedThreads
-            println("✅ HOME FEED: Loaded ${feedThreads.size} threads")
+            if (BuildConfig.DEBUG) { println("✅ HOME FEED: Loaded ${feedThreads.size} threads") }
 
             if (feedThreads.isNotEmpty()) {
                 feedService.preloadChildrenAround(0, feedThreads)
@@ -149,7 +150,7 @@ fun HomeFeedView(
             // Load social signals (megaphone: videos hyped by people you follow)
             socialSignals = SocialSignalService.shared.loadActiveSignals(userID)
         } catch (e: Exception) {
-            println("🚨 HOME FEED: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("🚨 HOME FEED: Error - ${e.message}") }
             errorMessage = e.message
         } finally {
             isLoading = false
@@ -241,12 +242,12 @@ fun HomeFeedView(
                         if (afterSize > beforeSize) {
                             val newOnes = feedService.getCurrentFeed().drop(beforeSize)
                             baseThreads = baseThreads + newOnes
-                            println("✅ FEED: Added ${newOnes.size} new threads")
+                            if (BuildConfig.DEBUG) { println("✅ FEED: Added ${newOnes.size} new threads") }
                         } else {
                             // No new content — recycle for endless scroll
                             val recycled = baseThreads.toList().shuffled()
                             baseThreads = baseThreads + recycled
-                            println("🔄 FEED: Recycled ${recycled.size} threads for endless scroll")
+                            if (BuildConfig.DEBUG) { println("🔄 FEED: Recycled ${recycled.size} threads for endless scroll") }
                         }
 
                         isLoadingMore = false

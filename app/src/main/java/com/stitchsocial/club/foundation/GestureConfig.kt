@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.*
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Simple gesture results
@@ -71,7 +72,7 @@ fun SimplifiedSwipeDetector(
                         }
 
                         if (result != SimpleGestureResult.NONE) {
-                            println("SIMPLE GESTURE: $result")
+                            if (BuildConfig.DEBUG) { println("SIMPLE GESTURE: $result") }
                             onSwipe(result)
                         }
 

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import com.stitchsocial.club.VideoManager
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Color System (Purple Theme)
 object StitchColors {
@@ -263,7 +264,7 @@ fun CustomDippedTabBar(
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                     createButtonScale = 0.9f
 
-                    println("🎥 CREATE BUTTON: Pausing all videos for recording")
+                    if (BuildConfig.DEBUG) { println("🎥 CREATE BUTTON: Pausing all videos for recording") }
                     VideoManager.startRecording()
 
                     onCreateTapped()

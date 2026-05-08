@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 class CollectionPlayerViewModel(
     private val collectionService: CollectionService = CollectionService()
@@ -96,12 +97,12 @@ class CollectionPlayerViewModel(
                     ?: 0
                 _currentIndex.value = startIdx
 
-                println("▶️ COLLECTION PLAYER: Loaded ${segs.size} segments, starting at $startIdx")
+                if (BuildConfig.DEBUG) { println("▶️ COLLECTION PLAYER: Loaded ${segs.size} segments, starting at $startIdx") }
                 startProgressTimer()
 
             } catch (e: Exception) {
                 _error.value = "Failed to load collection: ${e.message}"
-                println("❌ COLLECTION PLAYER: Load failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ COLLECTION PLAYER: Load failed: ${e.message}") }
             } finally {
                 _isLoading.value = false
             }
@@ -144,7 +145,7 @@ class CollectionPlayerViewModel(
         currentTimestamp = 0.0
 
         saveProgress(updated)
-        println("⏭️ COLLECTION PLAYER: Advanced to segment ${idx + 1}/${segs.size}")
+        if (BuildConfig.DEBUG) { println("⏭️ COLLECTION PLAYER: Advanced to segment ${idx + 1}/${segs.size}") }
     }
 
     /** Go back to previous segment. */
@@ -153,7 +154,7 @@ class CollectionPlayerViewModel(
         if (idx <= 0) return
         _currentIndex.value = idx - 1
         currentTimestamp = 0.0
-        println("⏮️ COLLECTION PLAYER: Back to segment ${idx - 1}")
+        if (BuildConfig.DEBUG) { println("⏮️ COLLECTION PLAYER: Back to segment ${idx - 1}") }
     }
 
     /** Jump to a specific segment index (user taps segment list). */
@@ -163,7 +164,7 @@ class CollectionPlayerViewModel(
         saveCurrentPositionToProgress()
         _currentIndex.value = index
         currentTimestamp = 0.0
-        println("⏩ COLLECTION PLAYER: Jumped to segment $index")
+        if (BuildConfig.DEBUG) { println("⏩ COLLECTION PLAYER: Jumped to segment $index") }
     }
 
     // ─────────────────────────────────────────────
@@ -200,7 +201,7 @@ class CollectionPlayerViewModel(
             try {
                 collectionService.updateWatchProgress(progress)
             } catch (e: Exception) {
-                println("⚠️ COLLECTION PLAYER: Progress save failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ COLLECTION PLAYER: Progress save failed: ${e.message}") }
             }
         }
     }
@@ -256,7 +257,7 @@ class CollectionPlayerViewModel(
                     _segments.value = current.toMutableList().also { it[index] = updated }
                 }
             } catch (e: Exception) {
-                println("⚠️ COLLECTION PLAYER: refreshSegmentCounts($index) failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ COLLECTION PLAYER: refreshSegmentCounts($index) failed: ${e.message}") }
             }
         }
     }
@@ -269,6 +270,6 @@ class CollectionPlayerViewModel(
         progressTimerJob?.cancel()
         saveCurrentPositionToProgress()
         super.onCleared()
-        println("🧹 COLLECTION PLAYER: ViewModel cleared, progress saved")
+        if (BuildConfig.DEBUG) { println("🧹 COLLECTION PLAYER: ViewModel cleared, progress saved") }
     }
 }

@@ -24,6 +24,7 @@ import java.util.Date
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Hype Regen Source (matches iOS HypeRegenSource)
 
@@ -119,7 +120,7 @@ class HypeRatingService private constructor() {
     private var saveJob: Job? = null
 
     init {
-        println("⚡ HYPE RATING SERVICE: Initialized")
+        if (BuildConfig.DEBUG) { println("⚡ HYPE RATING SERVICE: Initialized") }
     }
 
     // MARK: - Load (matches iOS loadRating)
@@ -150,30 +151,30 @@ class HypeRatingService private constructor() {
                 val passiveRegen = state.calculatePassiveRegen()
                 if (passiveRegen > 0) {
                     state.currentRating = min(maxRating, state.currentRating + passiveRegen)
-                    println("⚡ HYPE RATING: +${"%.1f".format(passiveRegen)}% passive regen")
+                    if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: +${"%.1f".format(passiveRegen)}% passive regen") }
                 }
 
                 // Apply pending engagement regen
                 if (state.pendingRegenFromEngagement > 0) {
                     state.currentRating = min(maxRating, state.currentRating + state.pendingRegenFromEngagement)
-                    println("⚡ HYPE RATING: +${"%.1f".format(state.pendingRegenFromEngagement)}% pending engagement regen")
+                    if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: +${"%.1f".format(state.pendingRegenFromEngagement)}% pending engagement regen") }
                     state.pendingRegenFromEngagement = 0.0
                 }
 
                 _currentRating.value = state.currentRating
                 _isLoaded.value = true
                 scheduleSave()
-                println("⚡ HYPE RATING: Loaded ${"%.1f".format(state.currentRating)}%")
+                if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: Loaded ${"%.1f".format(state.currentRating)}%") }
             } else {
                 // First time
                 state = HypeRatingStateData()
                 _currentRating.value = state.currentRating
                 _isLoaded.value = true
                 saveToFirebase()
-                println("⚡ HYPE RATING: Initialized at ${"%.1f".format(state.currentRating)}%")
+                if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: Initialized at ${"%.1f".format(state.currentRating)}%") }
             }
         } catch (e: Exception) {
-            println("⚠️ HYPE RATING: Failed to load — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ HYPE RATING: Failed to load — ${e.message}") }
             _currentRating.value = state.currentRating
             _isLoaded.value = true
         }
@@ -204,7 +205,7 @@ class HypeRatingService private constructor() {
 
     private fun applyRegen(source: HypeRegenSource) {
         if (!state.canRegisterEvent(source)) {
-            println("⚡ HYPE RATING: Daily cap reached for ${source.key}")
+            if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: Daily cap reached for ${source.key}") }
             return
         }
 
@@ -221,7 +222,7 @@ class HypeRatingService private constructor() {
             state.lastFullAt = Date()
         }
 
-        println("⚡ HYPE RATING: +${"%.2f".format(reward)}% from ${source.key} → ${"%.1f".format(oldRating)}% → ${"%.1f".format(state.currentRating)}%")
+        if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: +${"%.2f".format(reward)}% from ${source.key} → ${"%.1f".format(oldRating)}% → ${"%.1f".format(state.currentRating)}%") }
         scheduleSave()
     }
 
@@ -232,7 +233,7 @@ class HypeRatingService private constructor() {
         state.currentRating = min(maxRating, state.currentRating + passiveRegen)
         state.lastUpdatedAt = Date()
         _currentRating.value = state.currentRating
-        println("⚡ HYPE RATING: Passive +${"%.1f".format(passiveRegen)}% → ${"%.1f".format(state.currentRating)}%")
+        if (BuildConfig.DEBUG) { println("⚡ HYPE RATING: Passive +${"%.1f".format(passiveRegen)}% → ${"%.1f".format(state.currentRating)}%") }
         scheduleSave()
     }
 
@@ -266,7 +267,7 @@ class HypeRatingService private constructor() {
                 .set(data, com.google.firebase.firestore.SetOptions.merge())
                 .await()
         } catch (e: Exception) {
-            println("⚠️ HYPE RATING: Save failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ HYPE RATING: Save failed — ${e.message}") }
         }
     }
 
@@ -289,7 +290,7 @@ class HypeRatingService private constructor() {
                     com.google.firebase.firestore.SetOptions.merge()
                 ).await()
         } catch (e: Exception) {
-            println("⚠️ HYPE RATING: Failed to queue regen — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ HYPE RATING: Failed to queue regen — ${e.message}") }
         }
     }
 }

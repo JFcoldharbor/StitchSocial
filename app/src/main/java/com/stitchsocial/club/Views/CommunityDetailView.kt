@@ -50,6 +50,7 @@ import com.stitchsocial.club.community.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Colors (matches iOS mockup exactly)
 private val darkBg       = Color(0xFF0D0F1A)
@@ -126,9 +127,9 @@ fun CommunityDetailView(
                 parsePost(doc.id, doc.data ?: emptyMap())
             }
 
-            println("✅ COMMUNITY DETAIL: ${topMembers.size} members, ${posts.size} posts")
+            if (BuildConfig.DEBUG) { println("✅ COMMUNITY DETAIL: ${topMembers.size} members, ${posts.size} posts") }
         } catch (e: Exception) {
-            println("❌ COMMUNITY DETAIL: Load failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ COMMUNITY DETAIL: Load failed — ${e.message}") }
         } finally {
             isLoading = false
         }
@@ -238,7 +239,7 @@ fun CommunityDetailView(
                                             if (p.id == post.id) p.copy(hypeCount = p.hypeCount + 1) else p
                                         }
                                     } catch (e: Exception) {
-                                        println("⚠️ POST HYPE: ${e.message}")
+                                        if (BuildConfig.DEBUG) { println("⚠️ POST HYPE: ${e.message}") }
                                     }
                                 }
                             },
@@ -313,7 +314,7 @@ fun CommunityDetailView(
                         )
                         posts = listOf(newPost) + posts
                     } catch (e: Exception) {
-                        println("❌ POST: Failed — ${e.message}")
+                        if (BuildConfig.DEBUG) { println("❌ POST: Failed — ${e.message}") }
                     }
                 }
             },

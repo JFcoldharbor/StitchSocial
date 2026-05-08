@@ -40,6 +40,7 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Handles video export with all edits applied
@@ -107,7 +108,7 @@ class VideoExportService private constructor(private val context: Context) {
             val mode = determineExportMode(editState)
             _exportMode.value = mode
             
-            println("🎬 VIDEO EXPORT: Using mode: ${mode.displayName}")
+            if (BuildConfig.DEBUG) { println("🎬 VIDEO EXPORT: Using mode: ${mode.displayName}") }
             
             val outputUri: Uri = when (mode) {
                 ExportMode.PASSTHROUGH -> {
@@ -134,7 +135,7 @@ class VideoExportService private constructor(private val context: Context) {
             // Log quality comparison
             logQualityComparison(editState.videoUri, outputUri)
             
-            println("✅ VIDEO EXPORT: Complete - ${outputUri.lastPathComponent} (mode: ${mode.displayName})")
+            if (BuildConfig.DEBUG) { println("✅ VIDEO EXPORT: Complete - ${outputUri.lastPathComponent} (mode: ${mode.displayName})") }
             
             _isExporting.value = false
             _exportProgress.value = 1.0
@@ -144,7 +145,7 @@ class VideoExportService private constructor(private val context: Context) {
         } catch (e: Exception) {
             _exportError.value = e.message
             _isExporting.value = false
-            println("❌ VIDEO EXPORT: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIDEO EXPORT: Failed - ${e.message}") }
             throw e
         }
     }
@@ -156,10 +157,10 @@ class VideoExportService private constructor(private val context: Context) {
         val hasCaptions = editState.captions.isNotEmpty()
         val hasTrim = hasActualTrim(editState)
         
-        println("🔍 EXPORT MODE CHECK:")
-        println("   Has filter: $hasFilter")
-        println("   Has captions: $hasCaptions")
-        println("   Has trim: $hasTrim")
+        if (BuildConfig.DEBUG) { println("🔍 EXPORT MODE CHECK:") }
+        if (BuildConfig.DEBUG) { println("   Has filter: $hasFilter") }
+        if (BuildConfig.DEBUG) { println("   Has captions: $hasCaptions") }
+        if (BuildConfig.DEBUG) { println("   Has trim: $hasTrim") }
         
         // If filters or captions, must do full processing
         if (hasFilter || hasCaptions) {
@@ -192,7 +193,7 @@ class VideoExportService private constructor(private val context: Context) {
     // MARK: - Passthrough Export
     
     private suspend fun passthroughExport(sourceUri: Uri): Uri = withContext(Dispatchers.IO) {
-        println("📋 EXPORT: Passthrough mode - copying file directly")
+        if (BuildConfig.DEBUG) { println("📋 EXPORT: Passthrough mode - copying file directly") }
         
         _exportProgress.value = 0.2
         
@@ -207,7 +208,7 @@ class VideoExportService private constructor(private val context: Context) {
         
         _exportProgress.value = 1.0
         
-        println("✅ EXPORT: Passthrough complete - zero quality loss")
+        if (BuildConfig.DEBUG) { println("✅ EXPORT: Passthrough complete - zero quality loss") }
         Uri.fromFile(outputFile)
     }
     
@@ -218,7 +219,7 @@ class VideoExportService private constructor(private val context: Context) {
         trimStartMs: Long,
         trimEndMs: Long
     ): Uri = withContext(Dispatchers.IO) {
-        println("✂️ EXPORT: Trim-only mode - using MediaMuxer")
+        if (BuildConfig.DEBUG) { println("✂️ EXPORT: Trim-only mode - using MediaMuxer") }
         
         val outputFile = createTemporaryVideoFile()
         
@@ -286,14 +287,14 @@ class VideoExportService private constructor(private val context: Context) {
             muxer.release()
         }
         
-        println("✅ EXPORT: Trim-only complete - minimal quality loss")
+        if (BuildConfig.DEBUG) { println("✅ EXPORT: Trim-only complete - minimal quality loss") }
         Uri.fromFile(outputFile)
     }
     
     // MARK: - Full Process Export
 
     private suspend fun fullProcessExport(editState: VideoEditState): Uri = withContext(Dispatchers.IO) {
-        println("🎨 EXPORT: Full process mode")
+        if (BuildConfig.DEBUG) { println("🎨 EXPORT: Full process mode") }
 
         val hasCaptions = editState.captions.isNotEmpty() && editState.captions.any { it.text.isNotBlank() }
 
@@ -330,13 +331,13 @@ class VideoExportService private constructor(private val context: Context) {
             }
         }
         _exportProgress.value = 1.0
-        println("✅ EXPORT: Compress-only complete")
+        if (BuildConfig.DEBUG) { println("✅ EXPORT: Compress-only complete") }
         result.outputUri
     }
 
     @OptIn(UnstableApi::class)
     private suspend fun transformWithCaptions(editState: VideoEditState): Uri = withContext(Dispatchers.IO) {
-        println("🎨 EXPORT: Transformer with ${editState.captions.size} caption overlay(s)")
+        if (BuildConfig.DEBUG) { println("🎨 EXPORT: Transformer with ${editState.captions.size} caption overlay(s)") }
 
         // Resolve the rendered video size so caption bitmaps scale correctly.
         // VideoEditState.videoSize is the displayed (post-rotation) size, so
@@ -381,7 +382,7 @@ class VideoExportService private constructor(private val context: Context) {
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(composition: Composition, exportResult: TransformerExportResult) {
                             _exportProgress.value = 1.0
-                            println("✅ EXPORT: Transformer complete (${outputFile.length() / 1024} KB)")
+                            if (BuildConfig.DEBUG) { println("✅ EXPORT: Transformer complete (${outputFile.length() / 1024} KB)") }
                             if (continuation.isActive) {
                                 continuation.resume(Uri.fromFile(outputFile))
                             }
@@ -392,7 +393,7 @@ class VideoExportService private constructor(private val context: Context) {
                             exportResult: TransformerExportResult,
                             exportException: ExportException
                         ) {
-                            println("❌ EXPORT: Transformer failed — ${exportException.message}")
+                            if (BuildConfig.DEBUG) { println("❌ EXPORT: Transformer failed — ${exportException.message}") }
                             if (continuation.isActive) {
                                 continuation.resumeWithException(exportException)
                             }
@@ -524,11 +525,11 @@ class VideoExportService private constructor(private val context: Context) {
             
             val ratio = if (originalSize > 0) exportedSize.toDouble() / originalSize.toDouble() else 1.0
             
-            println("📊 EXPORT QUALITY:")
-            println("   Original: ${formatFileSize(originalSize)}")
-            println("   Exported: ${formatFileSize(exportedSize)}")
-            println("   Size Ratio: ${String.format("%.1f%%", ratio * 100)}")
-            println("   Mode: ${_exportMode.value.displayName}")
+            if (BuildConfig.DEBUG) { println("📊 EXPORT QUALITY:") }
+            if (BuildConfig.DEBUG) { println("   Original: ${formatFileSize(originalSize)}") }
+            if (BuildConfig.DEBUG) { println("   Exported: ${formatFileSize(exportedSize)}") }
+            if (BuildConfig.DEBUG) { println("   Size Ratio: ${String.format("%.1f%%", ratio * 100)}") }
+            if (BuildConfig.DEBUG) { println("   Mode: ${_exportMode.value.displayName}") }
             
             when (_exportMode.value) {
                 ExportMode.PASSTHROUGH -> println("   ✅ Zero quality loss (passthrough)")
@@ -537,7 +538,7 @@ class VideoExportService private constructor(private val context: Context) {
             }
             
         } catch (e: Exception) {
-            println("⚠️ EXPORT: Could not compare file sizes")
+            if (BuildConfig.DEBUG) { println("⚠️ EXPORT: Could not compare file sizes") }
         }
     }
     

@@ -38,6 +38,7 @@ import java.util.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Bottom sheet showing all spin-off threads from a video
@@ -67,7 +68,7 @@ fun SpinOffsListSheet(
             spinOffs = loadedSpinOffs
         } catch (e: Exception) {
             error = "Failed to load spin-offs"
-            println("❌ SPIN-OFFS SHEET: Error loading spin-offs - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ SPIN-OFFS SHEET: Error loading spin-offs - ${e.message}") }
         } finally {
             isLoading = false
         }

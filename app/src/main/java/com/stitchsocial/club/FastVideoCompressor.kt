@@ -30,6 +30,7 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
+import com.stitchsocial.club.BuildConfig
 
 /**
  * CapCut-style fast video compression with hardware acceleration
@@ -151,12 +152,12 @@ class FastVideoCompressor private constructor(private val context: Context) {
             val sourceInfo = analyzeVideo(sourceUri)
             val targetBytes = (targetSizeMB * 1024 * 1024).toLong()
             
-            println("🎬 FAST COMPRESS: Source ${formatBytes(sourceInfo.fileSize)} → Target ${formatBytes(targetBytes)}")
-            println("🎬 FAST COMPRESS: Duration ${String.format("%.1f", sourceInfo.duration)}s, Resolution ${sourceInfo.resolution.width.toInt()}x${sourceInfo.resolution.height.toInt()}")
+            if (BuildConfig.DEBUG) { println("🎬 FAST COMPRESS: Source ${formatBytes(sourceInfo.fileSize)} → Target ${formatBytes(targetBytes)}") }
+            if (BuildConfig.DEBUG) { println("🎬 FAST COMPRESS: Duration ${String.format("%.1f", sourceInfo.duration)}s, Resolution ${sourceInfo.resolution.width.toInt()}x${sourceInfo.resolution.height.toInt()}") }
             
             // Step 2: Check if compression is needed
             if (sourceInfo.fileSize <= targetBytes) {
-                println("✅ FAST COMPRESS: Already under target, copying file")
+                if (BuildConfig.DEBUG) { println("✅ FAST COMPRESS: Already under target, copying file") }
                 val outputUri = copyToOutput(sourceUri)
                 
                 _isCompressing.value = false
@@ -184,7 +185,7 @@ class FastVideoCompressor private constructor(private val context: Context) {
                 preserveResolution = preserveResolution
             )
             
-            println("🎬 FAST COMPRESS: Using ${settings.codec} @ ${settings.bitrate / 1000}kbps, ${settings.resolution.width.toInt()}x${settings.resolution.height.toInt()}")
+            if (BuildConfig.DEBUG) { println("🎬 FAST COMPRESS: Using ${settings.codec} @ ${settings.bitrate / 1000}kbps, ${settings.resolution.width.toInt()}x${settings.resolution.height.toInt()}") }
             
             // Step 4: Perform hardware-accelerated compression
             val outputUri = performHardwareCompression(
@@ -219,8 +220,8 @@ class FastVideoCompressor private constructor(private val context: Context) {
                 bitrate = settings.bitrate
             )
             
-            println("✅ FAST COMPRESS: ${formatBytes(sourceInfo.fileSize)} → ${formatBytes(outputSize)} in ${processingTime}ms")
-            println("✅ FAST COMPRESS: ${String.format("%.1f", result.compressionRatio)}x compression ratio")
+            if (BuildConfig.DEBUG) { println("✅ FAST COMPRESS: ${formatBytes(sourceInfo.fileSize)} → ${formatBytes(outputSize)} in ${processingTime}ms") }
+            if (BuildConfig.DEBUG) { println("✅ FAST COMPRESS: ${String.format("%.1f", result.compressionRatio)}x compression ratio") }
             
             return@withContext result
             
@@ -228,7 +229,7 @@ class FastVideoCompressor private constructor(private val context: Context) {
             _currentPhase.value = CompressionPhase.FAILED
             _lastError.value = e.message
             _isCompressing.value = false
-            println("❌ FAST COMPRESS: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ FAST COMPRESS: ${e.message}") }
             throw e
         }
     }

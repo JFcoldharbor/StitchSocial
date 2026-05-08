@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.exoplayer.ExoPlayer
+import com.stitchsocial.club.BuildConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,7 +44,7 @@ fun VideoTrimmerView(
             val startRatio = (editState.trimStartTime / editState.videoDuration).toFloat().coerceIn(0f, 1f)
             val endRatio = (editState.trimEndTime / editState.videoDuration).toFloat().coerceIn(0f, 1f)
             sliderPosition = startRatio..endRatio
-            println("✂️ TRIMMER: Synced to ${editState.trimStartTime}s - ${editState.trimEndTime}s (duration: ${editState.videoDuration}s)")
+            if (BuildConfig.DEBUG) { println("✂️ TRIMMER: Synced to ${editState.trimStartTime}s - ${editState.trimEndTime}s (duration: ${editState.videoDuration}s)") }
         }
     }
 
@@ -74,7 +75,7 @@ fun VideoTrimmerView(
                 // Ensure minimum 5% duration (prevents handles from overlapping)
                 if (range.endInclusive - range.start >= 0.05f) {
                     sliderPosition = range
-                    println("✂️ TRIMMER: Dragging ${range.start} - ${range.endInclusive}")
+                    if (BuildConfig.DEBUG) { println("✂️ TRIMMER: Dragging ${range.start} - ${range.endInclusive}") }
                 }
             },
             onValueChangeFinished = {
@@ -88,7 +89,7 @@ fun VideoTrimmerView(
                 // Seek player to start of trimmed region
                 exoPlayer.seekTo((newStartTime * 1000).toLong())
 
-                println("✂️ TRIMMER: Committed ${newStartTime}s - ${newEndTime}s")
+                if (BuildConfig.DEBUG) { println("✂️ TRIMMER: Committed ${newStartTime}s - ${newEndTime}s") }
             },
             valueRange = 0f..1f,
             colors = SliderDefaults.colors(
@@ -152,7 +153,7 @@ fun VideoTrimmerView(
                 editState.updateTrimRange(0.0, editState.videoDuration)
                 onEditStateChange(editState)
                 exoPlayer.seekTo(0)
-                println("✂️ TRIMMER: Reset to full duration")
+                if (BuildConfig.DEBUG) { println("✂️ TRIMMER: Reset to full duration") }
             },
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = Color(0xFFFF9500)

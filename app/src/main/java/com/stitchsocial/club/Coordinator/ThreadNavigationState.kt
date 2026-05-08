@@ -41,6 +41,7 @@ import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.coordination.EngagementCoordinator
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Navigation State Management
 
@@ -202,10 +203,10 @@ fun ThreadVideoView(
             video = video,
             isActive = isActive,
             onEngagement = { interactionType ->
-                println("🎯 THREAD NAV: Engagement $interactionType on ${video.title}")
+                if (BuildConfig.DEBUG) { println("🎯 THREAD NAV: Engagement $interactionType on ${video.title}") }
             },
             onVideoClick = {
-                println("🔹 THREAD NAV: Video clicked: ${video.title}")
+                if (BuildConfig.DEBUG) { println("🔹 THREAD NAV: Video clicked: ${video.title}") }
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -223,25 +224,25 @@ fun ThreadVideoView(
             onAction = { action: OverlayAction ->
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {
-                        println("👤 THREAD NAV: Navigate to profile ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("👤 THREAD NAV: Navigate to profile ${video.creatorID}") }
                     }
                     is OverlayAction.NavigateToThread -> {
-                        println("🧵 THREAD NAV: Navigate to thread ${video.threadID}")
+                        if (BuildConfig.DEBUG) { println("🧵 THREAD NAV: Navigate to thread ${video.threadID}") }
                     }
                     is OverlayAction.Engagement -> {
-                        println("💫 THREAD NAV: Engagement ${action.type}")
+                        if (BuildConfig.DEBUG) { println("💫 THREAD NAV: Engagement ${action.type}") }
                     }
                     is OverlayAction.Follow -> {
-                        println("➕ THREAD NAV: Follow user ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("➕ THREAD NAV: Follow user ${video.creatorID}") }
                     }
                     is OverlayAction.Unfollow -> {
-                        println("➖ THREAD NAV: Unfollow user ${video.creatorID}")
+                        if (BuildConfig.DEBUG) { println("➖ THREAD NAV: Unfollow user ${video.creatorID}") }
                     }
                     is OverlayAction.Share -> {
-                        println("📤 THREAD NAV: Share video ${video.id}")
+                        if (BuildConfig.DEBUG) { println("📤 THREAD NAV: Share video ${video.id}") }
                     }
                     is OverlayAction.StitchRecording -> {
-                        println("🎬 THREAD NAV: Stitch recording ${video.id}")
+                        if (BuildConfig.DEBUG) { println("🎬 THREAD NAV: Stitch recording ${video.id}") }
                     }
                 }
             }

@@ -43,6 +43,7 @@ import com.stitchsocial.club.foundation.EngagementConfig
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 @Composable
 fun ProgressiveCoolButton3D(
@@ -282,7 +283,7 @@ fun ProgressiveCoolButton3D(
                     .clickable(
                         enabled = !isProcessing && !isDisabled,
                         onClick = {
-                            println("🔵 COOL TAP FIRED - videoID: $videoID, disabled: $isDisabled, selfBlock: $shouldBlockSelfEngagement, engCap: $hasHitEngagementCap, creatorID: $creatorID, currentUserID: $currentUserID, tier: $userTier")
+                            if (BuildConfig.DEBUG) { println("🔵 COOL TAP FIRED - videoID: $videoID, disabled: $isDisabled, selfBlock: $shouldBlockSelfEngagement, engCap: $hasHitEngagementCap, creatorID: $creatorID, currentUserID: $currentUserID, tier: $userTier") }
 
                             if (shouldBlockSelfEngagement) {
                                 showError("You can't cool your own content")

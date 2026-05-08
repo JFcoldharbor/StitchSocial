@@ -12,6 +12,7 @@ package com.stitchsocial.club.viewmodels
 import androidx.lifecycle.ViewModel
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.flow.*
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Camera ViewModel with tier-based recording limits
@@ -42,12 +43,12 @@ class CameraViewModel : ViewModel() {
 
     fun startRecording() {
         _isRecording.value = true
-        println("CAMERA: Recording started")
+        if (BuildConfig.DEBUG) { println("CAMERA: Recording started") }
     }
 
     fun stopRecording() {
         _isRecording.value = false
-        println("CAMERA: Recording stopped")
+        if (BuildConfig.DEBUG) { println("CAMERA: Recording stopped") }
     }
 
     fun clearError() {
@@ -66,7 +67,7 @@ class CameraViewModel : ViewModel() {
         _maxRecordingDuration.value = maxDuration
         _isUnlimitedRecording.value = (maxDuration == 0L)
 
-        println("CAMERA: Updated recording limits - Tier: ${userTier.displayName}, Duration: ${if (maxDuration == 0L) "Unlimited" else "${maxDuration}s"}")
+        if (BuildConfig.DEBUG) { println("CAMERA: Updated recording limits - Tier: ${userTier.displayName}, Duration: ${if (maxDuration == 0L) "Unlimited" else "${maxDuration}s"}") }
     }
 
     fun getRecordingLimitText(userTier: UserTier): String {

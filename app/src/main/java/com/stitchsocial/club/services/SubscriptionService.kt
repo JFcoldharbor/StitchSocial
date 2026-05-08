@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 class SubscriptionService private constructor() {
 
@@ -56,7 +57,7 @@ class SubscriptionService private constructor() {
                 _mySubscriptions.value = emptyList()
                 _mySubscribers.value = emptyList()
                 _creatorPlan.value = null
-                println("⭐ SUB SERVICE: cache reset on auth swap → ${newUID ?: "nil"}")
+                if (BuildConfig.DEBUG) { println("⭐ SUB SERVICE: cache reset on auth swap → ${newUID ?: "nil"}") }
             }
         }
     }
@@ -175,7 +176,7 @@ class SubscriptionService private constructor() {
 
         creatorPlanCache.remove(creatorID)
         val updated = fetchCreatorPlan(creatorID)!!
-        println("✅ SUBS: Plan updated for $creatorID")
+        if (BuildConfig.DEBUG) { println("✅ SUBS: Plan updated for $creatorID") }
         return updated
     }
 
@@ -265,10 +266,10 @@ class SubscriptionService private constructor() {
                     subscriptionTier = coinTier.displayName
                 )
             } catch (e: Exception) {
-                println("⚠️ SUB SERVICE: subscription notification failed — ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ SUB SERVICE: subscription notification failed — ${e.message}") }
             }
 
-            println("🎉 SUBS: $subscriberID → $creatorID at ${coinTier.displayName} (${price} coins)")
+            if (BuildConfig.DEBUG) { println("🎉 SUBS: $subscriberID → $creatorID at ${coinTier.displayName} (${price} coins)") }
 
             return ActiveSubscription(
                 id = subID,
@@ -320,7 +321,7 @@ class SubscriptionService private constructor() {
         mySubscribersFetchedAt = null
 
         _mySubscriptions.value = _mySubscriptions.value.filter { it.creatorID != creatorID }
-        println("❌ SUBS: $subscriberID cancelled → $creatorID")
+        if (BuildConfig.DEBUG) { println("❌ SUBS: $subscriberID cancelled → $creatorID") }
     }
 
     // MARK: - Check Subscription

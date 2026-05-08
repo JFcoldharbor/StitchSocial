@@ -43,6 +43,7 @@ import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 @Composable
 fun ReferralDashboardView(
@@ -68,7 +69,7 @@ fun ReferralDashboardView(
             try {
                 stats = referralService.getUserReferralStats(userID)
             } catch (e: Exception) {
-                println("⚠️ REFERRAL DASHBOARD: Failed to load stats — ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ REFERRAL DASHBOARD: Failed to load stats — ${e.message}") }
             } finally {
                 isLoading = false
                 hasFetchedOnce = true

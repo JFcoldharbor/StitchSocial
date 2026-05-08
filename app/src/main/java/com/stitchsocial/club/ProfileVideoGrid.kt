@@ -45,6 +45,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 /**
  * ProfileVideoGrid - Fixed for LazyColumn compatibility + VideoThumbnailView
@@ -70,12 +71,12 @@ fun ProfileVideoGrid(
 
     // DEBUG: Log video count and URLs
     LaunchedEffect(videos) {
-        println("📱 PROFILE GRID: Received ${videos.size} videos")
+        if (BuildConfig.DEBUG) { println("📱 PROFILE GRID: Received ${videos.size} videos") }
         videos.forEachIndexed { index, video ->
-            println("  📹 Video $index: ${video.id}")
-            println("     Title: ${video.title}")
-            println("     ThumbnailURL: '${video.thumbnailURL}'")
-            println("     VideoURL: '${video.videoURL}'")
+            if (BuildConfig.DEBUG) { println("  📹 Video $index: ${video.id}") }
+            if (BuildConfig.DEBUG) { println("     Title: ${video.title}") }
+            if (BuildConfig.DEBUG) { println("     ThumbnailURL: '${video.thumbnailURL}'") }
+            if (BuildConfig.DEBUG) { println("     VideoURL: '${video.videoURL}'") }
         }
     }
 
@@ -107,7 +108,7 @@ fun ProfileVideoGrid(
                                 isCurrentUserProfile = isCurrentUserProfile,
                                 isPinned = pinnedVideoIDs.contains(video.id),
                                 onVideoTap = {
-                                    println("🔹 PROFILE GRID: Video tapped - ${video.title}")
+                                    if (BuildConfig.DEBUG) { println("🔹 PROFILE GRID: Video tapped - ${video.title}") }
                                     onVideoTap(video, videoIndex, videos)
                                 },
                                 onVideoDelete = onVideoDelete,
@@ -154,31 +155,31 @@ private fun VideoGridItem(
 
     // Debug logging
     LaunchedEffect(isCurrentUserProfile, onVideoDelete) {
-        println("🔍 VIDEO GRID ITEM: ${video.id}")
-        println("   isCurrentUserProfile = $isCurrentUserProfile")
-        println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
-        println("   canDelete = ${isCurrentUserProfile && onVideoDelete != null}")
+        if (BuildConfig.DEBUG) { println("🔍 VIDEO GRID ITEM: ${video.id}") }
+        if (BuildConfig.DEBUG) { println("   isCurrentUserProfile = $isCurrentUserProfile") }
+        if (BuildConfig.DEBUG) { println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}") }
+        if (BuildConfig.DEBUG) { println("   canDelete = ${isCurrentUserProfile && onVideoDelete != null}") }
     }
 
     Box(
         modifier = modifier
             .combinedClickable(
                 onClick = {
-                    println("👆 SHORT TAP on ${video.title}")
+                    if (BuildConfig.DEBUG) { println("👆 SHORT TAP on ${video.title}") }
                     onVideoTap()
                 },
                 onLongClick = {
-                    println("👆 LONG PRESS on ${video.title}")
-                    println("   isCurrentUserProfile = $isCurrentUserProfile")
-                    println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
+                    if (BuildConfig.DEBUG) { println("👆 LONG PRESS on ${video.title}") }
+                    if (BuildConfig.DEBUG) { println("   isCurrentUserProfile = $isCurrentUserProfile") }
+                    if (BuildConfig.DEBUG) { println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}") }
 
                     if (isCurrentUserProfile && onVideoDelete != null) {
-                        println("✅ SHOWING DELETE MENU for ${video.title}")
+                        if (BuildConfig.DEBUG) { println("✅ SHOWING DELETE MENU for ${video.title}") }
                         showContextMenu = true
                     } else {
-                        println("❌ DELETE NOT ALLOWED")
-                        println("   isCurrentUserProfile = $isCurrentUserProfile")
-                        println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}")
+                        if (BuildConfig.DEBUG) { println("❌ DELETE NOT ALLOWED") }
+                        if (BuildConfig.DEBUG) { println("   isCurrentUserProfile = $isCurrentUserProfile") }
+                        if (BuildConfig.DEBUG) { println("   onVideoDelete = ${if (onVideoDelete != null) "NOT NULL" else "NULL"}") }
                     }
                 }
             )
@@ -279,12 +280,12 @@ private fun VideoThumbnailContent(
 
     // Debug logging
     LaunchedEffect(video.id) {
-        println("🖼️ THUMBNAIL DEBUG: Video ${video.id}")
-        println("   title: ${video.title}")
-        println("   thumbnailURL raw: '${video.thumbnailURL}'")
-        println("   videoURL: '${video.videoURL}'")
-        println("   hasValidThumbnail: $hasValidThumbnail")
-        println("   imageUrl to load: '$imageUrl'")
+        if (BuildConfig.DEBUG) { println("🖼️ THUMBNAIL DEBUG: Video ${video.id}") }
+        if (BuildConfig.DEBUG) { println("   title: ${video.title}") }
+        if (BuildConfig.DEBUG) { println("   thumbnailURL raw: '${video.thumbnailURL}'") }
+        if (BuildConfig.DEBUG) { println("   videoURL: '${video.videoURL}'") }
+        if (BuildConfig.DEBUG) { println("   hasValidThumbnail: $hasValidThumbnail") }
+        if (BuildConfig.DEBUG) { println("   imageUrl to load: '$imageUrl'") }
     }
 
     Box(
@@ -321,14 +322,14 @@ private fun VideoThumbnailContent(
                     }
                     is AsyncImagePainter.State.Error -> {
                         LaunchedEffect(Unit) {
-                            println("❌ THUMBNAIL ERROR: Failed to load - $imageUrl")
-                            println("❌ THUMBNAIL ERROR: ${state.result.throwable.message}")
+                            if (BuildConfig.DEBUG) { println("❌ THUMBNAIL ERROR: Failed to load - $imageUrl") }
+                            if (BuildConfig.DEBUG) { println("❌ THUMBNAIL ERROR: ${state.result.throwable.message}") }
                         }
                         PlaceholderThumbnail(video.title)
                     }
                     is AsyncImagePainter.State.Success -> {
                         LaunchedEffect(Unit) {
-                            println("✅ THUMBNAIL SUCCESS: Loaded - $imageUrl")
+                            if (BuildConfig.DEBUG) { println("✅ THUMBNAIL SUCCESS: Loaded - $imageUrl") }
                         }
                         Image(
                             painter = painter,

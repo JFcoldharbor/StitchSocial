@@ -68,6 +68,7 @@ import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.SearchService
 import com.stitchsocial.club.TaggedUserChipById
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.BuildConfig
 
 // Constants
 private const val MAX_TAGGED_USERS = 5
@@ -174,7 +175,7 @@ fun ThreadComposer(
 
                                     onVideoCreated()
                                 } catch (e: Exception) {
-                                    println("COMPOSER: Upload failed: ${e.message}")
+                                    if (BuildConfig.DEBUG) { println("COMPOSER: Upload failed: ${e.message}") }
                                 } finally {
                                     isPosting = false
                                 }
@@ -455,9 +456,9 @@ private fun UserTagSheetContent(
             try {
                 val results = searchService.searchUsers(query, 30)
                 searchResults = results
-                println("🔍 TAG SHEET: Found ${results.size} users for '$query'")
+                if (BuildConfig.DEBUG) { println("🔍 TAG SHEET: Found ${results.size} users for '$query'") }
             } catch (e: Exception) {
-                println("❌ TAG SHEET: Search error: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ TAG SHEET: Search error: ${e.message}") }
                 searchResults = emptyList()
             } finally {
                 isSearching = false
@@ -1110,7 +1111,7 @@ private suspend fun sendPostCreationNotifications(
                     parentCreatorID = null,
                     threadUserIDs = emptyList()
                 )
-                println("COMPOSER NOTIF: Stitch notification sent to thread creator")
+                if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Stitch notification sent to thread creator") }
             }
 
             is RecordingContext.ReplyToVideo -> {
@@ -1120,7 +1121,7 @@ private suspend fun sendPostCreationNotifications(
                     videoID = createdVideo.id,
                     videoTitle = createdVideo.title
                 )
-                println("COMPOSER NOTIF: Reply notification sent to video creator")
+                if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Reply notification sent to video creator") }
             }
 
             is RecordingContext.ContinueThread -> {
@@ -1132,7 +1133,7 @@ private suspend fun sendPostCreationNotifications(
                     parentCreatorID = null,
                     threadUserIDs = emptyList()
                 )
-                println("COMPOSER NOTIF: Continue thread notification sent")
+                if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Continue thread notification sent") }
             }
 
             is RecordingContext.NewThread -> {
@@ -1152,15 +1153,15 @@ private suspend fun sendPostCreationNotifications(
                         videoTitle = createdVideo.title,
                         mentionContext = "video"
                     )
-                    println("COMPOSER NOTIF: Mention notification sent to $taggedUserID")
+                    if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Mention notification sent to $taggedUserID") }
                 } catch (e: Exception) {
-                    println("COMPOSER NOTIF: Mention failed for $taggedUserID - ${e.message}")
+                    if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Mention failed for $taggedUserID - ${e.message}") }
                 }
             }
         }
 
     } catch (e: Exception) {
         // Non-fatal — video was already created successfully
-        println("COMPOSER NOTIF: Post-creation notifications failed - ${e.message}")
+        if (BuildConfig.DEBUG) { println("COMPOSER NOTIF: Post-creation notifications failed - ${e.message}") }
     }
 }

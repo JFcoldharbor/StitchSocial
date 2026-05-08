@@ -43,6 +43,7 @@ import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.FollowManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.stitchsocial.club.BuildConfig
 
 // ===== TAB ENUM =====
 
@@ -122,7 +123,7 @@ class StitchersViewModel(
             _hasMoreFollowers.value = allFollowers.size > displayedFollowerCount
             followManager.loadFollowStatesForUsers(firstBatch)
         } catch (e: Exception) {
-            println("❌ STITCHERS: Failed to load followers: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ STITCHERS: Failed to load followers: ${e.message}") }
         }
         _isLoadingFollowers.value = false
     }
@@ -140,7 +141,7 @@ class StitchersViewModel(
                 _hasMoreFollowers.value = displayedFollowerCount < allFollowers.size
                 followManager.loadFollowStatesForUsers(nextBatch)
             } catch (e: Exception) {
-                println("❌ STITCHERS: Failed to load more followers: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ STITCHERS: Failed to load more followers: ${e.message}") }
             }
             _isLoadingMoreFollowers.value = false
         }
@@ -158,7 +159,7 @@ class StitchersViewModel(
             _hasMoreFollowing.value = allFollowing.size > displayedFollowingCount
             followManager.loadFollowStatesForUsers(firstBatch)
         } catch (e: Exception) {
-            println("❌ STITCHERS: Failed to load following: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ STITCHERS: Failed to load following: ${e.message}") }
         }
         _isLoadingFollowing.value = false
     }
@@ -176,7 +177,7 @@ class StitchersViewModel(
                 _hasMoreFollowing.value = displayedFollowingCount < allFollowing.size
                 followManager.loadFollowStatesForUsers(nextBatch)
             } catch (e: Exception) {
-                println("❌ STITCHERS: Failed to load more following: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ STITCHERS: Failed to load more following: ${e.message}") }
             }
             _isLoadingMoreFollowing.value = false
         }
@@ -193,11 +194,11 @@ class StitchersViewModel(
     }
 
     fun toggleBlock(targetUserID: String) {
-        println("⚠️ STITCHERS: Block functionality not yet implemented")
+        if (BuildConfig.DEBUG) { println("⚠️ STITCHERS: Block functionality not yet implemented") }
     }
 
     fun removeFollower(followerID: String) {
-        println("⚠️ STITCHERS: Remove follower functionality not yet implemented")
+        if (BuildConfig.DEBUG) { println("⚠️ STITCHERS: Remove follower functionality not yet implemented") }
     }
 }
 

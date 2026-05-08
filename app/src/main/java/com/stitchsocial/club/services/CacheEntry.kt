@@ -26,6 +26,7 @@ import com.google.firebase.firestore.Query
 import com.stitchsocial.club.foundation.*
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import com.stitchsocial.club.BuildConfig
 
 private data class CacheEntry<T>(val data: T, val cachedAt: Long) {
     fun isValid(ttlMs: Long) = System.currentTimeMillis() - cachedAt < ttlMs
@@ -83,17 +84,17 @@ class ShowService private constructor() {
             val all = snap.documents.mapNotNull { decodeShow(it.data ?: return@mapNotNull null, it.id) }
             val shows = all.filter { it.status != ShowStatus.REMOVED }
             shows.forEach { showCache[it.id] = CacheEntry(it, System.currentTimeMillis()) }
-            println("📚 SHOW SERVICE: Loaded ${shows.count()} shows for $creatorID")
+            if (BuildConfig.DEBUG) { println("📚 SHOW SERVICE: Loaded ${shows.count()} shows for $creatorID") }
             shows
         } catch (e: Exception) {
             // Index missing — fallback without orderBy, sort client-side
-            println("⚠️ SHOW SERVICE: Ordered query failed (${e.message}) — retrying without order")
+            if (BuildConfig.DEBUG) { println("⚠️ SHOW SERVICE: Ordered query failed (${e.message}) — retrying without order") }
             val snap = showsCol.whereEqualTo("creatorID", creatorID).get().await()
             val all = snap.documents.mapNotNull { decodeShow(it.data ?: return@mapNotNull null, it.id) }
             val shows = all.filter { it.status != ShowStatus.REMOVED }
                 .sortedByDescending { it.updatedAt }
             shows.forEach { showCache[it.id] = CacheEntry(it, System.currentTimeMillis()) }
-            println("📚 SHOW SERVICE: Fallback loaded ${shows.count()} shows")
+            if (BuildConfig.DEBUG) { println("📚 SHOW SERVICE: Fallback loaded ${shows.count()} shows") }
             shows
         }
     }
@@ -102,7 +103,7 @@ class ShowService private constructor() {
         val data = encodeShow(show)
         showsCol.document(show.id).set(data).await()
         showCache[show.id] = CacheEntry(show, System.currentTimeMillis())
-        println("✅ SHOW SERVICE: Saved show ${show.id}")
+        if (BuildConfig.DEBUG) { println("✅ SHOW SERVICE: Saved show ${show.id}") }
     }
 
     suspend fun deleteShow(showId: String) {
@@ -217,7 +218,7 @@ class ShowService private constructor() {
             ))
         }
         batch.commit().await()
-        println("📅 SHOW SERVICE: Reordered schedule — ${pairs.size} episodes updated")
+        if (BuildConfig.DEBUG) { println("📅 SHOW SERVICE: Reordered schedule — ${pairs.size} episodes updated") }
     }
 
     // ═══════════════════════════════════════

@@ -95,6 +95,7 @@ import com.stitchsocial.club.viewmodels.FloatingIconManager
 // ThreadView import
 // ============================================================================
 import com.stitchsocial.club.ui.screens.ThreadView
+import com.stitchsocial.club.BuildConfig
 
 // ============================================================================
 // MARK: - NON-SCALED TEXT SIZE UTILITIES
@@ -438,25 +439,25 @@ fun ContextualVideoOverlay(
 
     // Load user data - fetch from service if not cached
     LaunchedEffect(video.creatorID) {
-        println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Fetching profile for creatorID: ${video.creatorID}")
-        println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: video.creatorName: ${video.creatorName}")
+        if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Fetching profile for creatorID: ${video.creatorID}") }
+        if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: video.creatorName: ${video.creatorName}") }
 
         val cached = UserDataCache.get(video.creatorID)
         if (cached != null) {
-            println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Found in cache: ${cached.displayName}")
+            if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Found in cache: ${cached.displayName}") }
             realCreatorName = cached.displayName
             realCreatorProfileImageURL = cached.profileImageURL
         } else {
             // Fetch from UserService
             try {
                 isLoadingUserData = true
-                println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Calling userService.getUserProfile...")
+                if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Calling userService.getUserProfile...") }
                 val profile = userService.getUserProfile(video.creatorID)
-                println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile result: $profile")
+                if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile result: $profile") }
                 if (profile != null) {
                     realCreatorName = profile.displayName.ifEmpty { profile.username }
                     realCreatorProfileImageURL = profile.profileImageURL
-                    println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}")
+                    if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}") }
                     // Cache the result
                     UserDataCache.set(video.creatorID, CachedUserData(
                         displayName = realCreatorName ?: "",
@@ -464,12 +465,12 @@ fun ContextualVideoOverlay(
                         tier = null,
                         cachedAt = Date()
                     ))
-                    println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched creator profile: ${profile.displayName}")
+                    if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched creator profile: ${profile.displayName}") }
                 } else {
-                    println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile was NULL!")
+                    if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Profile was NULL!") }
                 }
             } catch (e: Exception) {
-                println("Ã¢ÂÅ’ OVERLAY: Failed to fetch creator profile: ${e.message}")
+                if (BuildConfig.DEBUG) { println("Ã¢ÂÅ’ OVERLAY: Failed to fetch creator profile: ${e.message}") }
                 e.printStackTrace()
             } finally {
                 isLoadingUserData = false
@@ -497,10 +498,10 @@ fun ContextualVideoOverlay(
                             tier = null,
                             cachedAt = Date()
                         ))
-                        println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched thread creator profile: ${profile.displayName}")
+                        if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched thread creator profile: ${profile.displayName}") }
                     }
                 } catch (e: Exception) {
-                    println("Ã¢ÂÅ’ OVERLAY: Failed to fetch thread creator profile: ${e.message}")
+                    if (BuildConfig.DEBUG) { println("Ã¢ÂÅ’ OVERLAY: Failed to fetch thread creator profile: ${e.message}") }
                 }
             }
         }
@@ -1728,7 +1729,7 @@ internal fun TipButton(
                         "coinTotal", FieldValue.increment(amount.toLong()),
                         "lastTippedAt", com.google.firebase.Timestamp(java.util.Date())
                     ).await()
-                println("💰 TIP: $currentUserID → $creatorID +$amount on $videoID")
+                if (BuildConfig.DEBUG) { println("💰 TIP: $currentUserID → $creatorID +$amount on $videoID") }
 
                 // Side-effects — notification + creator's supporters list +
                 // topSupporters array. Run sequentially after the core
@@ -1745,7 +1746,7 @@ internal fun TipButton(
                 errorMsg = "Tip failed"
                 showError = true
                 scope.launch { delay(2000); showError = false }
-                println("❌ TIP: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ TIP: ${e.message}") }
             }
         }
     }
@@ -1893,12 +1894,12 @@ private suspend fun recordTipSideEffects(
             db.collection("notification_cooldowns").document(cooldownKey)
                 .set(mapOf("lastNotificationAt" to com.google.firebase.Timestamp(java.util.Date())))
                 .await()
-            println("✅ TIP NOTIF: $amountText tip notification written for $creatorID")
+            if (BuildConfig.DEBUG) { println("✅ TIP NOTIF: $amountText tip notification written for $creatorID") }
         } else {
-            println("⏱ TIP NOTIF: Cooldown active ($tipperID → $creatorID)")
+            if (BuildConfig.DEBUG) { println("⏱ TIP NOTIF: Cooldown active ($tipperID → $creatorID)") }
         }
     } catch (e: Exception) {
-        println("⚠️ TIP NOTIF: write failed — ${e.message}")
+        if (BuildConfig.DEBUG) { println("⚠️ TIP NOTIF: write failed — ${e.message}") }
     }
 
     // 2) Per-tipper supporter row under the creator (atomic increment so
@@ -1917,7 +1918,7 @@ private suspend fun recordTipSideEffects(
             )
             .await()
     } catch (e: Exception) {
-        println("⚠️ TIP AGG: supporter row update failed for $creatorID/$tipperID — ${e.message}")
+        if (BuildConfig.DEBUG) { println("⚠️ TIP AGG: supporter row update failed for $creatorID/$tipperID — ${e.message}") }
         return
     }
 
@@ -1940,7 +1941,7 @@ private suspend fun recordTipSideEffects(
         }
         db.collection("users").document(creatorID).update("topSupporters", top).await()
     } catch (e: Exception) {
-        println("⚠️ TIP AGG: topSupporters refresh failed for $creatorID — ${e.message}")
+        if (BuildConfig.DEBUG) { println("⚠️ TIP AGG: topSupporters refresh failed for $creatorID — ${e.message}") }
     }
 }
 

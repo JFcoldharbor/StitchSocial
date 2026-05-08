@@ -16,6 +16,7 @@
  */
 
 package com.stitchsocial.club
+import com.stitchsocial.club.BuildConfig
 
 object AppConfig {
 
@@ -98,11 +99,11 @@ object AppConfig {
 
     /** Called by VideoCoordinator.kt during AI analysis init */
     fun printConfigurationStatus() {
-        println("🔧 APP CONFIG STATUS:")
-        println("   AI Enabled:    ${Features.enableAIAnalysis}")
-        println("   AI Configured: ${API.OpenAI.isConfigured()}")
-        println("   Debug Logging: ${Features.enableDebugLogging}")
-        println("   API Key len:   ${API.OpenAI.API_KEY.length}")
+        if (BuildConfig.DEBUG) { println("🔧 APP CONFIG STATUS:") }
+        if (BuildConfig.DEBUG) { println("   AI Enabled:    ${Features.enableAIAnalysis}") }
+        if (BuildConfig.DEBUG) { println("   AI Configured: ${API.OpenAI.isConfigured()}") }
+        if (BuildConfig.DEBUG) { println("   Debug Logging: ${Features.enableDebugLogging}") }
+        if (BuildConfig.DEBUG) { println("   API Key len:   ${API.OpenAI.API_KEY.length}") }
     }
 
     // MARK: - URLs

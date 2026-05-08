@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.UUID
+import com.stitchsocial.club.BuildConfig
 
 class VideoWatermarkService private constructor(private val context: Context) {
 
@@ -59,7 +60,7 @@ class VideoWatermarkService private constructor(private val context: Context) {
     ): WatermarkResult = withContext(Dispatchers.IO) {
         try {
             _isProcessing.value = true
-            println("🎨 WATERMARK: Starting watermark export for @$creatorUsername")
+            if (BuildConfig.DEBUG) { println("🎨 WATERMARK: Starting watermark export for @$creatorUsername") }
 
             val sourceUri = Uri.fromFile(sourceFile)
             val outputFile = File(context.cacheDir, "StitchWM_${UUID.randomUUID()}.mp4")
@@ -262,12 +263,12 @@ class VideoWatermarkService private constructor(private val context: Context) {
             encoderSurface.release()
 
             _isProcessing.value = false
-            println("✅ WATERMARK: Export complete — ${outputFile.name}")
+            if (BuildConfig.DEBUG) { println("✅ WATERMARK: Export complete — ${outputFile.name}") }
             WatermarkResult(success = true, outputFile = outputFile)
 
         } catch (e: Exception) {
             _isProcessing.value = false
-            println("❌ WATERMARK: Failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ WATERMARK: Failed — ${e.message}") }
             WatermarkResult(success = false, error = e.message)
         }
     }

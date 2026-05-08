@@ -64,6 +64,7 @@ import com.stitchsocial.club.viewmodels.FloatingIconManager
 // Follow Manager
 import com.stitchsocial.club.FollowManager
 import com.stitchsocial.club.camera.RecordingContextFactory
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Main VideoPlayer Composable
 
@@ -118,10 +119,10 @@ fun VideoPlayer(
             if (video.replyCount > 0) {
                 val children = feedService.loadThreadChildren(video.id)
                 childVideos = children
-                println("📹 VideoPlayer: Loaded ${children.size} children for ${video.id}")
+                if (BuildConfig.DEBUG) { println("📹 VideoPlayer: Loaded ${children.size} children for ${video.id}") }
             }
         } catch (e: Exception) {
-            println("❌ VideoPlayer: Failed to load children: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VideoPlayer: Failed to load children: ${e.message}") }
         }
         isLoadingChildren = false
     }
@@ -236,7 +237,7 @@ fun VideoPlayer(
                         onAction = { action ->
                             when (action) {
                                 is OverlayAction.NavigateToProfile -> {
-                                    println("🧑 VideoPlayer: Navigate to profile ${action.userID}")
+                                    if (BuildConfig.DEBUG) { println("🧑 VideoPlayer: Navigate to profile ${action.userID}") }
                                     pauseAllVideos()
                                     showingCreatorProfileID = action.userID
                                 }
@@ -250,7 +251,7 @@ fun VideoPlayer(
                                 }
                                 is OverlayAction.Share -> onShare()
                                 is OverlayAction.StitchRecording -> {
-                                    println("🎬 VIDEOPLAYER: StitchRecording action")
+                                    if (BuildConfig.DEBUG) { println("🎬 VIDEOPLAYER: StitchRecording action") }
                                     val isOwn = video.creatorID == currentUserID
                                     val ctx = if (isOwn) {
                                         RecordingContextFactory.createContinueThread(
@@ -265,7 +266,7 @@ fun VideoPlayer(
                                             video.title
                                         )
                                     }
-                                    println("🎬 VIDEOPLAYER: Context created, showing modal")
+                                    if (BuildConfig.DEBUG) { println("🎬 VIDEOPLAYER: Context created, showing modal") }
                                     navigationCoordinator?.showModal(
                                         ModalState.RECORDING,
                                         mapOf(
@@ -307,7 +308,7 @@ fun VideoPlayer(
                     onAction = { action ->
                         when (action) {
                             is OverlayAction.NavigateToProfile -> {
-                                println("🧑 VideoPlayer: Navigate to profile ${action.userID}")
+                                if (BuildConfig.DEBUG) { println("🧑 VideoPlayer: Navigate to profile ${action.userID}") }
                                 pauseAllVideos()
                                 showingCreatorProfileID = action.userID
                             }
@@ -321,7 +322,7 @@ fun VideoPlayer(
                             }
                             is OverlayAction.Share -> onShare()
                             is OverlayAction.StitchRecording -> {
-                                println("🎬 VIDEOPLAYER: StitchRecording action")
+                                if (BuildConfig.DEBUG) { println("🎬 VIDEOPLAYER: StitchRecording action") }
                                 val isOwn = video.creatorID == currentUserID
                                 val ctx = if (isOwn) {
                                     RecordingContextFactory.createContinueThread(
@@ -336,7 +337,7 @@ fun VideoPlayer(
                                         video.title
                                     )
                                 }
-                                println("🎬 VIDEOPLAYER: Context created, showing modal")
+                                if (BuildConfig.DEBUG) { println("🎬 VIDEOPLAYER: Context created, showing modal") }
                                 navigationCoordinator?.showModal(
                                     ModalState.RECORDING,
                                     mapOf(

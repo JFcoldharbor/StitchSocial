@@ -39,6 +39,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
+import com.stitchsocial.club.BuildConfig
 
 // ─────────────────────────────────────────────
 // MARK: - DiscoverySignal
@@ -227,14 +228,14 @@ object DiscoveryEngagementTracker {
         currentCardStartTime = null
         currentCardVideoID = null
         currentCardCreatorID = null
-        println("📊 DISCOVERY TRACKER: New session started")
+        if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: New session started") }
     }
 
     fun registerManualInteraction() {
         manualInteractionCount++
         if (!sessionHasIntent) {
             sessionHasIntent = true
-            println("📊 DISCOVERY TRACKER: Session intent confirmed")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Session intent confirmed") }
         }
     }
 
@@ -273,7 +274,7 @@ object DiscoveryEngagementTracker {
             wasSwipeBack = false
         )
         processSignal(signal)
-        println("📊 DISCOVERY TRACKER: Fullscreen tap — ${videoID.take(8)}, hypeWeight=4")
+        if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Fullscreen tap — ${videoID.take(8)}, hypeWeight=4") }
     }
 
     // ── Signal Processing ─────────────────────────────────────────
@@ -300,7 +301,7 @@ object DiscoveryEngagementTracker {
         var record = videoRecords[videoID] ?: VideoWatchRecord(videoID, creatorID)
 
         if (wasSwipeBack && record.isRewatchCapped) {
-            println("📊 DISCOVERY TRACKER: Rewatch capped for ${videoID.take(8)}")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Rewatch capped for ${videoID.take(8)}") }
             return
         }
 
@@ -337,7 +338,7 @@ object DiscoveryEngagementTracker {
         if (signal.isCoolSignal) {
             if (acc.totalCoolSignals >= 4 && acc.coolDelayActive) {
                 if (!acc.canRegisterBlockingCool) {
-                    println("📊 DISCOVERY TRACKER: Cool delay active — 5th signal blocked")
+                    if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Cool delay active — 5th signal blocked") }
                     return
                 }
             }
@@ -346,7 +347,7 @@ object DiscoveryEngagementTracker {
             val coolSet = creatorCoolVideoSets.getOrPut(creatorID) { mutableSetOf() }
             coolSet.add(signal.videoID)
             acc.videosWithCoolSignals = coolSet.size
-            println("📊 DISCOVERY TRACKER: Cool — creator=${creatorID.take(8)}, total=${acc.totalCoolSignals}")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Cool — creator=${creatorID.take(8)}, total=${acc.totalCoolSignals}") }
 
         } else if (signal.hypeWeight > 0) {
             acc.totalHypeWeight += signal.hypeWeight
@@ -354,7 +355,7 @@ object DiscoveryEngagementTracker {
             val hypeSet = creatorHypeVideoSets.getOrPut(creatorID) { mutableSetOf() }
             hypeSet.add(signal.videoID)
             acc.videosWithHypeSignals = hypeSet.size
-            println("📊 DISCOVERY TRACKER: Hype — creator=${creatorID.take(8)}, weight=${signal.hypeWeight}")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Hype — creator=${creatorID.take(8)}, weight=${signal.hypeWeight}") }
         }
 
         acc.recalculatePreference()
@@ -395,7 +396,7 @@ object DiscoveryEngagementTracker {
         creatorCoolVideoSets.remove(creatorID)
         creatorHypeVideoSets.remove(creatorID)
         creatorPreferences.remove(creatorID)
-        println("🔓 DISCOVERY TRACKER: Cleared preference for ${creatorID.take(8)}")
+        if (BuildConfig.DEBUG) { println("🔓 DISCOVERY TRACKER: Cleared preference for ${creatorID.take(8)}") }
     }
 
     // ── Firebase Persistence ──────────────────────────────────────
@@ -437,9 +438,9 @@ object DiscoveryEngagementTracker {
 
         try {
             batch.commit().await()
-            println("📊 DISCOVERY TRACKER: Persisted ${toFlush.size} creator preferences")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Persisted ${toFlush.size} creator preferences") }
         } catch (e: Exception) {
-            println("⚠️ DISCOVERY TRACKER: Persist failed — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY TRACKER: Persist failed — ${e.message}") }
             pendingPersists.addAll(toFlush) // re-queue
         }
     }
@@ -469,9 +470,9 @@ object DiscoveryEngagementTracker {
                 )
                 creatorAccumulators[creatorID] = acc
             }
-            println("📊 DISCOVERY TRACKER: Loaded ${creatorPreferences.size} creator preferences")
+            if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Loaded ${creatorPreferences.size} creator preferences") }
         } catch (e: Exception) {
-            println("⚠️ DISCOVERY TRACKER: Failed to load preferences — ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY TRACKER: Failed to load preferences — ${e.message}") }
         }
     }
 

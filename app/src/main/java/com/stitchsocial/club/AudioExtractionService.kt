@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.nio.ByteBuffer
 import kotlin.math.min
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Fast audio extraction service optimized for parallel video processing
@@ -60,10 +61,10 @@ class AudioExtractionService {
             try {
                 if (audioFile.exists()) {
                     audioFile.delete()
-                    println("🧹 AUDIO CLEANUP: Deleted ${audioFile.name}")
+                    if (BuildConfig.DEBUG) { println("🧹 AUDIO CLEANUP: Deleted ${audioFile.name}") }
                 }
             } catch (e: Exception) {
-                println("⚠️ AUDIO CLEANUP: Failed to delete ${audioFile.name} - ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ AUDIO CLEANUP: Failed to delete ${audioFile.name} - ${e.message}") }
             }
         }
     }
@@ -109,7 +110,7 @@ class AudioExtractionService {
                 throw AudioExtractionError.FileNotFound
             }
 
-            println("🎵 AUDIO EXTRACTION: Starting for ${videoFile.name}")
+            if (BuildConfig.DEBUG) { println("🎵 AUDIO EXTRACTION: Starting for ${videoFile.name}") }
 
             // STEP 2: Analyze video metadata (20%)
             updateProgress(0.2, "Analyzing video metadata...")
@@ -148,8 +149,8 @@ class AudioExtractionService {
 
             val extractionTime = (System.currentTimeMillis() - startTime) / 1000.0
 
-            println("✅ AUDIO EXTRACTION: Complete in ${String.format("%.1f", extractionTime)}s")
-            println("🎵 AUDIO FILE: ${formatFileSize(audioData.size.toLong())} at ${outputFile.absolutePath}")
+            if (BuildConfig.DEBUG) { println("✅ AUDIO EXTRACTION: Complete in ${String.format("%.1f", extractionTime)}s") }
+            if (BuildConfig.DEBUG) { println("🎵 AUDIO FILE: ${formatFileSize(audioData.size.toLong())} at ${outputFile.absolutePath}") }
 
             AudioExtractionResult(
                 audioFile = outputFile,
@@ -173,7 +174,7 @@ class AudioExtractionService {
                 else -> "Unknown error: ${e.message}"
             }
 
-            println("❌ AUDIO EXTRACTION: Failed - $errorMessage")
+            if (BuildConfig.DEBUG) { println("❌ AUDIO EXTRACTION: Failed - $errorMessage") }
             updateProgress(0.0, "Extraction failed: $errorMessage")
             progressCallback(0.0)
 
@@ -219,7 +220,7 @@ class AudioExtractionService {
                 throw AudioExtractionError.NoAudioTrack
             }
 
-            println("🎵 VIDEO METADATA: Duration=${String.format("%.1f", duration)}s, Audio=$hasAudio, SampleRate=$sampleRate")
+            if (BuildConfig.DEBUG) { println("🎵 VIDEO METADATA: Duration=${String.format("%.1f", duration)}s, Audio=$hasAudio, SampleRate=$sampleRate") }
 
             VideoMetadata(
                 duration = duration,
@@ -231,7 +232,7 @@ class AudioExtractionService {
             )
 
         } catch (e: Exception) {
-            println("❌ METADATA ANALYSIS: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ METADATA ANALYSIS: Failed - ${e.message}") }
             throw AudioExtractionError.ExtractionFailed
         } finally {
             retriever.release()
@@ -272,7 +273,7 @@ class AudioExtractionService {
                 throw AudioExtractionError.NoAudioTrack
             }
 
-            println("🎵 FOUND AUDIO TRACK: Index=$audioTrackIndex, Format=${audioFormat.getString(MediaFormat.KEY_MIME)}")
+            if (BuildConfig.DEBUG) { println("🎵 FOUND AUDIO TRACK: Index=$audioTrackIndex, Format=${audioFormat.getString(MediaFormat.KEY_MIME)}") }
 
             // Select and configure audio track
             extractor.selectTrack(audioTrackIndex)
@@ -330,19 +331,19 @@ class AudioExtractionService {
                 offset += audioBytes.size
             }
 
-            println("🎵 EXTRACTION COMPLETE: ${formatFileSize(totalSize.toLong())} extracted")
+            if (BuildConfig.DEBUG) { println("🎵 EXTRACTION COMPLETE: ${formatFileSize(totalSize.toLong())} extracted") }
 
             return@withContext combinedAudioData
 
         } catch (e: Exception) {
-            println("❌ AUDIO EXTRACTION: Failed during extraction - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ AUDIO EXTRACTION: Failed during extraction - ${e.message}") }
             throw AudioExtractionError.ExtractionFailed
         } finally {
             try {
                 extractor.release()
                 muxer.release()
             } catch (e: Exception) {
-                println("⚠️ CLEANUP WARNING: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ CLEANUP WARNING: ${e.message}") }
             }
         }
     }
@@ -351,16 +352,16 @@ class AudioExtractionService {
 
     private fun validateExtractedAudio(audioFile: File, audioData: ByteArray): Boolean {
         if (!audioFile.exists() || audioFile.length() == 0L) {
-            println("❌ VALIDATION: Audio file is empty or doesn't exist")
+            if (BuildConfig.DEBUG) { println("❌ VALIDATION: Audio file is empty or doesn't exist") }
             return false
         }
 
         if (audioData.isEmpty()) {
-            println("❌ VALIDATION: Audio data array is empty")
+            if (BuildConfig.DEBUG) { println("❌ VALIDATION: Audio data array is empty") }
             return false
         }
 
-        println("✅ VALIDATION: Audio extraction successful - File: ${formatFileSize(audioFile.length())}, Data: ${formatFileSize(audioData.size.toLong())}")
+        if (BuildConfig.DEBUG) { println("✅ VALIDATION: Audio extraction successful - File: ${formatFileSize(audioFile.length())}, Data: ${formatFileSize(audioData.size.toLong())}") }
         return true
     }
 
@@ -376,7 +377,7 @@ class AudioExtractionService {
         val fileName = "extracted_audio_${timestamp}.m4a"
         val audioFile = File(tempDir, fileName)
 
-        println("🎵 TEMP AUDIO FILE: ${audioFile.absolutePath}")
+        if (BuildConfig.DEBUG) { println("🎵 TEMP AUDIO FILE: ${audioFile.absolutePath}") }
         return audioFile
     }
 
@@ -398,11 +399,11 @@ class AudioExtractionService {
             }
 
             if (cleanedCount > 0) {
-                println("🧹 AUDIO CLEANUP: Removed $cleanedCount temporary audio files")
+                if (BuildConfig.DEBUG) { println("🧹 AUDIO CLEANUP: Removed $cleanedCount temporary audio files") }
             }
 
         } catch (e: Exception) {
-            println("⚠️ AUDIO CLEANUP: Failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ AUDIO CLEANUP: Failed - ${e.message}") }
         }
     }
 
@@ -412,7 +413,7 @@ class AudioExtractionService {
         _extractionProgress.value = progress
         _currentTask.value = task
 
-        println("🎵 AUDIO PROGRESS: ${(progress * 100).toInt()}% - $task")
+        if (BuildConfig.DEBUG) { println("🎵 AUDIO PROGRESS: ${(progress * 100).toInt()}% - $task") }
     }
 
     // MARK: - Utility Functions

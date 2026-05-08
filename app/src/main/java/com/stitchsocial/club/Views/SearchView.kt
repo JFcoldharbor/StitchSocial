@@ -50,6 +50,7 @@ import com.stitchsocial.club.FollowManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Search Tab (matches iOS: All / Users / Videos)
 
@@ -168,9 +169,9 @@ class SearchViewModel(
                 _userResults.value = users
                 _videoResults.value = videos
                 followManager.loadFollowStatesForUsers(users)
-                println("🔍 SEARCH: query='$query' users=${users.size} videos=${videos.size}")
+                if (BuildConfig.DEBUG) { println("🔍 SEARCH: query='$query' users=${users.size} videos=${videos.size}") }
             } catch (e: Exception) {
-                println("❌ SEARCH: Failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SEARCH: Failed: ${e.message}") }
                 clearResults()
             } finally {
                 _isSearching.value = false
@@ -194,9 +195,9 @@ class SearchViewModel(
                 SearchCache.suggestedUsers = SearchCache.Entry(users)
                 refreshRecentUsers()
                 followManager.loadFollowStatesForUsers(users)
-                println("✅ SEARCH: Loaded ${users.size} personalized suggestions")
+                if (BuildConfig.DEBUG) { println("✅ SEARCH: Loaded ${users.size} personalized suggestions") }
             } catch (e: Exception) {
-                println("❌ SEARCH: Suggestions failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SEARCH: Suggestions failed: ${e.message}") }
             } finally {
                 _isLoadingSuggestions.value = false
             }
@@ -215,7 +216,7 @@ class SearchViewModel(
                 _trendingHashtags.value = hashtags
                 SearchCache.trendingHashtags = SearchCache.Entry(hashtags)
             } catch (e: Exception) {
-                println("❌ SEARCH: Trending hashtags failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SEARCH: Trending hashtags failed: ${e.message}") }
             } finally {
                 _isLoadingHashtags.value = false
             }

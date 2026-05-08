@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 // ─────────────────────────────────────────────
 // MARK: - Privacy enums (mirror iOS)
@@ -130,7 +131,7 @@ fun PrivacySettingsView(
                 }
                 db.collection("users").document(userID).update(mapOf("privacy" to payload)).await()
             } catch (e: Exception) {
-                println("PRIVACY VIEW: Save failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("PRIVACY VIEW: Save failed: ${e.message}") }
             }
         }
     }

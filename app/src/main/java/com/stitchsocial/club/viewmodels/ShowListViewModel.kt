@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
+import com.stitchsocial.club.BuildConfig
 
 // ─────────────────────────────────────────────
 // MARK: - Show List ViewModel
@@ -43,10 +44,10 @@ class ShowListViewModel : ViewModel() {
             service.clearAllCaches()   // always fresh — creator needs to see latest draft state
             try {
                 _shows.value = service.getCreatorShows(creatorID)
-                println("📚 SHOW LIST VM: ${_shows.value.size} shows — ${_shows.value.map { it.status.rawValue }}")
+                if (BuildConfig.DEBUG) { println("📚 SHOW LIST VM: ${_shows.value.size} shows — ${_shows.value.map { it.status.rawValue }}") }
             } catch (e: Exception) {
                 _error.value = e.message
-                println("❌ SHOW LIST VM: Failed to load: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SHOW LIST VM: Failed to load: ${e.message}") }
             }
             _isLoading.value = false
         }
@@ -141,7 +142,7 @@ class ShowEditorViewModel : ViewModel() {
                     com.google.firebase.firestore.SetOptions.merge()
                 ).await()
             } catch (e: Exception) {
-                println("⚠️ SHOW EDITOR VM: persistSchedule failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ SHOW EDITOR VM: persistSchedule failed: ${e.message}") }
             }
         }
     }
@@ -158,11 +159,11 @@ class ShowEditorViewModel : ViewModel() {
                 )
                 service.saveShow(updated)
                 _show.value = updated
-                println(if (show.id == updated.id) "✅ SHOW EDITOR VM: Updated ${updated.id}" else "✅ SHOW EDITOR VM: Created ${updated.id}")
+                if (BuildConfig.DEBUG) { println(if (show.id == updated.id) "✅ SHOW EDITOR VM: Updated ${updated.id}" else "✅ SHOW EDITOR VM: Created ${updated.id}") }
                 onSuccess(updated)
             } catch (e: Exception) {
                 _error.value = e.message
-                println("❌ SHOW EDITOR VM: Save failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SHOW EDITOR VM: Save failed: ${e.message}") }
             }
             _isSaving.value = false
         }
@@ -260,7 +261,7 @@ class ShowDetailViewModel : ViewModel() {
                 _episodesBySeasonId.value = episodes
                 _selectedSeasonId.value = seasons.firstOrNull()?.id
             } catch (e: Exception) {
-                println("❌ SHOW DETAIL VM: Load failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SHOW DETAIL VM: Load failed: ${e.message}") }
             }
             _isLoading.value = false
         }
@@ -278,7 +279,7 @@ class ShowDetailViewModel : ViewModel() {
             try {
                 service.applyReorderedSchedule(newOrder, show)
             } catch (e: Exception) {
-                println("❌ SHOW DETAIL VM: Reorder failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ SHOW DETAIL VM: Reorder failed: ${e.message}") }
             }
             _isReordering.value = false
         }
@@ -303,7 +304,7 @@ class EpisodeScheduleViewModel : ViewModel() {
         if (show == null) return
         val slot = service.nextAvailableSlot(show, existingEpisodes)
         _suggestedSlot.value = slot
-        println("📅 EPISODE SCHEDULE VM: Suggested slot = $slot")
+        if (BuildConfig.DEBUG) { println("📅 EPISODE SCHEDULE VM: Suggested slot = $slot") }
     }
 
     fun setIntent(intent: PublishIntent) { _publishIntent.value = intent }

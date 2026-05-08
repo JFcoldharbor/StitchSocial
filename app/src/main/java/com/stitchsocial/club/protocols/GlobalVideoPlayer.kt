@@ -18,6 +18,7 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Single ExoPlayer instance manager to prevent codec crashes
@@ -42,23 +43,23 @@ object GlobalVideoPlayer {
     private val playbackListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
-            println("GLOBAL PLAYER: Playing state changed: $isPlaying")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Playing state changed: $isPlaying") }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             _isLoading.value = playbackState == Player.STATE_BUFFERING
             when (playbackState) {
                 Player.STATE_READY -> {
-                    println("GLOBAL PLAYER: Ready")
+                    if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Ready") }
                 }
                 Player.STATE_BUFFERING -> {
-                    println("GLOBAL PLAYER: Buffering...")
+                    if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Buffering...") }
                 }
                 Player.STATE_ENDED -> {
-                    println("GLOBAL PLAYER: Playback ended")
+                    if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Playback ended") }
                 }
                 Player.STATE_IDLE -> {
-                    println("GLOBAL PLAYER: Idle")
+                    if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Idle") }
                 }
             }
         }
@@ -81,7 +82,7 @@ object GlobalVideoPlayer {
                     addListener(playbackListener)
                 }
 
-            println("GLOBAL PLAYER: ✅ Initialized single ExoPlayer instance")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ✅ Initialized single ExoPlayer instance") }
         }
         return player!!
     }
@@ -91,12 +92,12 @@ object GlobalVideoPlayer {
      */
     fun setCurrentVideo(videoUrl: String, videoId: String) {
         if (currentVideoId == videoId && currentVideoUrl == videoUrl) {
-            println("GLOBAL PLAYER: 🔄 Same video, skipping switch")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: 🔄 Same video, skipping switch") }
             return
         }
 
         player?.let { p ->
-            println("GLOBAL PLAYER: 🎬 Switching to video: $videoId")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: 🎬 Switching to video: $videoId") }
 
             // Stop current playback
             p.stop()
@@ -110,9 +111,9 @@ object GlobalVideoPlayer {
             currentVideoId = videoId
             currentVideoUrl = videoUrl
 
-            println("GLOBAL PLAYER: ✅ Video switched successfully")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ✅ Video switched successfully") }
         } ?: run {
-            println("GLOBAL PLAYER: ❌ Player not initialized")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ❌ Player not initialized") }
         }
     }
 
@@ -123,7 +124,7 @@ object GlobalVideoPlayer {
         player?.let { p ->
             p.playWhenReady = true
             p.play()
-            println("GLOBAL PLAYER: ▶️ Playing: $currentVideoId")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ▶️ Playing: $currentVideoId") }
         }
     }
 
@@ -134,7 +135,7 @@ object GlobalVideoPlayer {
         player?.let { p ->
             p.pause()
             p.playWhenReady = false
-            println("GLOBAL PLAYER: ⏸️ Paused: $currentVideoId")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ⏸️ Paused: $currentVideoId") }
         }
     }
 
@@ -146,7 +147,7 @@ object GlobalVideoPlayer {
             p.stop()
             p.playWhenReady = false
             _isPlaying.value = false
-            println("GLOBAL PLAYER: ⏹️ Stopped: $currentVideoId")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: ⏹️ Stopped: $currentVideoId") }
         }
     }
 
@@ -156,7 +157,7 @@ object GlobalVideoPlayer {
     fun attachToView(view: PlayerView) {
         view.player = player
         attachedView = view
-        println("GLOBAL PLAYER: 📺 Attached to PlayerView")
+        if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: 📺 Attached to PlayerView") }
     }
 
     /**
@@ -177,7 +178,7 @@ object GlobalVideoPlayer {
         player?.let { p ->
             p.removeListener(playbackListener)
             p.release()
-            println("GLOBAL PLAYER: 🗑️ Released player resources")
+            if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: 🗑️ Released player resources") }
         }
 
         player = null
@@ -194,7 +195,7 @@ object GlobalVideoPlayer {
      * Hello world test
      */
     fun helloWorldTest() {
-        println("GLOBAL PLAYER: Hello World - Single ExoPlayer ready!")
-        println("GLOBAL PLAYER: Features: Crash-safe, Memory efficient, Codec-safe")
+        if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Hello World - Single ExoPlayer ready!") }
+        if (BuildConfig.DEBUG) { println("GLOBAL PLAYER: Features: Crash-safe, Memory efficient, Codec-safe") }
     }
 }

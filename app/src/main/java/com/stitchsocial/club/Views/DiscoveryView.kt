@@ -95,6 +95,7 @@ import com.stitchsocial.club.SearchView
 import com.stitchsocial.club.FollowManager
 import com.stitchsocial.club.ShareButton
 import com.stitchsocial.club.ShareButtonSize
+import com.stitchsocial.club.BuildConfig
 
 // MARK: - Discovery Category (with icons matching iOS)
 
@@ -236,7 +237,7 @@ class DiscoveryViewModel(
                 hasLoaded = true
                 _videos.value = combined
                 applyFilterAndShuffle()
-                println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total")
+                if (BuildConfig.DEBUG) { println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total") }
 
                 loadFeaturedCollectionsForSwipeFeed()
 
@@ -246,7 +247,7 @@ class DiscoveryViewModel(
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to load videos"
-                println("❌ DISCOVERY: Load failed: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed: ${e.message}") }
                 delay(2000)
                 hasLoaded = false
                 _isLoading.value = false
@@ -313,7 +314,7 @@ class DiscoveryViewModel(
         val rest  = current.filter { it.createdAt.time < cutoffMs  }.shuffled()
         _videos.value = fresh + rest
         applyFilterAndShuffle()
-        println("🔀 DISCOVERY: Reshuffled — ${fresh.size} fresh + ${rest.size} rest")
+        if (BuildConfig.DEBUG) { println("🔀 DISCOVERY: Reshuffled — ${fresh.size} fresh + ${rest.size} rest") }
     }
 
     fun loadMoreContent() { reshuffleAndRestart() }
@@ -337,7 +338,7 @@ class DiscoveryViewModel(
     fun randomizeContent() {
         _videos.value = _videos.value.shuffled()
         applyFilterAndShuffle()
-        println("DISCOVERY: Content randomized - ${_filteredVideos.value.size} videos reshuffled")
+        if (BuildConfig.DEBUG) { println("DISCOVERY: Content randomized - ${_filteredVideos.value.size} videos reshuffled") }
     }
 
     // MARK: - Hashtag Methods (matches iOS DiscoveryViewModel)
@@ -361,7 +362,7 @@ class DiscoveryViewModel(
                 _hashtagVideos.value = result.videos
                 _filteredVideos.value = result.videos
             } catch (e: Exception) {
-                println("DISCOVERY: Failed to load hashtag videos - ${e.message}")
+                if (BuildConfig.DEBUG) { println("DISCOVERY: Failed to load hashtag videos - ${e.message}") }
             }
 
             _isLoading.value = false
@@ -395,7 +396,7 @@ class DiscoveryViewModel(
 
         _filteredVideos.value = diversifyShuffle(filtered)
 
-        println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos")
+        if (BuildConfig.DEBUG) { println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos") }
     }
 
     // MARK: - Filtering and Shuffling
@@ -461,9 +462,9 @@ class DiscoveryViewModel(
 
                 _videos.value = currentVideos
                 applyFilterAndShuffle()
-                println("🎬 DISCOVERY: Injected ${injected.size} collection cards into swipe feed")
+                if (BuildConfig.DEBUG) { println("🎬 DISCOVERY: Injected ${injected.size} collection cards into swipe feed") }
             } catch (e: Exception) {
-                println("⚠️ DISCOVERY: Collection card load failed — ${e.message}")
+                if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY: Collection card load failed — ${e.message}") }
             }
         }
     }
@@ -567,7 +568,7 @@ fun DiscoveryView(
         val uid = authService.getCurrentUserId()
         if (!uid.isNullOrEmpty()) {
             engagementViewModel.setCurrentUser(uid)
-            println("DISCOVERY: EngagementViewModel.setCurrentUser($uid)")
+            if (BuildConfig.DEBUG) { println("DISCOVERY: EngagementViewModel.setCurrentUser($uid)") }
         }
     }
     val iconManager = remember { FloatingIconManager() }
@@ -658,7 +659,7 @@ fun DiscoveryView(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    println("DISCOVERY: App backgrounded - sending pause broadcast")
+                    if (BuildConfig.DEBUG) { println("DISCOVERY: App backgrounded - sending pause broadcast") }
                     val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
                     LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
                 }
@@ -676,7 +677,7 @@ fun DiscoveryView(
     // Pause videos when announcement is showing
     LaunchedEffect(isAnnouncementShowing) {
         if (isAnnouncementShowing) {
-            println("🔇 DISCOVERY: Announcement showing - pausing all videos")
+            if (BuildConfig.DEBUG) { println("🔇 DISCOVERY: Announcement showing - pausing all videos") }
             val intent = Intent("com.stitchsocial.club.PAUSE_ALL_VIDEOS")
             LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
         }
@@ -754,7 +755,7 @@ fun DiscoveryView(
                         discoveryMode = discoveryMode.toggle()
                     },
                     onSearchTapped = {
-                        println("DISCOVERY: Search button tapped")
+                        if (BuildConfig.DEBUG) { println("DISCOVERY: Search button tapped") }
                         showSearchSheet = true
                     }
                 )
@@ -850,7 +851,7 @@ fun DiscoveryView(
                                                 showCollectionPlayer = true
                                                 return@DiscoverySwipeCards
                                             }
-                                            println("DISCOVERY: Video tapped - ${video.title}")
+                                            if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped - ${video.title}") }
                                             currentPlayingVideo = video
 
                                             // Fetch thread data (parent + children)
@@ -869,7 +870,7 @@ fun DiscoveryView(
                                                     currentVideoIndex = 0  // Start at parent
                                                     showVideoPlayer = true
                                                 } catch (e: Exception) {
-                                                    println("DISCOVERY: Error fetching thread - ${e.message}")
+                                                    if (BuildConfig.DEBUG) { println("DISCOVERY: Error fetching thread - ${e.message}") }
                                                     allVideos = listOf(video)
                                                     currentVideoIndex = 0
                                                     showVideoPlayer = true
@@ -892,7 +893,7 @@ fun DiscoveryView(
                                 DiscoveryGridView(
                                     videos = videos,
                                     onVideoTapped = { video ->
-                                        println("DISCOVERY: Video tapped - ${video.title}")
+                                        if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped - ${video.title}") }
                                         currentPlayingVideo = video
 
                                         // Fetch thread data (parent + children)
@@ -911,7 +912,7 @@ fun DiscoveryView(
                                                 currentVideoIndex = 0  // Start at parent
                                                 showVideoPlayer = true
                                             } catch (e: Exception) {
-                                                println("DISCOVERY: Error fetching thread - ${e.message}")
+                                                if (BuildConfig.DEBUG) { println("DISCOVERY: Error fetching thread - ${e.message}") }
                                                 allVideos = listOf(video)
                                                 currentVideoIndex = 0
                                                 showVideoPlayer = true
@@ -993,7 +994,7 @@ fun DiscoveryView(
                                         )
                                     )
 
-                                    println("DISCOVERY SWIPE: Index now $currentVideoIndex / ${videoCount - 1}")
+                                    if (BuildConfig.DEBUG) { println("DISCOVERY SWIPE: Index now $currentVideoIndex / ${videoCount - 1}") }
                                 }
                             },
                             onDragCancel = {
@@ -1077,7 +1078,7 @@ fun DiscoveryView(
                                     // Navigate to thread via parent callback
                                     val threadID = currentVideo.threadID ?: currentVideo.id
                                     onShowThreadView(threadID, currentVideo.id)
-                                    println("DISCOVERY: Thread button tapped - navigating to $threadID")
+                                    if (BuildConfig.DEBUG) { println("DISCOVERY: Thread button tapped - navigating to $threadID") }
                                 }
                                 is OverlayAction.StitchRecording -> {
                                     val isOwn = currentVideo.creatorID == currentUserID
@@ -1208,18 +1209,18 @@ fun DiscoveryView(
                 SearchView(
                     followManager = followManager,
                     onUserTapped = { user ->
-                        println("DISCOVERY: User tapped from search - ${user.displayName}")
+                        if (BuildConfig.DEBUG) { println("DISCOVERY: User tapped from search - ${user.displayName}") }
                         showSearchSheet = false
                         onNavigateToProfile(user.id)
                     },
                     onVideoTapped = { video ->
-                        println("DISCOVERY: Video tapped from search - ${video.title}")
+                        if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped from search - ${video.title}") }
                         showSearchSheet = false
                         currentPlayingVideo = video
                         showVideoPlayer = true
                     },
                     onDismiss = {
-                        println("DISCOVERY: Search dismissed")
+                        if (BuildConfig.DEBUG) { println("DISCOVERY: Search dismissed") }
                         showSearchSheet = false
                     }
                 )

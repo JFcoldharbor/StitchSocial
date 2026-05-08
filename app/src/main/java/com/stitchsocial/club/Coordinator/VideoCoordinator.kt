@@ -42,6 +42,7 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import java.io.ByteArrayOutputStream
+import com.stitchsocial.club.BuildConfig
 
 /**
  * VideoCoordinator with complete parallel processing pipeline + proper thread hierarchy
@@ -131,9 +132,9 @@ class VideoCoordinator(
         val startTime = System.currentTimeMillis()
 
         try {
-            println("🚀 VIDEO COORDINATOR: Starting parallel processing")
-            println("📹 Video: $videoPath")
-            println("🎯 Context: $recordingContext")
+            if (BuildConfig.DEBUG) { println("🚀 VIDEO COORDINATOR: Starting parallel processing") }
+            if (BuildConfig.DEBUG) { println("📹 Video: $videoPath") }
+            if (BuildConfig.DEBUG) { println("🎯 Context: $recordingContext") }
 
             // Update state flows
             _isProcessingParallel.value = true
@@ -169,13 +170,13 @@ class VideoCoordinator(
             _isProcessingParallel.value = false
 
             val totalTime = System.currentTimeMillis() - startTime
-            println("✅ VIDEO COORDINATOR: Parallel processing complete in ${totalTime}ms")
-            println("🎤 Audio: $audioResult")
-            println("🗜️ Compressed: $compressedPath")
-            println("🤖 AI: ${aiResult.title}")
+            if (BuildConfig.DEBUG) { println("✅ VIDEO COORDINATOR: Parallel processing complete in ${totalTime}ms") }
+            if (BuildConfig.DEBUG) { println("🎤 Audio: $audioResult") }
+            if (BuildConfig.DEBUG) { println("🗜️ Compressed: $compressedPath") }
+            if (BuildConfig.DEBUG) { println("🤖 AI: ${aiResult.title}") }
 
         } catch (e: Exception) {
-            println("❌ VIDEO COORDINATOR: Processing failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIDEO COORDINATOR: Processing failed - ${e.message}") }
             e.printStackTrace()
             _isProcessingParallel.value = false
             _parallelProgress.value = 0.0
@@ -190,7 +191,7 @@ class VideoCoordinator(
      * Launch Android gallery picker for video selection
      */
     fun launchGalleryPicker() {
-        println("📱 VIDEO COORDINATOR: Launching gallery picker")
+        if (BuildConfig.DEBUG) { println("📱 VIDEO COORDINATOR: Launching gallery picker") }
         // Trigger will be handled by MainActivity via NavigationCoordinator
     }
 
@@ -198,8 +199,8 @@ class VideoCoordinator(
      * Process video selected from gallery
      */
     suspend fun processGalleryVideo(videoUri: Uri) = withContext(Dispatchers.IO) {
-        println("📹 VIDEO COORDINATOR: Processing gallery video")
-        println("📁 URI: $videoUri")
+        if (BuildConfig.DEBUG) { println("📹 VIDEO COORDINATOR: Processing gallery video") }
+        if (BuildConfig.DEBUG) { println("📁 URI: $videoUri") }
 
         try {
             // Convert URI to file path
@@ -248,10 +249,10 @@ class VideoCoordinator(
                 recordingContext = com.stitchsocial.club.camera.RecordingContext.NewThread
             )
 
-            println("✅ VIDEO COORDINATOR: Gallery video processing started")
+            if (BuildConfig.DEBUG) { println("✅ VIDEO COORDINATOR: Gallery video processing started") }
 
         } catch (e: Exception) {
-            println("❌ VIDEO COORDINATOR: Gallery video processing failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIDEO COORDINATOR: Gallery video processing failed - ${e.message}") }
             e.printStackTrace()
             throw e
         }
@@ -271,13 +272,13 @@ class VideoCoordinator(
                 }
             }
 
-            println("📁 VIDEO COORDINATOR: Copied URI to ${outputFile.absolutePath}")
-            println("📊 VIDEO COORDINATOR: File size: ${outputFile.length()} bytes")
+            if (BuildConfig.DEBUG) { println("📁 VIDEO COORDINATOR: Copied URI to ${outputFile.absolutePath}") }
+            if (BuildConfig.DEBUG) { println("📊 VIDEO COORDINATOR: File size: ${outputFile.length()} bytes") }
 
             return@withContext outputFile.absolutePath
 
         } catch (e: Exception) {
-            println("❌ VIDEO COORDINATOR: Failed to copy URI - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIDEO COORDINATOR: Failed to copy URI - ${e.message}") }
             throw e
         }
     }
@@ -296,10 +297,10 @@ class VideoCoordinator(
         taggedUserIDs: List<String> = emptyList() // NEW: Tagged users parameter
     ): CoreVideoMetadata = withContext(Dispatchers.IO) {
 
-        println("🎬 VIDEO COORDINATOR: Completing video creation")
-        println("📝 Title: $userTitle")
-        println("📄 Description: $userDescription")
-        println("🏷️ Hashtags: $userHashtags")
+        if (BuildConfig.DEBUG) { println("🎬 VIDEO COORDINATOR: Completing video creation") }
+        if (BuildConfig.DEBUG) { println("📝 Title: $userTitle") }
+        if (BuildConfig.DEBUG) { println("📄 Description: $userDescription") }
+        if (BuildConfig.DEBUG) { println("🏷️ Hashtags: $userHashtags") }
         println("👥 Tagged Users: ${taggedUserIDs.size} users") // NEW: Log tagged users
 
         val videoPath = _lastProcessedVideoPath.value
@@ -322,14 +323,14 @@ class VideoCoordinator(
                 if (thumbnailData != null) {
                     val tempVideoId = "vid_${System.currentTimeMillis()}"
                     val url = uploadThumbnailToStorage(thumbnailData, tempVideoId)
-                    println("THUMBNAIL: Generated and uploaded successfully")
+                    if (BuildConfig.DEBUG) { println("THUMBNAIL: Generated and uploaded successfully") }
                     url
                 } else {
-                    println("THUMBNAIL: Generation returned null, skipping")
+                    if (BuildConfig.DEBUG) { println("THUMBNAIL: Generation returned null, skipping") }
                     ""
                 }
             } catch (e: Exception) {
-                println("THUMBNAIL: Failed - ${e.message} (continuing without thumbnail)")
+                if (BuildConfig.DEBUG) { println("THUMBNAIL: Failed - ${e.message} (continuing without thumbnail)") }
                 ""
             }
 
@@ -357,18 +358,18 @@ class VideoCoordinator(
 
             updateProgress(1.0, "Video creation complete!")
 
-            println("🎉 VIDEO COORDINATOR: Video successfully created!")
-            println("🆔 Video ID: ${finalVideo.id}")
-            println("📹 Video URL: ${finalVideo.videoURL}")
-            println("🧵 Thread ID: ${finalVideo.threadID}")
-            println("↩️ Reply To: ${finalVideo.replyToVideoID}")
-            println("📊 Depth: ${finalVideo.conversationDepth}")
+            if (BuildConfig.DEBUG) { println("🎉 VIDEO COORDINATOR: Video successfully created!") }
+            if (BuildConfig.DEBUG) { println("🆔 Video ID: ${finalVideo.id}") }
+            if (BuildConfig.DEBUG) { println("📹 Video URL: ${finalVideo.videoURL}") }
+            if (BuildConfig.DEBUG) { println("🧵 Thread ID: ${finalVideo.threadID}") }
+            if (BuildConfig.DEBUG) { println("↩️ Reply To: ${finalVideo.replyToVideoID}") }
+            if (BuildConfig.DEBUG) { println("📊 Depth: ${finalVideo.conversationDepth}") }
             println("👥 Tagged: ${finalVideo.taggedUserIDs.size} users") // NEW
 
             return@withContext finalVideo
 
         } catch (e: Exception) {
-            println("❌ VIDEO COORDINATOR: Video creation failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ VIDEO COORDINATOR: Video creation failed - ${e.message}") }
             e.printStackTrace()
             updateProgress(0.0, "Creation failed: ${e.message}")
             throw e
@@ -388,7 +389,7 @@ class VideoCoordinator(
         return@withContext when (context) {
             // NEW THREAD: threadID = videoID (set after creation), depth = 0
             is com.stitchsocial.club.camera.RecordingContext.NewThread -> {
-                println("🧵 HIERARCHY: New thread - depth 0")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: New thread - depth 0") }
                 ThreadHierarchyData(
                     threadID = null, // Will be set to video ID after creation
                     replyToVideoID = null,
@@ -399,14 +400,14 @@ class VideoCoordinator(
 
             // STITCH TO THREAD: Child of thread (depth = 1)
             is com.stitchsocial.club.camera.RecordingContext.StitchToThread -> {
-                println("🧵 HIERARCHY: Stitch to thread ${context.threadId}")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Stitch to thread ${context.threadId}") }
 
                 // Fetch parent thread to get root threadID
                 val parentVideo = fetchParentVideo(context.threadId)
                 val rootThreadID = parentVideo.threadID ?: parentVideo.id
 
-                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
-                println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Root thread ID: $rootThreadID") }
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}") }
 
                 ThreadHierarchyData(
                     threadID = rootThreadID,
@@ -418,16 +419,16 @@ class VideoCoordinator(
 
             // REPLY TO VIDEO: Can be child (depth 1) or stepchild (depth 2)
             is com.stitchsocial.club.camera.RecordingContext.ReplyToVideo -> {
-                println("🧵 HIERARCHY: Reply to video ${context.videoId}")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Reply to video ${context.videoId}") }
 
                 // Fetch parent video to determine depth
                 val parentVideo = fetchParentVideo(context.videoId)
                 val newDepth = parentVideo.conversationDepth + 1
                 val rootThreadID = parentVideo.threadID ?: parentVideo.id
 
-                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
-                println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}")
-                println("🧵 HIERARCHY: New depth: $newDepth")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Root thread ID: $rootThreadID") }
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Parent depth: ${parentVideo.conversationDepth}") }
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: New depth: $newDepth") }
 
                 // Determine content type based on depth
                 val contentType = when (newDepth) {
@@ -446,13 +447,13 @@ class VideoCoordinator(
 
             // CONTINUE THREAD: Child of thread (depth = 1)
             is com.stitchsocial.club.camera.RecordingContext.ContinueThread -> {
-                println("🧵 HIERARCHY: Continue thread ${context.threadId}")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Continue thread ${context.threadId}") }
 
                 // Fetch parent thread
                 val parentVideo = fetchParentVideo(context.threadId)
                 val rootThreadID = parentVideo.threadID ?: parentVideo.id
 
-                println("🧵 HIERARCHY: Root thread ID: $rootThreadID")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Root thread ID: $rootThreadID") }
 
                 ThreadHierarchyData(
                     threadID = rootThreadID,
@@ -464,7 +465,7 @@ class VideoCoordinator(
 
             // SPIN-OFF: New thread responding to another video (depth = 0)
             is com.stitchsocial.club.camera.RecordingContext.SpinOffFrom -> {
-                println("🧵 HIERARCHY: Spin-off from video ${context.videoId}")
+                if (BuildConfig.DEBUG) { println("🧵 HIERARCHY: Spin-off from video ${context.videoId}") }
                 ThreadHierarchyData(
                     threadID = null, // Will be set to video ID after creation
                     replyToVideoID = null,
@@ -481,7 +482,7 @@ class VideoCoordinator(
      */
     private suspend fun fetchParentVideo(videoID: String): CoreVideoMetadata = withContext(Dispatchers.IO) {
         return@withContext try {
-            println("📥 HIERARCHY: Fetching parent video $videoID")
+            if (BuildConfig.DEBUG) { println("📥 HIERARCHY: Fetching parent video $videoID") }
 
             val doc = db.collection("videos").document(videoID).get().await()
 
@@ -497,10 +498,10 @@ class VideoCoordinator(
             val conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
             val contentTypeStr = data["contentType"] as? String ?: "thread"
 
-            println("✅ HIERARCHY: Parent video loaded")
-            println("  threadID: $threadID")
-            println("  replyToVideoID: $replyToVideoID")
-            println("  conversationDepth: $conversationDepth")
+            if (BuildConfig.DEBUG) { println("✅ HIERARCHY: Parent video loaded") }
+            if (BuildConfig.DEBUG) { println("  threadID: $threadID") }
+            if (BuildConfig.DEBUG) { println("  replyToVideoID: $replyToVideoID") }
+            if (BuildConfig.DEBUG) { println("  conversationDepth: $conversationDepth") }
 
             // Create minimal CoreVideoMetadata with hierarchy data
             CoreVideoMetadata(
@@ -539,7 +540,7 @@ class VideoCoordinator(
             )
 
         } catch (e: Exception) {
-            println("❌ HIERARCHY: Failed to fetch parent video - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ HIERARCHY: Failed to fetch parent video - ${e.message}") }
             throw e
         }
     }
@@ -548,7 +549,7 @@ class VideoCoordinator(
 
     private suspend fun extractAudio(videoPath: String): String {
         _parallelPhase.value = "Extracting audio..."
-        println("🎤 AUDIO: Starting extraction from $videoPath")
+        if (BuildConfig.DEBUG) { println("🎤 AUDIO: Starting extraction from $videoPath") }
 
         // Simulate audio extraction progress
         for (i in 1..10) {
@@ -558,27 +559,27 @@ class VideoCoordinator(
 
         // For now, just return the video path (AI will use video file)
         // In production, you'd use FFmpeg to extract actual audio
-        println("✅ AUDIO: Using video file directly for AI analysis")
+        if (BuildConfig.DEBUG) { println("✅ AUDIO: Using video file directly for AI analysis") }
         return videoPath
     }
 
     private suspend fun compressVideo(videoPath: String): String {
         _parallelPhase.value = "Compressing video..."
-        println("🗜️ COMPRESSION: Starting compression")
+        if (BuildConfig.DEBUG) { println("🗜️ COMPRESSION: Starting compression") }
 
         for (i in 1..10) {
             delay(150)
             _compressionProgress.value = i / 10.0
         }
 
-        println("✅ COMPRESSION: Compression complete")
+        if (BuildConfig.DEBUG) { println("✅ COMPRESSION: Compression complete") }
         return videoPath
     }
 
     private suspend fun analyzeWithAI(videoPath: String): VideoAnalysisResult = withContext(Dispatchers.IO) {
         _parallelPhase.value = "Analyzing with AI..."
-        println("🤖 AI: Starting analysis")
-        println("🤖 AI: Video path: $videoPath")
+        if (BuildConfig.DEBUG) { println("🤖 AI: Starting analysis") }
+        if (BuildConfig.DEBUG) { println("🤖 AI: Video path: $videoPath") }
 
         // Print config status
         AppConfig.printConfigurationStatus()
@@ -586,10 +587,10 @@ class VideoCoordinator(
         return@withContext try {
             // Try to use real AI analyzer if available
             val isAvailable = aiAnalyzer.isAIAvailable()
-            println("🤖 AI: isAIAvailable = $isAvailable")
+            if (BuildConfig.DEBUG) { println("🤖 AI: isAIAvailable = $isAvailable") }
 
             if (isAvailable) {
-                println("🤖 AI: AIVideoAnalyzer is available, attempting analysis")
+                if (BuildConfig.DEBUG) { println("🤖 AI: AIVideoAnalyzer is available, attempting analysis") }
 
                 // Get the recording context
                 val recordingContext = _lastRecordingContext.value
@@ -609,27 +610,27 @@ class VideoCoordinator(
                     delay(500)
                     progress += 0.1
                     _aiAnalysisProgress.value = progress
-                    println("🤖 AI: Progress ${(progress * 100).toInt()}%")
+                    if (BuildConfig.DEBUG) { println("🤖 AI: Progress ${(progress * 100).toInt()}%") }
                 }
 
                 val aiResult = aiJob.await()
                 _aiAnalysisProgress.value = 1.0
 
                 if (aiResult != null) {
-                    println("✅ AI: Real analysis complete - title: '${aiResult.title}'")
-                    println("✅ AI: description: '${aiResult.description}'")
-                    println("✅ AI: hashtags: ${aiResult.hashtags}")
+                    if (BuildConfig.DEBUG) { println("✅ AI: Real analysis complete - title: '${aiResult.title}'") }
+                    if (BuildConfig.DEBUG) { println("✅ AI: description: '${aiResult.description}'") }
+                    if (BuildConfig.DEBUG) { println("✅ AI: hashtags: ${aiResult.hashtags}") }
                     aiResult  // Return directly - already correct type
                 } else {
-                    println("⚠️ AI: Returned null, using fallback")
+                    if (BuildConfig.DEBUG) { println("⚠️ AI: Returned null, using fallback") }
                     generateFallbackAI()
                 }
             } else {
-                println("⚠️ AI: Not available (check AppConfig.enableAIAnalysis and API key)")
+                if (BuildConfig.DEBUG) { println("⚠️ AI: Not available (check AppConfig.enableAIAnalysis and API key)") }
                 generateFallbackAI()
             }
         } catch (e: Exception) {
-            println("❌ AI: Error - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ AI: Error - ${e.message}") }
             e.printStackTrace()
             generateFallbackAI()
         }
@@ -644,7 +645,7 @@ class VideoCoordinator(
 
         // Return BLANK fields - user will fill in manually
         // This matches iOS behavior when AI is not available
-        println("⚠️ FALLBACK: Returning blank fields for manual entry")
+        if (BuildConfig.DEBUG) { println("⚠️ FALLBACK: Returning blank fields for manual entry") }
         return VideoAnalysisResult(
             title = "",  // Blank - user enters manually
             description = "",  // Blank - user enters manually
@@ -709,11 +710,11 @@ class VideoCoordinator(
             chosen.recycle()
 
             val data = outputStream.toByteArray()
-            println("THUMBNAIL: Generated ${data.size} bytes from $videoPath (brightness=${"%.1f".format(bestBrightness)})")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Generated ${data.size} bytes from $videoPath (brightness=${"%.1f".format(bestBrightness)})") }
             data
 
         } catch (e: Exception) {
-            println("THUMBNAIL: Generation failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Generation failed - ${e.message}") }
             null
         } finally {
             retriever.release()
@@ -774,10 +775,10 @@ class VideoCoordinator(
         try {
             storageRef.putBytes(thumbnailData, metadata).await()
             val downloadUrl = storageRef.downloadUrl.await()
-            println("THUMBNAIL: Uploaded to ${downloadUrl}")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Uploaded to ${downloadUrl}") }
             downloadUrl.toString()
         } catch (e: Exception) {
-            println("THUMBNAIL: Upload failed - ${e.message}")
+            if (BuildConfig.DEBUG) { println("THUMBNAIL: Upload failed - ${e.message}") }
             throw e
         }
     }
@@ -794,15 +795,15 @@ class VideoCoordinator(
         val storageRef = storage.reference.child(fileName)
 
         return try {
-            println("📤 Uploading video to Firebase Storage...")
+            if (BuildConfig.DEBUG) { println("📤 Uploading video to Firebase Storage...") }
             val uri = Uri.fromFile(videoFile)
             val uploadTask = storageRef.putFile(uri).await()
             val downloadUrl = storageRef.downloadUrl.await()
 
-            println("✅ Video uploaded successfully")
+            if (BuildConfig.DEBUG) { println("✅ Video uploaded successfully") }
             downloadUrl.toString()
         } catch (e: Exception) {
-            println("❌ Video upload failed: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ Video upload failed: ${e.message}") }
             throw e
         }
     }
@@ -834,7 +835,7 @@ class VideoCoordinator(
             creatorUsername   = userDoc.getString("username")
             creatorDisplayName = userDoc.getString("displayName")
         } catch (e: Exception) {
-            println("⚠️ DATABASE: Could not load user doc for $creatorID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("⚠️ DATABASE: Could not load user doc for $creatorID: ${e.message}") }
         }
         val resolvedCreatorName = creatorUsername
             ?: creatorDisplayName
@@ -884,7 +885,7 @@ class VideoCoordinator(
         )
 
         return try {
-            println("💾 DATABASE: Adding document to 'videos' collection...")
+            if (BuildConfig.DEBUG) { println("💾 DATABASE: Adding document to 'videos' collection...") }
             println("👥 DATABASE: Tagged users: ${taggedUserIDs.size}") // NEW: Log tagged users
 
             val documentRef = db.collection("videos").add(documentData).await()
@@ -892,14 +893,14 @@ class VideoCoordinator(
 
             // ✅ CRITICAL: For new threads, update threadID to match video ID
             if (metadata.contentType == ContentType.THREAD && metadata.threadID == null) {
-                println("🧵 DATABASE: Updating threadID to match video ID for new thread")
+                if (BuildConfig.DEBUG) { println("🧵 DATABASE: Updating threadID to match video ID for new thread") }
                 documentRef.update("threadID", videoId).await()
                 finalThreadID = videoId
             }
 
-            println("✅ DATABASE: Document created successfully!")
-            println("🆔 DATABASE: New video ID: $videoId")
-            println("🧵 DATABASE: Final thread ID: $finalThreadID")
+            if (BuildConfig.DEBUG) { println("✅ DATABASE: Document created successfully!") }
+            if (BuildConfig.DEBUG) { println("🆔 DATABASE: New video ID: $videoId") }
+            if (BuildConfig.DEBUG) { println("🧵 DATABASE: Final thread ID: $finalThreadID") }
             println("👥 DATABASE: Tagged users saved: ${taggedUserIDs.size}") // NEW
 
             metadata.copy(
@@ -911,7 +912,7 @@ class VideoCoordinator(
             )
 
         } catch (e: Exception) {
-            println("❌ DATABASE: Failed to create document - ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ DATABASE: Failed to create document - ${e.message}") }
             throw e
         }
     }
@@ -926,7 +927,7 @@ class VideoCoordinator(
         if (videoFile.length() == 0L) {
             throw IllegalArgumentException("Video file is empty: $videoPath")
         }
-        println("✅ Video file validation passed: ${videoFile.length()} bytes")
+        if (BuildConfig.DEBUG) { println("✅ Video file validation passed: ${videoFile.length()} bytes") }
     }
 
     private fun updateProgress(progress: Double, phase: String) {
@@ -936,7 +937,7 @@ class VideoCoordinator(
         _currentPhase.value = phase
         _currentTask.value = phase
 
-        println("📊 PROGRESS: ${(progress * 100).toInt()}% - $phase")
+        if (BuildConfig.DEBUG) { println("📊 PROGRESS: ${(progress * 100).toInt()}% - $phase") }
     }
 
     // MARK: - Cleanup

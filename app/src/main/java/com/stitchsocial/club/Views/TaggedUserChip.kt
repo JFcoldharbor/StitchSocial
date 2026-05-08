@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Loads a user by ID from Firebase and renders the appropriate chip state.
@@ -68,7 +69,7 @@ fun TaggedUserChipById(
                 hasError = true
             }
         } catch (e: Exception) {
-            println("❌ TAGGED CHIP: Failed to load user $userID: ${e.message}")
+            if (BuildConfig.DEBUG) { println("❌ TAGGED CHIP: Failed to load user $userID: ${e.message}") }
             hasError = true
         } finally {
             isLoading = false

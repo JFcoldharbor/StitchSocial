@@ -60,6 +60,7 @@ import java.util.concurrent.Executors
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.viewmodels.CameraViewModel
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Complete Camera recording interface with VideoCoordinator pipeline integration
@@ -82,7 +83,7 @@ fun CameraView(
 ) {
     // Instance tracking for debugging
     val instanceId = remember { System.currentTimeMillis() }
-    println("📷 CAMERA INSTANCE $instanceId: CameraView composing - context=$recordingContext")
+    if (BuildConfig.DEBUG) { println("📷 CAMERA INSTANCE $instanceId: CameraView composing - context=$recordingContext") }
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -113,14 +114,14 @@ fun CameraView(
     // Initialize tier limits on user tier change
     LaunchedEffect(userTier) {
         viewModel.updateRecordingLimits(userTier)
-        println("CAMERA: Updated recording limits for tier: ${userTier.displayName}")
+        if (BuildConfig.DEBUG) { println("CAMERA: Updated recording limits for tier: ${userTier.displayName}") }
     }
 
     // Stop and dispose all background videos when camera opens
     LaunchedEffect(Unit) {
         onStopAllVideos()
         onDisposeAllVideos()
-        println("CAMERA: Stopped and disposed all background videos")
+        if (BuildConfig.DEBUG) { println("CAMERA: Stopped and disposed all background videos") }
     }
 
     // Camera permission launcher
@@ -157,7 +158,7 @@ fun CameraView(
 
                 // Auto-stop when tier limit reached (unless unlimited)
                 if (viewModel.shouldAutoStop()) {
-                    println("CAMERA: Auto-stopping recording at tier limit (${maxRecordingDuration}s)")
+                    if (BuildConfig.DEBUG) { println("CAMERA: Auto-stopping recording at tier limit (${maxRecordingDuration}s)") }
                     recording?.stop()
                     isRecording = false
                     break
@@ -180,7 +181,7 @@ fun CameraView(
         }
         isUsingFrontCamera = !isUsingFrontCamera
 
-        println("CAMERA: Flipped to ${if (isUsingFrontCamera) "front" else "back"} camera")
+        if (BuildConfig.DEBUG) { println("CAMERA: Flipped to ${if (isUsingFrontCamera) "front" else "back"} camera") }
 
         // Rebind camera with new selector
         cameraProvider?.let { provider ->
@@ -192,9 +193,9 @@ fun CameraView(
                     preview,
                     videoCapture
                 )
-                println("CAMERA: Camera rebound successfully")
+                if (BuildConfig.DEBUG) { println("CAMERA: Camera rebound successfully") }
             } catch (exc: Exception) {
-                println("CAMERA: Camera flip failed - ${exc.message}")
+                if (BuildConfig.DEBUG) { println("CAMERA: Camera flip failed - ${exc.message}") }
             }
         }
     }
@@ -202,7 +203,7 @@ fun CameraView(
     // ===== GALLERY PICKER HANDLER (FIXED) =====
 
     val handleGalleryRequest: () -> Unit = {
-        println("CAMERA: Gallery button pressed - closing camera and triggering gallery picker")
+        if (BuildConfig.DEBUG) { println("CAMERA: Gallery button pressed - closing camera and triggering gallery picker") }
         onCancel() // Close camera first
         onGalleryRequested() // Trigger NavigationCoordinator gallery flow
     }
@@ -211,12 +212,12 @@ fun CameraView(
 
     // Start recording function with proper file management
     val startRecording: () -> Unit = {
-        println("🎬 CAMERA: Start recording pressed!")
+        if (BuildConfig.DEBUG) { println("🎬 CAMERA: Start recording pressed!") }
         videoCapture?.let { capture ->
             val timestamp = System.currentTimeMillis()
             val videoFile = File(context.cacheDir, "STITCH_${timestamp}.mp4")
             currentVideoFile = videoFile
-            println("🎬 CAMERA: Video file will be: ${videoFile.absolutePath}")
+            if (BuildConfig.DEBUG) { println("🎬 CAMERA: Video file will be: ${videoFile.absolutePath}") }
 
             val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
@@ -226,16 +227,16 @@ fun CameraView(
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
-                            println("🎬 CAMERA: Recording STARTED - ${videoFile.name}")
+                            if (BuildConfig.DEBUG) { println("🎬 CAMERA: Recording STARTED - ${videoFile.name}") }
                         }
                         is VideoRecordEvent.Finalize -> {
-                            println("🎬 CAMERA INSTANCE $instanceId FINALIZE: Event received!")
-                            println("🎬 CAMERA FINALIZE: hasError = ${event.hasError()}")
+                            if (BuildConfig.DEBUG) { println("🎬 CAMERA INSTANCE $instanceId FINALIZE: Event received!") }
+                            if (BuildConfig.DEBUG) { println("🎬 CAMERA FINALIZE: hasError = ${event.hasError()}") }
                             if (!event.hasError()) {
-                                println("🎬 CAMERA: Recording completed successfully")
-                                println("🎬 CAMERA: File: ${videoFile.absolutePath}")
-                                println("🎬 CAMERA: Size: ${videoFile.length() / 1024}KB")
-                                println("🎬 CAMERA: Duration: ${recordingDuration}s")
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA: Recording completed successfully") }
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA: File: ${videoFile.absolutePath}") }
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA: Size: ${videoFile.length() / 1024}KB") }
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA: Duration: ${recordingDuration}s") }
 
                                 val recordedVideoData = createCompleteRecordedVideoData(
                                     recordingContext = recordingContext,
@@ -244,12 +245,12 @@ fun CameraView(
                                     duration = recordingDuration
                                 )
 
-                                println("🎬 CAMERA INSTANCE $instanceId: Calling onVideoRecorded callback NOW! [MODAL_CAMERAVIEW]")
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA INSTANCE $instanceId: Calling onVideoRecorded callback NOW! [MODAL_CAMERAVIEW]") }
                                 onVideoRecorded(recordedVideoData)
-                                println("🎬 CAMERA INSTANCE $instanceId: onVideoRecorded callback RETURNED! [MODAL_CAMERAVIEW]")
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA INSTANCE $instanceId: onVideoRecorded callback RETURNED! [MODAL_CAMERAVIEW]") }
 
                             } else {
-                                println("🎬 CAMERA: Recording failed - ${event.error}")
+                                if (BuildConfig.DEBUG) { println("🎬 CAMERA: Recording failed - ${event.error}") }
                                 videoFile.delete()
                             }
                             recording = null
@@ -260,25 +261,25 @@ fun CameraView(
 
             isRecording = true
             viewModel.startRecording()
-            println("🎬 CAMERA: Recording initiated successfully")
+            if (BuildConfig.DEBUG) { println("🎬 CAMERA: Recording initiated successfully") }
         } ?: run {
-            println("❌ CAMERA: videoCapture is NULL - cannot start recording!")
+            if (BuildConfig.DEBUG) { println("❌ CAMERA: videoCapture is NULL - cannot start recording!") }
         }
     }
 
     // Stop recording function
     val stopRecording: () -> Unit = {
-        println("🛑 CAMERA: Stop button pressed!")
-        println("🛑 CAMERA: recording = $recording")
+        if (BuildConfig.DEBUG) { println("🛑 CAMERA: Stop button pressed!") }
+        if (BuildConfig.DEBUG) { println("🛑 CAMERA: recording = $recording") }
         recording?.stop()
         isRecording = false
         viewModel.stopRecording()
-        println("🛑 CAMERA: Recording stop called, waiting for Finalize event...")
+        if (BuildConfig.DEBUG) { println("🛑 CAMERA: Recording stop called, waiting for Finalize event...") }
     }
 
     // Cancel recording function with cleanup
     val cancelRecording: () -> Unit = {
-        println("❌ CAMERA: CANCEL button pressed (X button)!")
+        if (BuildConfig.DEBUG) { println("❌ CAMERA: CANCEL button pressed (X button)!") }
         recording?.stop()
         isRecording = false
         viewModel.stopRecording()
@@ -286,12 +287,12 @@ fun CameraView(
         currentVideoFile?.let { file ->
             if (file.exists()) {
                 file.delete()
-                println("❌ CAMERA: Cancelled recording file deleted")
+                if (BuildConfig.DEBUG) { println("❌ CAMERA: Cancelled recording file deleted") }
             }
         }
         currentVideoFile = null
 
-        println("❌ CAMERA: Camera cancelled - calling onCancel()")
+        if (BuildConfig.DEBUG) { println("❌ CAMERA: Camera cancelled - calling onCancel()") }
         onCancel()
     }
 
@@ -340,10 +341,10 @@ fun CameraView(
                                     newVideoCapture
                                 )
 
-                                println("CAMERA: Camera initialized successfully (Samsung optimized)")
+                                if (BuildConfig.DEBUG) { println("CAMERA: Camera initialized successfully (Samsung optimized)") }
 
                             } catch (exc: Exception) {
-                                println("CAMERA: Camera initialization failed - ${exc.message}")
+                                if (BuildConfig.DEBUG) { println("CAMERA: Camera initialization failed - ${exc.message}") }
                             }
 
                         }, ContextCompat.getMainExecutor(ctx))
@@ -437,15 +438,15 @@ fun CameraView(
     // ✅ FIXED: Proper cleanup on dispose - UNBINDS CAMERA to remove recording indicator
     DisposableEffect(Unit) {
         onDispose {
-            println("📷 CAMERA CLEANUP: DisposableEffect onDispose triggered")
+            if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: DisposableEffect onDispose triggered") }
 
             // 1. Stop any active recording first
             recording?.let { activeRecording ->
-                println("📷 CAMERA CLEANUP: Stopping active recording...")
+                if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: Stopping active recording...") }
                 try {
                     activeRecording.stop()
                 } catch (e: Exception) {
-                    println("📷 CAMERA CLEANUP: Error stopping recording - ${e.message}")
+                    if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: Error stopping recording - ${e.message}") }
                 }
             }
             recording = null
@@ -454,7 +455,7 @@ fun CameraView(
             currentVideoFile?.let { file ->
                 if (file.exists()) {
                     file.delete()
-                    println("📷 CAMERA CLEANUP: Deleted temp file")
+                    if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: Deleted temp file") }
                 }
             }
             currentVideoFile = null
@@ -462,12 +463,12 @@ fun CameraView(
             // 3. ✅ CRITICAL: Unbind camera to release camera/microphone resources
             // This is what removes the green recording indicator!
             cameraProvider?.let { provider ->
-                println("📷 CAMERA CLEANUP: Unbinding all camera use cases...")
+                if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: Unbinding all camera use cases...") }
                 try {
                     provider.unbindAll()
-                    println("📷 CAMERA CLEANUP: ✅ Camera unbound successfully - indicator should disappear")
+                    if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: ✅ Camera unbound successfully - indicator should disappear") }
                 } catch (e: Exception) {
-                    println("📷 CAMERA CLEANUP: Error unbinding camera - ${e.message}")
+                    if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: Error unbinding camera - ${e.message}") }
                 }
             }
 
@@ -479,7 +480,7 @@ fun CameraView(
             // 5. Shutdown executor
             cameraExecutor.shutdown()
 
-            println("📷 CAMERA CLEANUP: ✅ Complete - all resources released")
+            if (BuildConfig.DEBUG) { println("📷 CAMERA CLEANUP: ✅ Complete - all resources released") }
         }
     }
 }
@@ -495,12 +496,12 @@ private fun createCompleteRecordedVideoData(
     val timestamp = System.currentTimeMillis()
     val videoId = "recorded_${timestamp}"
 
-    println("CAMERA: Creating video data:")
-    println("  - Context: $recordingContext")
-    println("  - Parent: ${parentVideo?.title ?: "None"}")
-    println("  - File: ${videoFile.absolutePath}")
-    println("  - Duration: ${duration}s")
-    println("  - Size: ${videoFile.length()}bytes")
+    if (BuildConfig.DEBUG) { println("CAMERA: Creating video data:") }
+    if (BuildConfig.DEBUG) { println("  - Context: $recordingContext") }
+    if (BuildConfig.DEBUG) { println("  - Parent: ${parentVideo?.title ?: "None"}") }
+    if (BuildConfig.DEBUG) { println("  - File: ${videoFile.absolutePath}") }
+    if (BuildConfig.DEBUG) { println("  - Duration: ${duration}s") }
+    if (BuildConfig.DEBUG) { println("  - Size: ${videoFile.length()}bytes") }
 
     return when (recordingContext) {
         RecordingContext.NewThread -> {

@@ -14,6 +14,7 @@ package com.stitchsocial.club.foundation
 import com.google.firebase.Timestamp
 import java.util.Date
 import java.util.concurrent.TimeUnit
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Represents a recently joined user for the "Just Joined" discovery section
@@ -70,7 +71,7 @@ data class RecentUser(
                     isVerified = isVerified
                 )
             } catch (e: Exception) {
-                println("❌ RecentUser.fromFirestore failed for $id: ${e.message}")
+                if (BuildConfig.DEBUG) { println("❌ RecentUser.fromFirestore failed for $id: ${e.message}") }
                 null
             }
         }
