@@ -314,6 +314,12 @@ class SearchService {
     private fun processVideoDocs(docs: List<DocumentSnapshot>): List<CoreVideoMetadata> {
         return docs.mapNotNull { doc ->
             val data = doc.data ?: return@mapNotNull null
+
+            // Skip videos hidden by moderation (Rekognition flagged/blocked).
+            // Default to "public" for legacy docs without the field.
+            val publicVisibility = data["publicVisibility"] as? String ?: "public"
+            if (publicVisibility != "public") return@mapNotNull null
+
             try {
                 val temperature = try { Temperature.valueOf((data["temperature"] as? String ?: "WARM").uppercase()) }
                 catch (e: Exception) { Temperature.WARM }

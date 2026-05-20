@@ -186,6 +186,12 @@ sealed class OverlayAction {
     data class Engagement(val type: EngagementType) : OverlayAction()
     object Share : OverlayAction()
     object StitchRecording : OverlayAction()
+    /**
+     * User-initiated report. Target is either a video or a user — see
+     * ReportSheet's REPORT_TARGET_TYPES set. Wired to the submitReport
+     * Cloud Function via ReportService.submitReport().
+     */
+    data class Report(val targetID: String, val targetType: String = "video") : OverlayAction()
 }
 
 // MARK: - Static User Cache

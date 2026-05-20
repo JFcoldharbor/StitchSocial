@@ -526,6 +526,7 @@ private fun createCompleteRecordedVideoData(
                 creatorName = "Current User",
                 parentThreadID = parentVideo?.id ?: "unknown_thread",
                 duration = duration.toDouble(),
+
                 fileSize = videoFile.length()
             )
         }

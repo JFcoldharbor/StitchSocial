@@ -60,6 +60,12 @@ fun ProfileVideoGrid(
     isLoading: Boolean = false,
     isCurrentUserProfile: Boolean = false,
     pinnedVideoIDs: Set<String> = emptySet(),
+    /**
+     * Video IDs hidden from public surfaces by Rekognition moderation
+     * (publicVisibility != "public"). Used only on the owner's profile to
+     * render the "Under review" banner. Always empty when viewing others.
+     */
+    moderationHiddenVideoIDs: Set<String> = emptySet(),
     onVideoTap: (BasicVideoInfo, Int, List<BasicVideoInfo>) -> Unit = { _, _, _ -> },
     onVideoDelete: ((BasicVideoInfo) -> Unit)? = null
 ) {
@@ -107,6 +113,7 @@ fun ProfileVideoGrid(
                                 index = videoIndex,
                                 isCurrentUserProfile = isCurrentUserProfile,
                                 isPinned = pinnedVideoIDs.contains(video.id),
+                                isModerationHidden = moderationHiddenVideoIDs.contains(video.id),
                                 onVideoTap = {
                                     if (BuildConfig.DEBUG) { println("🔹 PROFILE GRID: Video tapped - ${video.title}") }
                                     onVideoTap(video, videoIndex, videos)
@@ -146,6 +153,7 @@ private fun VideoGridItem(
     index: Int,
     isCurrentUserProfile: Boolean,
     isPinned: Boolean = false,
+    isModerationHidden: Boolean = false,
     onVideoTap: () -> Unit,
     onVideoDelete: ((BasicVideoInfo) -> Unit)?,
     modifier: Modifier = Modifier
@@ -189,6 +197,36 @@ private fun VideoGridItem(
             video = video,
             onTap = onVideoTap
         )
+
+        // "Under review" banner — owner-only, shown when Rekognition has
+        // hidden this video from public surfaces (publicVisibility != "public").
+        if (isCurrentUserProfile && isModerationHidden) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .background(
+                        Color(0xFFFF9500),
+                        androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.VisibilityOff,
+                    contentDescription = "Under review",
+                    tint = Color.White,
+                    modifier = Modifier.size(9.dp)
+                )
+                Text(
+                    text = "Under review",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
         // Pinned badge — small gold pin in the top-right (iOS parity)
         if (isPinned) {

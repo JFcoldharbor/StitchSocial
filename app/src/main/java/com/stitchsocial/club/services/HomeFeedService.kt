@@ -184,6 +184,10 @@ class HomeFeedService(
                 if (excludeVideoIDs.contains(videoID)) continue
                 if (currentFeedVideoIDs.contains(videoID)) continue
 
+                // Skip videos hidden by moderation (Rekognition flagged/blocked).
+                val publicVisibility = document.getString("publicVisibility") ?: "public"
+                if (publicVisibility != "public") continue
+
                 val thread = createThreadFromDocument(document)
                 if (thread != null) {
                     threads.add(thread)
@@ -409,6 +413,10 @@ class HomeFeedService(
                 .await()
 
             val children = snapshot.documents.mapNotNull { doc ->
+                // Skip moderation-hidden replies on public surfaces.
+                val publicVisibility = doc.getString("publicVisibility") ?: "public"
+                if (publicVisibility != "public") return@mapNotNull null
+
                 val thread = createThreadFromDocument(doc)
                 thread?.parentVideo // Reuse the same parser, extract video
             }

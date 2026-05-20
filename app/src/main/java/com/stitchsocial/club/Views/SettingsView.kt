@@ -136,6 +136,7 @@ fun SettingsView(
     var showFriendSuggestions by remember { mutableStateOf(false) }
     var showBusinessAnalytics by remember { mutableStateOf(false) }
     var showBusinessCampaigns by remember { mutableStateOf(false) }
+    var showMarketplace by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showBadgePage by remember { mutableStateOf(false) }
     var showReferralDashboard by remember { mutableStateOf(false) }
@@ -222,6 +223,7 @@ fun SettingsView(
                         SSection("BUSINESS", Icons.Default.Business, Color(0xFF64D2FF)) {
                             SNavRow(Icons.Default.BarChart, Color.Cyan, "Analytics", "Impressions, reach & performance") { showBusinessAnalytics = true }
                             SNavRow(Icons.Default.Campaign, Color(0xFFFF9F0A), "My Campaigns", "Create & manage ad campaigns") { showBusinessCampaigns = true }
+                            SNavRow(Icons.Default.Groups, Color(0xFFFF2D87), "Creator Marketplace", "Post briefs, review applicants, pay creators") { showMarketplace = true }
                             SNavRow(Icons.Default.CreditCard, Color(0xFFFFD60A), "Ad Spend", "Budget & billing overview") { showBusinessAnalytics = true }
                             SNavRow(Icons.Default.Edit, Color(0xFFBF5AF2), "Edit Business Profile", "Brand name, category & website") { showManageAccount = true }
                             // Quick Stats 2×2 grid (matches iOS businessSection)
@@ -243,6 +245,7 @@ fun SettingsView(
                     item {
                         SSection("CREATOR", Icons.Default.Star, Color(0xFFBF5AF2)) {
                             SNavRow(Icons.Default.AttachMoney, Color(0xFF30D158), "Ad Opportunities", "Brand partnerships") { showAdOpportunities = true }
+                            SNavRow(Icons.Default.Groups, Color(0xFFFF2D87), "Brand Marketplace", "Apply to paid creator briefs") { showMarketplace = true }
                             SNavRow(Icons.Default.Group, Color(0xFFFF2D55), "My Subscribers", "People subscribed to you") { showMySubscribers = true }
                             SNavRow(Icons.Default.Settings, Color(0xFFFF9F0A), "Subscription Settings", "Set price & manage subscribers") { showSubscriptionSettings = true }
                             SNavRow(Icons.Default.Forum, Color.Cyan, "My Community", "Create & manage your community") { showCommunitySettings = true }
@@ -425,6 +428,18 @@ fun SettingsView(
         if (showAdOpportunities) {
             Box(Modifier.fillMaxSize().zIndex(10f)) {
                 AdOpportunitiesView(user = liveUser, onDismiss = { showAdOpportunities = false })
+            }
+        }
+
+        if (showMarketplace) {
+            Box(Modifier.fillMaxSize().zIndex(10f)) {
+                CreatorCampaignsHubView(
+                    currentUserID = liveUser.id,
+                    isBrandAccount = isBusiness,
+                    brandName = liveUser.displayName.ifBlank { liveUser.username },
+                    brandLogoURL = null,
+                    onDismiss = { showMarketplace = false }
+                )
             }
         }
 

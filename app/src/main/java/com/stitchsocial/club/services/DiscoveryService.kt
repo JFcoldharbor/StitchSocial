@@ -147,6 +147,12 @@ class DiscoveryService(private val context: Context) {
                     // Skip deleted videos
                     if (isDeleted) return@mapNotNull null
 
+                    // Skip videos hidden by moderation (AWS Rekognition flagged/blocked).
+                    // Server-side moderateNewVideo writes publicVisibility on every new video;
+                    // older docs default to "public" so they continue to surface.
+                    val publicVisibility = data["publicVisibility"] as? String ?: "public"
+                    if (publicVisibility != "public") return@mapNotNull null
+
                     val video = LeaderboardVideo(
                         id = doc.id,
                         title = title,
