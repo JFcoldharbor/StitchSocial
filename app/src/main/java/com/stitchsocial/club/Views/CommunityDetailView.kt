@@ -101,7 +101,68 @@ fun CommunityDetailView(
     var showingHighlight by remember { mutableStateOf(false) }
     var leaderboardSort by remember { mutableStateOf(LeaderboardSort.LEVEL) }
 
+    // Live stream state — mirrored from a snapshot listener on the community
+    // doc so the WATCH pill updates in real time as the creator goes on/off.
+    var isCreatorLiveRealtime by remember { mutableStateOf(communityItem.isCreatorLive) }
+    var liveStreamID by remember { mutableStateOf<String?>(null) }
+    var showingLiveStream by remember { mutableStateOf(false) }
+    var showingGoLive by remember { mutableStateOf(false) }
+
     val isCreator = userID == communityID
+
+    // Initial ghost-recovery check — runs ONCE on community open. Both
+    // creator + non-creator paths verify the stream doc actually exists +
+    // is LIVE before trusting the community doc's `isCreatorLive` flag.
+    //
+    // CRITICAL: this used to fire on every listener tick which meant the
+    // moment a creator tapped Go Live, the listener fired with
+    // isCreatorLive=true and the recovery promptly force-ended the freshly-
+    // started stream. Now it's mount-only + verified against the stream doc.
+    LaunchedEffect(communityID) {
+        val docSnap = runCatching {
+            db.collection("communities").document(communityID).get().await()
+        }.getOrNull() ?: return@LaunchedEffect
+        val data = docSnap.data ?: return@LaunchedEffect
+        val flaggedLive = data["isCreatorLive"] as? Boolean ?: false
+        val flaggedStreamID = data["activeStreamID"] as? String
+
+        if (!flaggedLive) return@LaunchedEffect
+
+        // Verify the actual stream doc is LIVE before trusting the flag.
+        val verified = com.stitchsocial.club.live.LiveStreamService
+            .getInstance().fetchActiveStream(creatorID = communityID)
+
+        if (verified != null && verified.id == flaggedStreamID) {
+            // Real session — leave it.
+            return@LaunchedEffect
+        }
+
+        if (BuildConfig.DEBUG) {
+            println("🧹 GHOST: $communityID flagged live but no LIVE stream doc found")
+        }
+        if (isCreator) {
+            // I'm the creator → I have write perms, clean up the doc.
+            com.stitchsocial.club.live.LiveStreamService.getInstance()
+                .forceEndStream(creatorID = communityID)
+        }
+        // Either way, suppress the WATCH pill locally for this session.
+        isCreatorLiveRealtime = false
+        liveStreamID = null
+    }
+
+    // Live-state listener — passive UI sync only. No ghost recovery here;
+    // that runs once in the LaunchedEffect above. Listener just keeps
+    // `isCreatorLiveRealtime` and `liveStreamID` in sync with Firestore so
+    // the WATCH pill reflects reality in real time as the creator goes on/off.
+    DisposableEffect(communityID) {
+        val listener = db.collection("communities").document(communityID)
+            .addSnapshotListener { snap, _ ->
+                val data = snap?.data ?: return@addSnapshotListener
+                isCreatorLiveRealtime = data["isCreatorLive"] as? Boolean ?: false
+                liveStreamID = data["activeStreamID"] as? String
+            }
+        onDispose { listener.remove() }
+    }
 
     // Load data — single batch: membership + top members + posts
     LaunchedEffect(communityID) {
@@ -186,7 +247,15 @@ fun CommunityDetailView(
                 }
 
                 // 5. Live Now Banner
-                item { LiveNowCard(communityItem = communityItem) }
+                item {
+                    LiveNowCard(
+                        creatorDisplayName = communityItem.creatorDisplayName,
+                        isCreatorLive = isCreatorLiveRealtime,
+                        onJoin = {
+                            if (liveStreamID != null) showingLiveStream = true
+                        },
+                    )
+                }
 
                 // 6. Super Hype + Badge Holders
                 item {
@@ -258,7 +327,7 @@ fun CommunityDetailView(
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isCreator) {
                     FloatingActionButton(
-                        onClick = { /* TODO: showingGoLive = true */ },
+                        onClick = { showingGoLive = true },
                         containerColor = accentOrange,
                         shape = CircleShape,
                         modifier = Modifier.size(48.dp)
@@ -275,6 +344,30 @@ fun CommunityDetailView(
                     Icon(Icons.Default.Edit, contentDescription = "Post", tint = Color.Black, modifier = Modifier.size(24.dp))
                 }
             }
+        }
+
+        // Live stream viewer — fullscreen overlay when the user taps WATCH
+        // on the LiveNow card. Identity comes from local membership so we
+        // don't need a separate user-doc fetch.
+        if (showingLiveStream && liveStreamID != null) {
+            LiveStreamViewerHost(
+                userID = userID,
+                communityID = communityID,
+                streamID = liveStreamID!!,
+                membership = membership,
+                onDismiss = { showingLiveStream = false },
+            )
+        }
+
+        // Creator broadcaster — fullscreen overlay when the creator taps Go
+        // Live FAB. Hosts the Agora broadcaster + camera preview.
+        if (showingGoLive && isCreator) {
+            com.stitchsocial.club.live.LiveStreamCreatorScreen(
+                creatorID = communityID,
+                creatorUsername = membership?.username ?: communityItem.creatorUsername,
+                creatorDisplayName = membership?.displayName ?: communityItem.creatorDisplayName,
+                onDismiss = { showingGoLive = false },
+            )
         }
     }
 
@@ -347,7 +440,7 @@ fun CommunityDetailView(
 // MARK: - Card 1: Creator Header
 
 @Composable
-private fun CreatorHeaderCard(
+internal fun CreatorHeaderCard(
     communityItem: CommunityListItem,
     memberCount: Int,
     isCreator: Boolean,
@@ -549,7 +642,11 @@ private fun TopSupportersCard(topMembers: List<CommunityMembership>, modifier: M
 
 // MARK: - Card 5: Live Now Banner
 @Composable
-private fun LiveNowCard(communityItem: CommunityListItem) {
+private fun LiveNowCard(
+    creatorDisplayName: String,
+    isCreatorLive: Boolean,
+    onJoin: () -> Unit,
+) {
     ModuleCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         gradient = listOf(accentPurple.copy(0.15f), accentCyan.copy(0.08f))
@@ -562,14 +659,18 @@ private fun LiveNowCard(communityItem: CommunityListItem) {
                 Column {
                     Text("Stream Hub", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = textPrimary)
                     Text(
-                        if (communityItem.isCreatorLive) "Creator is live now!" else "No active streams",
+                        if (isCreatorLive) "${creatorDisplayName.ifBlank { "Creator" }} is live now!" else "No active streams",
                         fontSize = 11.sp,
-                        color = if (communityItem.isCreatorLive) accentOrange else textMuted
+                        color = if (isCreatorLive) accentOrange else textMuted
                     )
                 }
             }
-            if (communityItem.isCreatorLive) {
-                Surface(shape = RoundedCornerShape(10.dp), color = accentOrange) {
+            if (isCreatorLive) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = accentOrange,
+                    modifier = Modifier.clickable { onJoin() },
+                ) {
                     Text("WATCH", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
                 }
@@ -626,7 +727,7 @@ private fun BadgeHoldersCard(topMembers: List<CommunityMembership>, modifier: Mo
 
 // MARK: - Post Card
 @Composable
-private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit, onTap: () -> Unit) {
+internal fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit, onTap: () -> Unit) {
     ModuleCard(modifier = modifier.clickable { onTap() }) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             MemberAvatar(name = post.authorDisplayName, size = 32)
@@ -645,8 +746,66 @@ private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit
             if (post.isPinned) Text("📌", fontSize = 14.sp)
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(post.body, fontSize = 13.sp, color = textSecondary, lineHeight = 19.sp)
-        Spacer(modifier = Modifier.height(8.dp))
+
+        // Video clip preview — shown when post is a VIDEO_CLIP. Thumbnail
+        // fills width with a 9:16 aspect ratio, play button + duration pill
+        // overlay. Tap inherits from the row-level onTap (opens detail).
+        val isVideoPost = post.postType == CommunityPostType.VIDEO_CLIP
+            && !post.videoThumbnailURL.isNullOrEmpty()
+        if (isVideoPost) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(9f / 16f)
+                    .clip(RoundedCornerShape(12.dp)),
+            ) {
+                AsyncImage(
+                    model = post.videoThumbnailURL,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // Play icon center
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .align(Alignment.Center),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+                // Duration pill bottom-right
+                if (post.videoDurationSeconds > 0) {
+                    Text(
+                        text = formatDuration(post.videoDurationSeconds),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Caption / body text — shown for text posts and as caption beneath
+        // video posts. Skip rendering an empty body to avoid wasted padding.
+        if (post.body.isNotBlank()) {
+            Text(post.body, fontSize = 13.sp, color = textSecondary, lineHeight = 19.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(modifier = Modifier.clickable { onHype() }, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("🔥", fontSize = 14.sp)
@@ -660,10 +819,16 @@ private fun PostCard(post: CommunityPost, modifier: Modifier, onHype: () -> Unit
     }
 }
 
+private fun formatDuration(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return "%d:%02d".format(m, s)
+}
+
 // MARK: - Compose Sheet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ComposePostSheet(userID: String, communityID: String, membership: CommunityMembership?, isCreator: Boolean, onPost: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun ComposePostSheet(userID: String, communityID: String, membership: CommunityMembership?, isCreator: Boolean, onPost: (String) -> Unit, onDismiss: () -> Unit) {
     var postBody by remember { mutableStateOf("") }
     val isValid = postBody.trim().isNotEmpty()
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = darkBg) {
@@ -828,5 +993,27 @@ private fun timeAgo(date: Date): String {
         else         -> "${diff / 86400}d"
     }
 }
-private fun parseMembership(id: String, data: Map<String, Any>): CommunityMembership? = try { CommunityMembership.fromFirestore(data.toMutableMap().apply { put("id", id) }) } catch (_: Exception) { null }
-private fun parsePost(id: String, data: Map<String, Any>): CommunityPost? = try { CommunityPost.fromFirestore(id, data) } catch (_: Exception) { null }
+internal fun parseMembership(id: String, data: Map<String, Any>): CommunityMembership? = try { CommunityMembership.fromFirestore(data.toMutableMap().apply { put("id", id) }) } catch (_: Exception) { null }
+internal fun parsePost(id: String, data: Map<String, Any>): CommunityPost? = try { CommunityPost.fromFirestore(id, data) } catch (_: Exception) { null }
+
+/// Thin wrapper that pulls identity off the loaded membership and hands it
+/// to the live viewer screen. Centralised here so the call site stays one
+/// line and identity fallbacks live in one place.
+@Composable
+private fun LiveStreamViewerHost(
+    userID: String,
+    communityID: String,
+    streamID: String,
+    membership: CommunityMembership?,
+    onDismiss: () -> Unit,
+) {
+    com.stitchsocial.club.live.LiveStreamViewerScreen(
+        userID = userID,
+        communityID = communityID,
+        streamID = streamID,
+        userLevel = membership?.level ?: 1,
+        userUsername = membership?.username ?: "user",
+        userDisplayName = membership?.displayName ?: membership?.username ?: "User",
+        onDismiss = onDismiss,
+    )
+}

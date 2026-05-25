@@ -144,6 +144,11 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
+
+    // Agora RTC SDK — live streaming engine. Matches the iOS app's `AgoraRtcKit`
+    // dependency; same channel/role semantics so creators broadcast to the same
+    // channel viewers join.
+    implementation("io.agora.rtc:full-sdk:4.3.2")
     // Used by VideoExportService (caption burn-in) and ReactionCompositor
     // (split-screen / PiP). 1.4+ exposes VideoCompositorSettings.
     implementation("androidx.media3:media3-transformer:1.4.1")

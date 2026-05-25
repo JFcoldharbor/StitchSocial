@@ -7,7 +7,7 @@
  * Features: Horizontal avatar display (non-interactive preview)
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

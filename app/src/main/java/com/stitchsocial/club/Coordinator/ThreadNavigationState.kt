@@ -244,6 +244,11 @@ fun ThreadVideoView(
                     is OverlayAction.StitchRecording -> {
                         if (BuildConfig.DEBUG) { println("🎬 THREAD NAV: Stitch recording ${video.id}") }
                     }
+                    is OverlayAction.Report -> {
+                        if (BuildConfig.DEBUG) {
+                            println("🚩 THREAD NAV: Report ${action.targetType}/${action.targetID}")
+                        }
+                    }
                 }
             }
         )

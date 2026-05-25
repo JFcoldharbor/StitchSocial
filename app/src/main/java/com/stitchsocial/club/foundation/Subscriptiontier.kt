@@ -160,6 +160,25 @@ data class TierPricing(
 
     fun toMap(): Map<String, Any> = mapOf("customPerks" to customPerks)
 
+    /**
+     * Returns a new TierPricing with [perk] toggled for [tier].
+     * SupportBadge is always-on and cannot be toggled off.
+     * Mirrors iOS TierPricing.togglePerk(_:for:).
+     */
+    fun togglePerk(perk: SubscriptionPerk, tier: CoinPriceTier): TierPricing {
+        if (perk == SubscriptionPerk.SUPPORT_BADGE) return this  // locked on
+        val key = tier.rawValue.toString()
+        val current = perks(tier)
+            .filter { it != SubscriptionPerk.SUPPORT_BADGE }
+            .map { it.value }
+            .toMutableSet()
+        if (current.contains(perk.value)) current.remove(perk.value)
+        else current.add(perk.value)
+        val updated = customPerks.toMutableMap()
+        updated[key] = current.toList()
+        return copy(customPerks = updated)
+    }
+
     companion object {
         fun fromMap(data: Map<String, Any>): TierPricing {
             val raw = data["customPerks"]

@@ -284,13 +284,24 @@ fun SettingsView(
                 if (!isBusiness) {
                     item {
                         SSection("SOCIAL", Icons.Default.People, Color(0xFF0A84FF)) {
-                            // Refer Friends — Influencer+ only (iOS ReferralButton)
+                            // Refer-a-friend / Ambassador Program — same destination,
+                            // different label + subtitle depending on whether the
+                            // user is Influencer-tier or above. Non-ambassadors get
+                            // a simple "Refer a Friend" share; ambassadors get the
+                            // full Ambassador Program (commissions + dashboard).
                             if (isAmbassador) {
                                 SNavRow(
                                     Icons.Default.Campaign,
                                     Color(0xFFBF5AF2),
-                                    "Refer Friends",
-                                    "Share your link and earn rewards"
+                                    "Ambassador Program",
+                                    "Track referrals + earn commissions"
+                                ) { showReferralDashboard = true }
+                            } else {
+                                SNavRow(
+                                    Icons.Default.Campaign,
+                                    Color(0xFFBF5AF2),
+                                    "Refer a Friend",
+                                    "Share your link with a friend"
                                 ) { showReferralDashboard = true }
                             }
                             SNavRow(Icons.Default.PersonAdd, Color.Cyan, "People You May Know", "Based on mutual connections") { showFriendSuggestions = true }
@@ -315,9 +326,26 @@ fun SettingsView(
                 // ── Support ───────────────────────────────────────
                 item {
                     SSection("SUPPORT", Icons.Default.HelpOutline, Color(0xFF0A84FF)) {
-                        SNavRow(Icons.Default.HelpOutline, Color(0xFF0A84FF), "Help & Support", "Get help") { }
-                        SNavRow(Icons.Default.Description, Color.Gray, "Privacy Policy", "How we use data") { }
-                        SNavRow(Icons.Default.Description, Color.Gray, "Terms of Service", "Terms & conditions") { }
+                        // Help & Support → opens email composer addressed
+                        // to support@stitchsocial.me. Falls back to nothing
+                        // if no mail app is installed.
+                        SNavRow(Icons.Default.HelpOutline, Color(0xFF0A84FF), "Help & Support", "Get help") {
+                            runCatching {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_SENDTO,
+                                    android.net.Uri.parse("mailto:support@stitchsocial.me?subject=Stitch%20Social%20support")
+                                )
+                                context.startActivity(intent)
+                            }
+                        }
+                        // Privacy + Terms → open the same legal page used by
+                        // LoginView. Single source of truth at stitchsocial.me/privacy.
+                        SNavRow(Icons.Default.Description, Color.Gray, "Privacy Policy", "How we use data") {
+                            openExternalURL(context, "https://stitchsocial.me/privacy")
+                        }
+                        SNavRow(Icons.Default.Description, Color.Gray, "Terms of Service", "Terms & conditions") {
+                            openExternalURL(context, "https://stitchsocial.me/privacy")
+                        }
                     }
                 }
 
@@ -807,4 +835,16 @@ private fun formatCount(count: Int): String = when {
     count >= 1_000_000 -> "${"%.1f".format(count / 1_000_000.0)}M"
     count >= 1_000     -> "${"%.1f".format(count / 1_000.0)}K"
     else               -> count.toString()
+}
+
+/// Opens [url] in the system browser. Wrapped in runCatching so a
+/// device with no browser (rare) doesn't crash the app.
+private fun openExternalURL(context: android.content.Context, url: String) {
+    runCatching {
+        val intent = android.content.Intent(
+            android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse(url)
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
 }

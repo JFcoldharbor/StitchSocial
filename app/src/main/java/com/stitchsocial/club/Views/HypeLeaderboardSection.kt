@@ -7,7 +7,7 @@
  * Features: Top 10 videos by hype (last 7 days), ranked cards, temperature badges
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

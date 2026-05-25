@@ -227,7 +227,12 @@ fun ReactionCameraView(
                     )
                 )
                 .build()
-            val newVideoCapture = VideoCapture.withOutput(recorder)
+            // FIX: pin recording rotation to portrait. See CameraView.kt for
+            // the rationale — CameraX defaults to the sensor's natural
+            // landscape orientation on most phones.
+            val newVideoCapture = VideoCapture.Builder(recorder)
+                .setTargetRotation(android.view.Surface.ROTATION_0)
+                .build()
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,

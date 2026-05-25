@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -404,6 +405,10 @@ fun CreatorSubscriptionSettingsView(
     var welcomeMessage by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var successMessage by remember { mutableStateOf<String?>(null) }
+    // Lifted to parent so toggling perks on any TierCard updates the same
+    // state that gets sent to `createOrUpdatePlan` on Save. Mirrors iOS.
+    var tierPricing by remember { mutableStateOf(TierPricing()) }
+    var expandedTier by remember { mutableStateOf<CoinPriceTier?>(null) }
 
     LaunchedEffect(creatorID) {
         try {
@@ -411,6 +416,7 @@ fun CreatorSubscriptionSettingsView(
             plan = fetched
             isEnabled = fetched?.isEnabled ?: false
             welcomeMessage = fetched?.customWelcomeMessage ?: ""
+            tierPricing = fetched?.tierPricing ?: TierPricing()
         } catch (e: Exception) {
             error = e.message
         } finally {
@@ -439,7 +445,7 @@ fun CreatorSubscriptionSettingsView(
                             service.createOrUpdatePlan(
                                 creatorID = creatorID,
                                 isEnabled = isEnabled,
-                                tierPricing = plan?.tierPricing ?: TierPricing(),
+                                tierPricing = tierPricing,
                                 welcomeMessage = welcomeMessage.ifBlank { null }
                             )
                             successMessage = "Saved!"
@@ -534,8 +540,15 @@ fun CreatorSubscriptionSettingsView(
                 CoinPriceTier.entries.forEach { tier ->
                     TierCard(
                         tier = tier,
-                        tierPricing = plan?.tierPricing ?: TierPricing(),
-                        canCustomize = AdRevenueShare.canAccessAds(creatorTier)
+                        tierPricing = tierPricing,
+                        isExpanded = expandedTier == tier,
+                        canCustomize = AdRevenueShare.canAccessAds(creatorTier),
+                        onToggleExpand = {
+                            expandedTier = if (expandedTier == tier) null else tier
+                        },
+                        onTogglePerk = { perk ->
+                            tierPricing = tierPricing.togglePerk(perk, tier)
+                        },
                     )
                 }
 
@@ -570,8 +583,20 @@ fun CreatorSubscriptionSettingsView(
     }
 }
 
+/**
+ * Tier card with expand/collapse + per-perk toggle. Mirrors iOS
+ * CreatorPricingSettingsView.tierPriceRow. Supporter Badge is locked on
+ * for every tier; all other [SubscriptionPerk] entries are toggleable.
+ */
 @Composable
-private fun TierCard(tier: CoinPriceTier, tierPricing: TierPricing, canCustomize: Boolean) {
+private fun TierCard(
+    tier: CoinPriceTier,
+    tierPricing: TierPricing,
+    isExpanded: Boolean,
+    canCustomize: Boolean,
+    onToggleExpand: () -> Unit,
+    onTogglePerk: (SubscriptionPerk) -> Unit,
+) {
     val tierColor = when (tier) {
         CoinPriceTier.STARTER -> Color.Gray
         CoinPriceTier.BASIC   -> Color.Cyan
@@ -579,27 +604,141 @@ private fun TierCard(tier: CoinPriceTier, tierPricing: TierPricing, canCustomize
         CoinPriceTier.PRO     -> Color(0xFFBF5AF2)
         CoinPriceTier.MAX     -> Color(0xFFFFD60A)
     }
-    val perks = tierPricing.perks(tier)
+    val tierPerks = tierPricing.perks(tier)
+    val assignable = listOf(
+        SubscriptionPerk.NO_ADS,
+        SubscriptionPerk.PRIORITY_REPLIES,
+        SubscriptionPerk.EXCLUSIVE_CONTENT,
+        SubscriptionPerk.DM_ACCESS,
+        SubscriptionPerk.EARLY_ACCESS,
+    )
 
     Column(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
             .border(1.dp, tierColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .background(tierColor.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .background(tierColor.copy(alpha = 0.05f), RoundedCornerShape(12.dp)),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(tier.displayName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = tierColor)
-            Text(tier.coinsDisplay, fontSize = 14.sp, color = Color.White)
-        }
-        perks.forEach { perk ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(perk.emoji, fontSize = 14.sp)
-                Text(perk.displayName, fontSize = 14.sp, color = Color.Gray)
+        // Header row — tap to expand/collapse
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = canCustomize) { onToggleExpand() }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(tier.displayName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = tierColor)
+                Text(
+                    "${tierPerks.size} perks",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${tier.rawValue} coins",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFFFD60A),
+                )
+                if (canCustomize) {
+                    Icon(
+                        if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
-        if (canCustomize) {
-            Text("Tap to customize perks (coming soon)", fontSize = 11.sp, color = Color.Gray.copy(alpha = 0.6f))
+
+        // Expanded perk toggles
+        if (isExpanded && canCustomize) {
+            Divider(color = Color.Gray.copy(alpha = 0.2f))
+            // Locked-on supporter badge row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(SubscriptionPerk.SUPPORT_BADGE.emoji, fontSize = 14.sp, modifier = Modifier.width(24.dp))
+                Text(
+                    SubscriptionPerk.SUPPORT_BADGE.displayName,
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = "Always on",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+
+            // Toggleable perks
+            assignable.forEach { perk ->
+                val isOn = tierPerks.contains(perk)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTogglePerk(perk) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        perk.emoji,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .width(24.dp)
+                            .graphicsLayer { alpha = if (isOn) 1f else 0.4f },
+                    )
+                    Text(
+                        perk.displayName,
+                        fontSize = 13.sp,
+                        color = if (isOn) Color.White else Color.Gray,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        if (isOn) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = if (isOn) "On" else "Off",
+                        tint = if (isOn) Color.Cyan else Color.Gray.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        } else if (!isExpanded) {
+            // Collapsed: show first 3 perks inline as preview
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                tierPerks.take(3).forEach { perk ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(perk.emoji, fontSize = 13.sp)
+                        Text(perk.displayName, fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+                if (tierPerks.size > 3) {
+                    Text(
+                        "+ ${tierPerks.size - 3} more",
+                        fontSize = 11.sp,
+                        color = Color.Gray.copy(alpha = 0.6f),
+                    )
+                }
+            }
+        }
+
+        if (!canCustomize) {
+            Text(
+                "Reach Influencer tier to customize perks",
+                fontSize = 11.sp,
+                color = Color.Gray.copy(alpha = 0.6f),
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+            )
         }
     }
 }

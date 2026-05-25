@@ -246,11 +246,15 @@ class DiscoveryViewModel(
                     com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(prefetchUrls)
                 }
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to load videos"
-                if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed: ${e.message}") }
+                // FIX: don't flash "Failed to load" to the user when we're
+                // about to auto-retry — only set the visible error when the
+                // user actually needs to act. Logs still fire so we can see
+                // transient failures in adb.
+                if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed: ${e.message} (retrying in 2s)") }
                 delay(2000)
                 hasLoaded = false
                 _isLoading.value = false
+                _errorMessage.value = null  // keep the slate clean for the retry
                 loadInitialContent()
                 return@launch
             } finally {
@@ -822,10 +826,16 @@ fun DiscoveryView(
                             }
                         )
                     }
-                    isLoading && videos.isEmpty() -> {
+                    // Show the loading view whenever the feed is empty AND
+                    // either we're actively loading OR there's no error.
+                    // Covers (a) the initial cold-launch black gap and
+                    // (b) the 2-second auto-retry window after a transient
+                    // failure — the user shouldn't see "Failed to load"
+                    // when the next attempt is already queued.
+                    videos.isEmpty() && (isLoading || currentErrorMessage == null) -> {
                         DiscoveryLoadingView()
                     }
-                    currentErrorMessage != null -> {
+                    currentErrorMessage != null && !isLoading -> {
                         DiscoveryErrorView(
                             message = currentErrorMessage,
                             onRetry = { viewModel.loadInitialContent() }

@@ -328,7 +328,15 @@ fun CameraView(
                                 .setQualitySelector(qualitySelector)
                                 .build()
 
-                            val newVideoCapture = VideoCapture.withOutput(recorder)
+                            // FIX: pin recording rotation to portrait (ROTATION_0).
+                            // CameraX otherwise uses the sensor's natural
+                            // orientation — landscape on most phones — so videos
+                            // ended up rotated 90° even when the user held the
+                            // phone in portrait. iOS records portrait by default
+                            // via AVCaptureMovieFileOutput; this matches that.
+                            val newVideoCapture = androidx.camera.video.VideoCapture.Builder(recorder)
+                                .setTargetRotation(android.view.Surface.ROTATION_0)
+                                .build()
                             videoCapture = newVideoCapture
 
                             try {

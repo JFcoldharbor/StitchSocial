@@ -278,6 +278,7 @@ fun VideoPlayer(
                                 is OverlayAction.Follow -> println("➕ Follow user: ${pagerVideo.creatorID}")
                                 is OverlayAction.Unfollow -> println("➖ Unfollow user: ${pagerVideo.creatorID}")
                                 is OverlayAction.NavigateToThread -> println("🧵 Navigate to thread: ${pagerVideo.threadID}")
+                                is OverlayAction.Report -> println("🚩 Report: ${action.targetType}/${action.targetID}")
                             }
                         }
                     )
@@ -349,6 +350,7 @@ fun VideoPlayer(
                             is OverlayAction.Follow -> println("➕ Follow user: ${video.creatorID}")
                             is OverlayAction.Unfollow -> println("➖ Unfollow user: ${video.creatorID}")
                             is OverlayAction.NavigateToThread -> println("🧵 Navigate to thread: ${video.threadID}")
+                            is OverlayAction.Report -> println("🚩 Report: ${action.targetType}/${action.targetID}")
                         }
                     }
                 )

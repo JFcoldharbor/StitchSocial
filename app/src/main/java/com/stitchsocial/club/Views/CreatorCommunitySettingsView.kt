@@ -60,6 +60,7 @@ fun CreatorCommunitySettingsView(
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDeactivateConfirm by remember { mutableStateOf(false) }
+    var showEditView by remember { mutableStateOf(false) }
 
     suspend fun reload() {
         try {
@@ -175,6 +176,7 @@ fun CreatorCommunitySettingsView(
                         )
                         is CommunityStatus.Active -> ActiveSection(
                             community = s.data,
+                            onEditRequest = { showEditView = true },
                             onDeactivateRequest = { showDeactivateConfirm = true }
                         )
                     }
@@ -229,6 +231,34 @@ fun CreatorCommunitySettingsView(
             },
             containerColor = Color(0xFF1C1C1E)
         )
+    }
+
+    // Fullscreen edit overlay — name + description fields.
+    if (showEditView) {
+        val activeCommunity = (status as? CommunityStatus.Active)?.data
+        if (activeCommunity != null) {
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                CommunityEditView(
+                    community = activeCommunity,
+                    onDismiss = { showEditView = false },
+                    onSaved = { updated ->
+                        // Reflect the edit locally so the settings screen
+                        // shows the new name/description without waiting for
+                        // a Firestore round-trip.
+                        status = CommunityStatus.Active(updated)
+                        communityName = updated.displayName
+                        communityDescription = updated.description
+                    }
+                )
+            }
+        } else {
+            // Status drifted to inactive while the sheet was up — just close.
+            showEditView = false
+        }
     }
 }
 
@@ -401,6 +431,7 @@ private fun InactiveSection(
 @Composable
 private fun ActiveSection(
     community: Community,
+    onEditRequest: () -> Unit,
     onDeactivateRequest: () -> Unit
 ) {
     // Stats row
@@ -419,10 +450,7 @@ private fun ActiveSection(
         background = Brush.horizontalGradient(listOf(Color.Cyan, Color.Cyan)),
         isLoading = false,
         enabled = true,
-        onClick = {
-            // TODO: Hook into CommunityEditView once ported.
-            // For now this is a no-op so the row doesn't crash.
-        }
+        onClick = onEditRequest
     )
 
     TextButton(

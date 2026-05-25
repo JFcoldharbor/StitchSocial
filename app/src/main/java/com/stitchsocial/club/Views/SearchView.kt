@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -333,6 +334,7 @@ private fun SearchHeader(onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 16.dp)
             .padding(top = 12.dp, bottom = 8.dp),
         contentAlignment = Alignment.Center
@@ -343,10 +345,12 @@ private fun SearchHeader(onDismiss: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             color = Color.White
         )
+        // Close button — used to be Icons.Default.Search (the magnifying glass)
+        // which was unrecognizable as a dismiss control. Now an actual X.
         Box(modifier = Modifier.align(Alignment.CenterStart)) {
             IconButton(onClick = onDismiss) {
                 Icon(
-                    Icons.Default.Search, // use X icon from your icon set
+                    Icons.Default.Close,
                     contentDescription = "Close",
                     tint = Color.White,
                     modifier = Modifier

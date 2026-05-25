@@ -7,7 +7,7 @@
  * Features: 2-column video grid with rank badges, thumbnails, hype stats, video navigation
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

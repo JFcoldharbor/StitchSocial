@@ -74,7 +74,9 @@ import kotlin.random.Random
 import com.stitchsocial.club.BuildConfig
 
 private const val TERMS_VERSION = "1.0"
-private const val TERMS_URL = "https://stitchsocial.me/privacy"
+private const val TERMS_URL = "https://stitchsocial.me/terms"
+private const val SAFETY_URL = "https://stitchsocial.me/terms#aup"
+private const val PRIVACY_URL = "https://stitchsocial.me/privacy"
 
 // MARK: - AuthMode
 
@@ -464,14 +466,18 @@ fun LoginView(
                         tint = if (acceptedTerms) StitchColors.primary else StitchColors.textSecondary,
                         modifier = Modifier.size(22.dp)
                     )
-                    Text("I agree to the Terms & Conditions, Safety Policy, and Privacy Policy",
+                    Text("I agree to the Terms & Conditions, Safety Policy, and Privacy Policy, including the zero-tolerance policy for objectionable content and abusive users.",
                         fontSize = 13.sp, color = StitchColors.textSecondary, lineHeight = 18.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    listOf("📄 Terms", "🛡️ Safety", "🔒 Privacy").forEach { label ->
+                    listOf(
+                        "📄 Terms" to TERMS_URL,
+                        "🛡️ Safety" to SAFETY_URL,
+                        "🔒 Privacy" to PRIVACY_URL,
+                    ).forEach { (label, url) ->
                         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = StitchColors.primary,
                             modifier = Modifier.clickable {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(TERMS_URL)))
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             })
                     }
                 }

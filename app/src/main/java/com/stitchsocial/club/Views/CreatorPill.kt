@@ -9,7 +9,7 @@
  * EXACT PORT: CreatorPill.swift
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

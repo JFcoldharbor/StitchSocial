@@ -211,6 +211,13 @@ fun FullscreenVideoPlayer(
                         // in the parent (ProfileView).
                         onDismiss()
                     }
+                    is OverlayAction.Report -> {
+                        // TODO: present ReportSheet from the parent navigator —
+                        // FullscreenVideoPlayer doesn't own a sheet stack today.
+                        if (BuildConfig.DEBUG) {
+                            println("🚩 REPORT: ${action.targetType}/${action.targetID}")
+                        }
+                    }
                 }
             }
         )

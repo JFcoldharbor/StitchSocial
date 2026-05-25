@@ -109,6 +109,10 @@ class MainActivity : ComponentActivity() {
         // ✅ NEW: Create notification channel EARLY (before any push can arrive)
         FCMService.ensureChannelExists(this)
 
+        // Initialize the per-stream video-clip disk cache. One-shot setup —
+        // creates the cache directory under context.cacheDir.
+        com.stitchsocial.club.live.StreamClipCache.init(this)
+
         // Bootstrap LinkedAccountManager so AuthService can use the
         // static `shared` accessor when seeding linked accounts on signIn.
         com.stitchsocial.club.services.LinkedAccountManager.getInstance(this)
@@ -840,7 +844,11 @@ fun MainScreen() {
                             .zIndex(50f)
                             .background(Color.Black)
                     ) {
-                        CommunityDetailView(
+                        // V2 community detail — TabView with Home + Threads,
+                        // sticky header, contextual FAB. Mirrors iOS
+                        // CommunityDetailV2View. V1 is still in the codebase
+                        // as a fallback if needed.
+                        com.stitchsocial.club.views.CommunityDetailV2View(
                             userID = currentUser?.id ?: "",
                             communityID = community.id,
                             communityItem = community,

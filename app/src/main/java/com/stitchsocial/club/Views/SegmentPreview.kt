@@ -21,7 +21,7 @@
  *   CollectionRow.maxPreviewCount = 4
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
