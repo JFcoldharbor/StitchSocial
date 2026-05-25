@@ -290,9 +290,25 @@ class AuthService {
             _currentUser.value = user
             _isAuthenticated.value = user != null
             when {
-                user == null -> { _authState.value = AuthState.SIGNED_OUT; println("AUTH SERVICE: 🚪 User signed out") }
-                user.isAnonymous -> { _authState.value = AuthState.SIGNED_IN; println("AUTH SERVICE: 👤 Anonymous user") }
-                else -> { _authState.value = AuthState.SIGNED_IN; println("AUTH SERVICE: ✅ User authenticated - ${user.email}") }
+                user == null -> {
+                    _authState.value = AuthState.SIGNED_OUT
+                    println("AUTH SERVICE: 🚪 User signed out")
+                    // Required by App Store Guideline 1.2 / Play Store UGC policy:
+                    // stop listening to the previous user's block list.
+                    BlockService.shared.stopListening()
+                }
+                user.isAnonymous -> {
+                    _authState.value = AuthState.SIGNED_IN
+                    println("AUTH SERVICE: 👤 Anonymous user")
+                    BlockService.shared.startListening()
+                }
+                else -> {
+                    _authState.value = AuthState.SIGNED_IN
+                    println("AUTH SERVICE: ✅ User authenticated - ${user.email}")
+                    // Populates BlockService.blockedUserIds so feed views can
+                    // filter blocked content the instant the user signs in.
+                    BlockService.shared.startListening()
+                }
             }
         }
     }

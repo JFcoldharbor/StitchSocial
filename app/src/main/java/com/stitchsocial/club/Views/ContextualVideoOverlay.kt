@@ -196,7 +196,7 @@ sealed class OverlayAction {
 
 // MARK: - Static User Cache
 
-private data class CachedUserData(
+private data class OverlayUserCache(
     val displayName: String,
     val profileImageURL: String?,
     val tier: UserTier?,
@@ -204,11 +204,11 @@ private data class CachedUserData(
 )
 
 private object UserDataCache {
-    private val cache = ConcurrentHashMap<String, CachedUserData>()
+    private val cache = ConcurrentHashMap<String, OverlayUserCache>()
     private val timestamps = ConcurrentHashMap<String, Date>()
     private const val CACHE_EXPIRATION_MS = 300_000L // 5 minutes
 
-    fun get(userID: String): CachedUserData? {
+    fun get(userID: String): OverlayUserCache? {
         val timestamp = timestamps[userID] ?: return null
         val now = Date()
         if (now.time - timestamp.time > CACHE_EXPIRATION_MS) {
@@ -219,7 +219,7 @@ private object UserDataCache {
         return cache[userID]
     }
 
-    fun set(userID: String, data: CachedUserData) {
+    fun set(userID: String, data: OverlayUserCache) {
         cache[userID] = data
         timestamps[userID] = Date()
     }
@@ -465,7 +465,7 @@ fun ContextualVideoOverlay(
                     realCreatorProfileImageURL = profile.profileImageURL
                     if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}") }
                     // Cache the result
-                    UserDataCache.set(video.creatorID, CachedUserData(
+                    UserDataCache.set(video.creatorID, OverlayUserCache(
                         displayName = realCreatorName ?: "",
                         profileImageURL = realCreatorProfileImageURL,
                         tier = null,
@@ -498,7 +498,7 @@ fun ContextualVideoOverlay(
                         realThreadCreatorName = profile.displayName.ifEmpty { profile.username }
                         realThreadCreatorProfileImageURL = profile.profileImageURL
                         // Cache the result
-                        UserDataCache.set(creatorID, CachedUserData(
+                        UserDataCache.set(creatorID, OverlayUserCache(
                             displayName = realThreadCreatorName ?: "",
                             profileImageURL = realThreadCreatorProfileImageURL,
                             tier = null,
@@ -597,7 +597,8 @@ fun ContextualVideoOverlay(
                 temperatureColor = temperatureColor,
                 displayReplyCount = displayReplyCount,
                 context = context,
-                onAction = onAction
+                onAction = onAction,
+                currentUserID = currentUserID
             )
         } else if (overlayContext == OverlayContext.CAROUSEL) {
             CarouselOverlay(
@@ -691,6 +692,125 @@ fun ContextualVideoOverlay(
     }
 }
 
+// MARK: - More Options Menu (Report / Block)
+//
+// Required by App Store Guideline 1.2 / Play Store UGC policy: users must
+// be able to flag objectionable content and block abusive users from any
+// UGC surface. Self-contained — owns its own DropdownMenu, AlertDialog, and
+// ReportSheet so callers only need to drop it into their overlay's right rail.
+//
+@Composable
+private fun MoreOptionsMenu(
+    video: CoreVideoMetadata,
+    displayCreatorName: String,
+    currentUserID: String?
+) {
+    val isUserVideo = currentUserID != null && currentUserID == video.creatorID
+    if (isUserVideo) return
+
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showReportSheet by remember { mutableStateOf(false) }
+    var reportTargetType by remember { mutableStateOf("video") }
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val blockedIds by com.stitchsocial.club.services.BlockService.shared
+        .blockedUserIds.collectAsStateWithLifecycle()
+    val isBlocked = blockedIds.contains(video.creatorID)
+
+    Box {
+        IconButton(onClick = { menuExpanded = true }) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "More options",
+                tint = Color.White,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .padding(6.dp)
+            )
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Report video") },
+                leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
+                onClick = {
+                    menuExpanded = false
+                    reportTargetType = "video"
+                    showReportSheet = true
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Report user") },
+                leadingIcon = { Icon(Icons.Default.PersonOff, contentDescription = null) },
+                onClick = {
+                    menuExpanded = false
+                    reportTargetType = "user"
+                    showReportSheet = true
+                }
+            )
+            if (isBlocked) {
+                DropdownMenuItem(
+                    text = { Text("Unblock @$displayCreatorName") },
+                    leadingIcon = { Icon(Icons.Default.LockOpen, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        scope.launch {
+                            com.stitchsocial.club.services.BlockService.shared
+                                .unblockUser(video.creatorID)
+                        }
+                    }
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Block @$displayCreatorName") },
+                    leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        showBlockConfirm = true
+                    }
+                )
+            }
+        }
+    }
+
+    if (showReportSheet) {
+        ReportSheet(
+            targetType = reportTargetType,
+            targetID = if (reportTargetType == "user") video.creatorID else video.id,
+            onDismiss = { showReportSheet = false }
+        )
+    }
+
+    if (showBlockConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text("Block @$displayCreatorName?") },
+            text = {
+                Text(
+                    "You won't see their videos, replies, or stitches. They won't be notified."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBlockConfirm = false
+                        scope.launch {
+                            com.stitchsocial.club.services.BlockService.shared
+                                .blockUser(video.creatorID)
+                        }
+                    }
+                ) { Text("Block", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
 // MARK: - Minimal Discovery Overlay
 
 @Composable
@@ -700,7 +820,8 @@ private fun MinimalDiscoveryOverlay(
     temperatureColor: Color,
     displayReplyCount: Int,
     context: Context,
-    onAction: ((OverlayAction) -> Unit)?
+    onAction: ((OverlayAction) -> Unit)?,
+    currentUserID: String? = null
 ) {
     // Fixed text sizes
     val nameFontSize = OverlaySizes.LABEL_MEDIUM.fixedSp()
@@ -774,6 +895,13 @@ private fun MinimalDiscoveryOverlay(
                 video = video,
                 creatorUsername = displayCreatorName,
                 size = ShareButtonSize.MEDIUM
+            )
+
+            // More options (Report / Block)
+            MoreOptionsMenu(
+                video = video,
+                displayCreatorName = displayCreatorName,
+                currentUserID = currentUserID
             )
 
             Spacer(modifier = Modifier.weight(1f))
@@ -918,7 +1046,8 @@ private fun FullContextualOverlay(
                 temperatureColor = temperatureColor,
                 overlayContext = overlayContext,
                 context = context,
-                onAction = onAction
+                onAction = onAction,
+                currentUserID = currentUserID
             )
         }
 
@@ -969,7 +1098,8 @@ private fun TopSection(
     temperatureColor: Color,
     overlayContext: OverlayContext,
     context: Context,
-    onAction: ((OverlayAction) -> Unit)?
+    onAction: ((OverlayAction) -> Unit)?,
+    currentUserID: String? = null
 ) {
     Row(
         modifier = Modifier
@@ -1009,12 +1139,16 @@ private fun TopSection(
             }
         }
 
-        // Right: Reserved for future options
+        // Right: Report / Block menu (App Store Guideline 1.2 / Play Store UGC)
         Column(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // More options button removed - can be added back when needed
+            MoreOptionsMenu(
+                video = video,
+                displayCreatorName = displayCreatorName,
+                currentUserID = currentUserID
+            )
         }
     }
 }

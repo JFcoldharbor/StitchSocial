@@ -179,6 +179,7 @@ class HomeFeedService(
                 .await()
 
             val threads = mutableListOf<ThreadData>()
+            val blockedIDs = BlockService.shared.blockedUserIds.value
             for (document in snapshot.documents) {
                 val videoID = document.getString(FirebaseSchema.VideoDocument.ID) ?: document.id
                 if (excludeVideoIDs.contains(videoID)) continue
@@ -187,6 +188,10 @@ class HomeFeedService(
                 // Skip videos hidden by moderation (Rekognition flagged/blocked).
                 val publicVisibility = document.getString("publicVisibility") ?: "public"
                 if (publicVisibility != "public") continue
+
+                // Skip blocked users' content (App Store Guideline 1.2 / Play UGC).
+                val creatorID = document.getString(FirebaseSchema.VideoDocument.CREATOR_ID) ?: ""
+                if (blockedIDs.contains(creatorID)) continue
 
                 val thread = createThreadFromDocument(document)
                 if (thread != null) {
@@ -412,10 +417,15 @@ class HomeFeedService(
                 .get()
                 .await()
 
+            val blockedIDs = BlockService.shared.blockedUserIds.value
             val children = snapshot.documents.mapNotNull { doc ->
                 // Skip moderation-hidden replies on public surfaces.
                 val publicVisibility = doc.getString("publicVisibility") ?: "public"
                 if (publicVisibility != "public") return@mapNotNull null
+
+                // Skip blocked users' replies (App Store Guideline 1.2 / Play UGC).
+                val creatorID = doc.getString(FirebaseSchema.VideoDocument.CREATOR_ID) ?: ""
+                if (blockedIDs.contains(creatorID)) return@mapNotNull null
 
                 val thread = createThreadFromDocument(doc)
                 thread?.parentVideo // Reuse the same parser, extract video

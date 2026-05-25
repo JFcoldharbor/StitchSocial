@@ -1222,7 +1222,9 @@ private fun ProfileHeader(
             isFollowLoading = isFollowLoading,
             onEditProfile = onEditProfile,
             onSettingsClick = onSettingsClick,
-            onFollowToggle = onFollowToggle
+            onFollowToggle = onFollowToggle,
+            targetUserID = user.id,
+            targetUsername = user.username
         )
 
         // Badge preview — pinned-first, taps open the badge page.
@@ -1419,7 +1421,9 @@ private fun ActionButtonsRow(
     isFollowLoading: Boolean,
     onEditProfile: () -> Unit,
     onSettingsClick: () -> Unit,
-    onFollowToggle: () -> Unit
+    onFollowToggle: () -> Unit,
+    targetUserID: String = "",
+    targetUsername: String = ""
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -1477,7 +1481,120 @@ private fun ActionButtonsRow(
             ) {
                 Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
             }
+
+            // More menu (Report / Block) — App Store Guideline 1.2 / Play Store UGC
+            ProfileMoreMenu(
+                targetUserID = targetUserID,
+                targetUsername = targetUsername
+            )
         }
+    }
+}
+
+// ===== PROFILE MORE MENU (Report / Block) =====
+//
+// Self-contained: hosts its own DropdownMenu, ReportSheet, and Block
+// confirmation AlertDialog so ActionButtonsRow only needs to drop it in.
+//
+@Composable
+private fun ProfileMoreMenu(
+    targetUserID: String,
+    targetUsername: String
+) {
+    if (targetUserID.isBlank()) return
+
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showReportSheet by remember { mutableStateOf(false) }
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val blockedIds by com.stitchsocial.club.services.BlockService.shared
+        .blockedUserIds.collectAsState()
+    val isBlocked = blockedIds.contains(targetUserID)
+
+    Box {
+        Button(
+            onClick = { menuExpanded = true },
+            modifier = Modifier.size(36.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray.copy(alpha = 0.8f)),
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            Icon(
+                Icons.Default.MoreHoriz,
+                contentDescription = "More",
+                tint = Color.White,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Report user") },
+                leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
+                onClick = {
+                    menuExpanded = false
+                    showReportSheet = true
+                }
+            )
+            if (isBlocked) {
+                DropdownMenuItem(
+                    text = { Text("Unblock @$targetUsername") },
+                    leadingIcon = { Icon(Icons.Default.LockOpen, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        scope.launch {
+                            com.stitchsocial.club.services.BlockService.shared
+                                .unblockUser(targetUserID)
+                        }
+                    }
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Block @$targetUsername") },
+                    leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        showBlockConfirm = true
+                    }
+                )
+            }
+        }
+    }
+
+    if (showReportSheet) {
+        ReportSheet(
+            targetType = "user",
+            targetID = targetUserID,
+            onDismiss = { showReportSheet = false }
+        )
+    }
+
+    if (showBlockConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text("Block @$targetUsername?") },
+            text = {
+                Text(
+                    "You won't see their videos, replies, or stitches. They won't be notified."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBlockConfirm = false
+                        scope.launch {
+                            com.stitchsocial.club.services.BlockService.shared
+                                .blockUser(targetUserID)
+                        }
+                    }
+                ) { Text("Block", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
