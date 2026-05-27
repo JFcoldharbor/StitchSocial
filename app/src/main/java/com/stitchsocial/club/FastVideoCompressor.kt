@@ -367,9 +367,14 @@ class FastVideoCompressor private constructor(private val context: Context) {
             )
         }
         
-        // Check HEVC support
-        val useHEVC = isHEVCEncoderAvailable()
-        val codec = if (useHEVC) "video/hevc" else "video/avc"
+        // Force H.264 (video/avc). The previous code preferred HEVC for ~40%
+        // better compression, but HEVC-in-MP4 produced black-screen playback
+        // on web players / CDN-transcoded variants — same root cause as the
+        // iOS passthrough preset bug. Larger files in exchange for universal
+        // decode. The isHEVCEncoderAvailable() helper is kept around for
+        // future opt-in (e.g. a "high efficiency" toggle for power creators).
+        val useHEVC = false
+        val codec = "video/avc"
         
         // Calculate frame rate
         val targetFrameRate = min(30, sourceInfo.frameRate.toInt())

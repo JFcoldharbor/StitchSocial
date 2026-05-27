@@ -156,24 +156,21 @@ class VideoExportService private constructor(private val context: Context) {
         val hasFilter = editState.selectedFilter != null && editState.selectedFilter != VideoFilter.NONE
         val hasCaptions = editState.captions.isNotEmpty()
         val hasTrim = hasActualTrim(editState)
-        
+
         if (BuildConfig.DEBUG) { println("🔍 EXPORT MODE CHECK:") }
         if (BuildConfig.DEBUG) { println("   Has filter: $hasFilter") }
         if (BuildConfig.DEBUG) { println("   Has captions: $hasCaptions") }
         if (BuildConfig.DEBUG) { println("   Has trim: $hasTrim") }
-        
-        // If filters or captions, must do full processing
-        if (hasFilter || hasCaptions) {
-            return ExportMode.FULL_PROCESS
-        }
-        
-        // If only trim, use trim-only mode
-        if (hasTrim) {
-            return ExportMode.TRIM_ONLY
-        }
-        
-        // No edits at all - pure passthrough
-        return ExportMode.PASSTHROUGH
+
+        // Always re-encode. The previous PASSTHROUGH and TRIM_ONLY paths
+        // just remuxed the source container (no codec change), which kept
+        // HEVC bitstreams intact when the source was a modern phone camera.
+        // HEVC-in-MP4 produced black-screen playback on web players and
+        // CDN transcoders. FastVideoCompressor now always encodes H.264,
+        // so forcing every export through FULL_PROCESS guarantees the
+        // output is universally decodable. Trade-off: a few seconds of
+        // extra encoding time, but matches iOS behavior 1:1.
+        return ExportMode.FULL_PROCESS
     }
     
     private fun hasActualTrim(editState: VideoEditState): Boolean {
