@@ -83,15 +83,13 @@ object StreamClipUploadService {
             .setContentType("video/mp4")
             .build()
 
-        // Stream the local file into Storage with progress reporting. We
-        // call putStream so we don't have to slurp the whole file into RAM.
-        val videoBytes = context.contentResolver.openInputStream(localUri)
-            ?.use { it.readBytes() }
-            ?: throw IllegalStateException("Could not open clip at $localUri")
+        // Stream the local file into Storage. putFile reads the content URI
+        // in chunks — the previous code claimed to "putStream" but actually
+        // called readBytes() + putBytes() which loaded the whole video into
+        // RAM. Real fix mirrors the iOS putData → putFile change.
+        Log.d(TAG, "📦 uploading clip $commentID.mp4 via putFile (streaming)")
 
-        Log.d(TAG, "📦 uploading ${videoBytes.size / 1024} KB to $commentID.mp4")
-
-        val task = videoRef.putBytes(videoBytes, videoMeta)
+        val task = videoRef.putFile(localUri, videoMeta)
         task.addOnProgressListener { snap ->
             val fraction = snap.bytesTransferred.toFloat() / snap.totalByteCount.toFloat()
             onProgress(0.3f + (fraction * 0.7f))

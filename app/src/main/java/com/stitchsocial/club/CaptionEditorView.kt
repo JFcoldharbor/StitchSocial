@@ -30,11 +30,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.launch
 
 @Composable
 fun CaptionEditorView(
@@ -45,6 +47,10 @@ fun CaptionEditorView(
     var showingAddCaption by remember { mutableStateOf(false) }
     var editingCaption by remember { mutableStateOf<VideoCaption?>(null) }
     var currentPlaybackTime by remember { mutableStateOf(0.0) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val autoCaptionService = remember { AutoCaptionService.getInstance(context) }
+    val isTranscribing by autoCaptionService.isTranscribing.collectAsState()
     
     // Track playback position
     LaunchedEffect(exoPlayer) {
@@ -59,7 +65,22 @@ fun CaptionEditorView(
     ) {
         // Content area
         if (editState.captions.isEmpty()) {
-            EmptyStateView(modifier = Modifier.weight(1f))
+            EmptyStateView(
+                modifier = Modifier.weight(1f),
+                isTranscribing = isTranscribing,
+                onGenerateCaptions = {
+                    scope.launch {
+                        try {
+                            val captions = autoCaptionService
+                                .generateCaptions(editState.videoUri)
+                            if (captions.isNotEmpty()) {
+                                captions.forEach { editState.addCaption(it) }
+                                onEditStateChange(editState)
+                            }
+                        } catch (_: Exception) { /* fail silently — UI already idle */ }
+                    }
+                }
+            )
         } else {
             CaptionList(
                 captions = editState.captions,
@@ -158,7 +179,11 @@ fun CaptionEditorView(
 // MARK: - Empty State View
 
 @Composable
-private fun EmptyStateView(modifier: Modifier = Modifier) {
+private fun EmptyStateView(
+    modifier: Modifier = Modifier,
+    isTranscribing: Boolean = false,
+    onGenerateCaptions: () -> Unit = {}
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -174,29 +199,64 @@ private fun EmptyStateView(modifier: Modifier = Modifier) {
                     .background(Color.Cyan.copy(alpha = 0.1f))
                     .blur(15.dp)
             )
-            Icon(
-                imageVector = Icons.Filled.Subtitles,
-                contentDescription = null,
-                tint = Color.Cyan.copy(alpha = 0.8f),
-                modifier = Modifier.size(48.dp)
-            )
+            if (isTranscribing) {
+                CircularProgressIndicator(
+                    color = Color.Cyan,
+                    modifier = Modifier.size(48.dp)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.Subtitles,
+                    contentDescription = null,
+                    tint = Color.Cyan.copy(alpha = 0.8f),
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
-        
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "No Captions",
+                text = if (isTranscribing) "Generating captions…" else "No Captions",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Add captions to make your video accessible",
+                text = if (isTranscribing)
+                    "Transcribing your audio — takes 30s–2 min."
+                else
+                    "Add captions to make your video accessible. Generation takes 30s–2 min.",
                 color = Color.Gray,
                 fontSize = 15.sp
             )
+        }
+
+        if (!isTranscribing) {
+            Button(
+                onClick = onGenerateCaptions,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Generate captions",
+                        color = Color.Black,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }

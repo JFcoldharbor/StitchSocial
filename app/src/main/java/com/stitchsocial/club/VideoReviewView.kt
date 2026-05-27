@@ -86,25 +86,10 @@ fun VideoReviewView(
         }
     }
 
-    // Auto-generate captions on entry (mirrors iOS VideoReviewView).
-    // Skips if captions already exist (don't overwrite manual edits or a
-    // resumed draft). Failures fall through silently — the user can still
-    // post without captions.
-    LaunchedEffect(initialState.videoUri) {
-        if (editState.captions.isNotEmpty()) return@LaunchedEffect
-        try {
-            val captions = AutoCaptionService.getInstance(context)
-                .generateCaptions(initialState.videoUri)
-            if (captions.isNotEmpty()) {
-                editState = editState.copy(
-                    captions = captions.toMutableList()
-                )
-                if (BuildConfig.DEBUG) { println("✅ REVIEW: Auto-generated ${captions.size} caption(s)") }
-            }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("⚠️ REVIEW: Auto-caption failed — ${e.message}") }
-        }
-    }
+    // Captions are now opt-in (mirrors iOS). Auto-generation on every review
+    // entry was burning Cloud Function transcription costs on videos users
+    // never wanted captioned. The CaptionEditorView empty state now offers a
+    // "Generate captions" button that triggers AutoCaptionService on demand.
 
     // Auto-save draft periodically
     LaunchedEffect(Unit) {

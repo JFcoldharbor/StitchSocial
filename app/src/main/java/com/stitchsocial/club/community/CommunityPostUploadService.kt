@@ -64,14 +64,14 @@ object CommunityPostUploadService {
 
         val videoRef = storage.reference
             .child("community-posts/$communityID/$postID.mp4")
-        val videoBytes = context.contentResolver.openInputStream(localUri)
-            ?.use { it.readBytes() }
-            ?: throw IllegalStateException("Could not open clip at $localUri")
 
-        Log.d(TAG, "📦 uploading ${videoBytes.size / 1024} KB for post $postID")
+        Log.d(TAG, "📦 uploading post $postID via putFile (streaming)")
 
-        val task = videoRef.putBytes(
-            videoBytes,
+        // putFile streams from the content URI — Storage SDK reads in chunks
+        // instead of slurping the whole video into RAM (was OOM-killing on
+        // 200MB+ uploads). Mirrors the iOS putData → putFile change.
+        val task = videoRef.putFile(
+            localUri,
             StorageMetadata.Builder().setContentType("video/mp4").build()
         )
         task.addOnProgressListener { snap ->
