@@ -154,36 +154,49 @@ fun ThreadComposer(
                 actions = {
                     TextButton(
                         onClick = {
-                            coroutineScope.launch {
-                                isPosting = true
-                                try {
-                                    // Complete video creation
-                                    val createdVideo = videoCoordinator.completeVideoCreation(
-                                        userTitle = title.trim(),
-                                        userDescription = description.trim(),
-                                        userHashtags = hashtags,
-                                        taggedUserIDs = taggedUserIds
-                                    )
-
-                                    // Send notifications via Cloud Functions (matches iOS)
-                                    sendPostCreationNotifications(
-                                        notificationService = notificationService,
-                                        createdVideo = createdVideo,
-                                        recordingContext = recordingContext,
-                                        taggedUserIds = taggedUserIds
-                                    )
-
-                                    onVideoCreated()
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) { println("COMPOSER: Upload failed: ${e.message}") }
-                                } finally {
-                                    isPosting = false
+                            // Hand off to BackgroundPostManager (app-scoped
+                            // coroutine) so the upload survives this composable
+                            // being dismissed. Mirror's iOS ThreadComposer:
+                            // we dismiss immediately and the tab-bar create
+                            // button shows heat-phase + embers + % progress
+                            // until the upload finishes.
+                            com.stitchsocial.club.services.BackgroundPostManager.submitPost(
+                                videoCoordinator = videoCoordinator,
+                                userTitle = title.trim(),
+                                userDescription = description.trim(),
+                                userHashtags = hashtags,
+                                taggedUserIDs = taggedUserIds,
+                                onCompleted = { createdVideo ->
+                                    // Notifications still need to fire AFTER
+                                    // the post lands. Run on the manager's
+                                    // own scope so dismissal doesn't cancel.
+                                    com.stitchsocial.club.services.BackgroundPostManager
+                                        .let { _ ->
+                                            kotlinx.coroutines.GlobalScope.launch {
+                                                runCatching {
+                                                    sendPostCreationNotifications(
+                                                        notificationService = notificationService,
+                                                        createdVideo = createdVideo,
+                                                        recordingContext = recordingContext,
+                                                        taggedUserIds = taggedUserIds
+                                                    )
+                                                }
+                                            }
+                                        }
+                                },
+                                onFailed = { error ->
+                                    if (BuildConfig.DEBUG) {
+                                        println("COMPOSER: Upload failed: ${error.message}")
+                                    }
                                 }
-                            }
+                            )
+                            // Dismiss the composer immediately — user lands
+                            // back on the feed while the upload runs.
+                            onVideoCreated()
                         },
-                        enabled = !isPosting && title.isNotBlank()
+                        enabled = title.isNotBlank()
                     ) {
-                        if (isPosting) {
+                        if (false) {  // isPosting spinner removed — progress lives on tab-bar create button now
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = Color(0xFF00BCD4),

@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import com.stitchsocial.club.VideoManager
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.services.BackgroundPostManager
+import com.stitchsocial.club.Views.EmberParticles
 
 // MARK: - Color System (Purple Theme)
 object StitchColors {
@@ -235,6 +237,12 @@ fun CustomDippedTabBar(
             }
         }
 
+        // Observe BackgroundPostManager so the create button morphs into a
+        // heat-phase progress + embers display while a post is uploading.
+        val isPosting by BackgroundPostManager.isPosting.collectAsState()
+        val postProgress by BackgroundPostManager.progress.collectAsState()
+        val postStatus by BackgroundPostManager.status.collectAsState()
+
         // Create Button - Raised position, rests on top of bar
         Box(
             modifier = Modifier
@@ -264,6 +272,11 @@ fun CustomDippedTabBar(
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                     createButtonScale = 0.9f
 
+                    // While uploading, taps on the create button do nothing —
+                    // we don't open a full progress screen on Android (yet),
+                    // and we don't want to kick off a parallel new recording.
+                    if (isPosting) return@clickable
+
                     if (BuildConfig.DEBUG) { println("🎥 CREATE BUTTON: Pausing all videos for recording") }
                     VideoManager.startRecording()
 
@@ -285,11 +298,100 @@ fun CustomDippedTabBar(
                 )
             }
 
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "Create",
+            if (isPosting || postStatus == BackgroundPostManager.PostStatus.COMPLETE
+                || postStatus == BackgroundPostManager.PostStatus.FAILED) {
+                CreateButtonPostingOverlay(
+                    progress = postProgress,
+                    status = postStatus,
+                    buttonSize = createButtonSize
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Create",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+        }
+    }
+}
+
+// MARK: - Create Button Posting Overlay (heat-phase fill + embers + %)
+//
+// Visual mirror of iOS RecordButtonProgressRing — the button itself fills
+// from the bottom with a heat-phase color as upload progress advances,
+// ember particles drift inside the circle, and the % replaces the "+" icon.
+@Composable
+private fun CreateButtonPostingOverlay(
+    progress: Double,
+    status: BackgroundPostManager.PostStatus,
+    buttonSize: androidx.compose.ui.unit.Dp
+) {
+    val isComplete = status == BackgroundPostManager.PostStatus.COMPLETE
+    val isFailed = status == BackgroundPostManager.PostStatus.FAILED
+
+    // Heat phase (matches iOS RecordButtonProgressRing)
+    val phase = when {
+        isComplete -> 4
+        progress >= 0.7 -> 3
+        progress >= 0.3 -> 2
+        else -> 1
+    }
+    val phaseColors: List<Color> = when {
+        isFailed -> listOf(Color.Red, Color(0xFFFF7A00))
+        phase == 1 -> listOf(Color(0xFF22D3EE), Color(0xFF3B82F6))
+        phase == 2 -> listOf(Color(0xFFFF8A00), Color(0xFFFF5A00))
+        phase == 3 -> listOf(Color(0xFFFF4500), Color(0xFFFF8A00))
+        phase == 4 -> listOf(Color(0xFF22C55E), Color(0xFF22D3EE))
+        else -> listOf(Color(0xFF22D3EE), Color(0xFF3B82F6))
+    }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // Heat-phase fill rising from the bottom of the button
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val fillHeight = size.height * progress.toFloat().coerceIn(0f, 1f)
+            // Draw the fill rectangle clipped to the existing circular shape
+            // (parent Box has .clip(CircleShape)).
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = phaseColors,
+                    startY = size.height - fillHeight,
+                    endY = size.height
+                ),
+                topLeft = Offset(0f, size.height - fillHeight),
+                size = Size(size.width, fillHeight)
+            )
+        }
+
+        // Embers drifting inside the button on phases 2–3 (not on complete/failed)
+        if (phase in 2..3 && !isComplete && !isFailed) {
+            EmberParticles(
+                modifier = Modifier.fillMaxSize(),
+                intensity = if (phase == 3) 0.7f else 0.4f,
+                color = phaseColors[0]
+            )
+        }
+
+        // Center label: % while uploading, ✓ on complete, ! on failed
+        when {
+            isComplete -> Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Posted",
                 tint = Color.White,
                 modifier = Modifier.size(26.dp)
+            )
+            isFailed -> Icon(
+                imageVector = Icons.Default.PriorityHigh,
+                contentDescription = "Failed",
+                tint = Color.White,
+                modifier = Modifier.size(26.dp)
+            )
+            else -> Text(
+                text = "${(progress * 100).toInt()}%",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
             )
         }
     }
