@@ -336,7 +336,7 @@ fun MainScreen() {
                 "hype", "reply", "cool", "engagement",
                 "stitch", "thread", "newVideo", "mention",
                 "video", "reengagement_stitches", "reengagement_milestone",
-                "tip" -> {
+                "tip", "question" -> {
                     // Cloud Functions include threadID in payload — use it for deep linking
                     val resolvedThreadID = threadId ?: videoId
                     if (resolvedThreadID != null) {

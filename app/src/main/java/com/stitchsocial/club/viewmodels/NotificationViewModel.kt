@@ -228,6 +228,7 @@ class NotificationViewModel(
             StitchNotificationType.MILESTONE -> NotificationType.TAP_MILESTONE
             StitchNotificationType.TIER_UPGRADE -> NotificationType.TIER_UPGRADED
             StitchNotificationType.SYSTEM -> NotificationType.SYSTEM_UPDATE
+            StitchNotificationType.QUESTION -> NotificationType.QUESTION_RECEIVED
             else -> NotificationType.SYSTEM_UPDATE
         }
     }
@@ -585,7 +586,8 @@ enum class NotificationType {
     FOLLOWING_VIDEO,
     TAP_MILESTONE,
     TIER_UPGRADED,
-    SYSTEM_UPDATE;
+    SYSTEM_UPDATE,
+    QUESTION_RECEIVED;
 
     val emoji: String
         get() = when (this) {
@@ -597,6 +599,7 @@ enum class NotificationType {
             TAP_MILESTONE -> "ðŸŽ¯"
             TIER_UPGRADED -> "â¬†ï¸"
             SYSTEM_UPDATE -> "â„¹ï¸"
+            QUESTION_RECEIVED -> "❓"
         }
 }
 

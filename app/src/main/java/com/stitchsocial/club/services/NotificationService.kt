@@ -633,7 +633,13 @@ enum class StitchNotificationType(val rawValue: String) {
     TIER_UPGRADE("tier_upgrade"),
     SPIN_OFF("spinoff"),
     TIP("tip"),
-    SYSTEM("system");
+    SYSTEM("system"),
+    /**
+     * Interest-matched question push routed server-side by the
+     * notifyOnQuestionPosted Cloud Function. Payload includes
+     * videoID, threadID, and the tag list that triggered the match.
+     */
+    QUESTION("question");
 
     val displayName: String
         get() = when (this) {
@@ -648,6 +654,7 @@ enum class StitchNotificationType(val rawValue: String) {
             SPIN_OFF -> "Spin-off"
             TIP -> "Tip"
             SYSTEM -> "System"
+            QUESTION -> "Question"
         }
 
     val iconName: String
@@ -663,5 +670,6 @@ enum class StitchNotificationType(val rawValue: String) {
             SPIN_OFF -> "call_split"
             TIP -> "monetization_on"
             SYSTEM -> "info"
+            QUESTION -> "help_outline"
         }
 }
