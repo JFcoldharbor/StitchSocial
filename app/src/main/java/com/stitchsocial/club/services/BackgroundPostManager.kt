@@ -1,6 +1,6 @@
 package com.stitchsocial.club.services
 
-import com.stitchsocial.club.Coordinator.VideoCoordinator
+import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import kotlinx.coroutines.*
