@@ -11,6 +11,7 @@
 
 package com.stitchsocial.club
 
+import com.stitchsocial.club.ui.theme.StitchColors
 import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -565,7 +566,7 @@ private fun ProcessingOverlay(progress: Double) {
                 LinearProgressIndicator(
                     progress = { progress.toFloat() },
                     modifier = Modifier.width(200.dp),
-                    color = Color.Cyan
+                    color = StitchColors.secondary
                 )
                 Text(
                     text = "Processing...",

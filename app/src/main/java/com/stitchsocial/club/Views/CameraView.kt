@@ -20,6 +20,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import com.stitchsocial.club.ui.theme.StitchColors
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -725,9 +726,9 @@ private fun CinematicRecordButton(
         else -> Color.White
     }
 
-    // Gradient colors (matches iOS StitchColors)
-    val primaryOrange = Color(0xFFFF6B35)
-    val secondaryOrange = Color(0xFFFFA500)
+    // Base button gradient — iOS RecordButtonProgressRing fills the create button
+    // with the brand spectrum (StitchColors.primary + secondary), NOT orange. The
+    // old orange was pre-brand-pass debt; red stays as the active-recording state.
     val recordingRed = Color(0xFFFF3B30)
 
     val scale by animateFloatAsState(
@@ -777,7 +778,11 @@ private fun CinematicRecordButton(
                         colors = if (isRecording) {
                             listOf(recordingRed.copy(alpha = 0.8f), recordingRed.copy(alpha = 0.6f))
                         } else {
-                            listOf(primaryOrange.copy(alpha = 0.7f), secondaryOrange)
+                            listOf(
+                                StitchColors.primary.copy(alpha = 0.8f),
+                                StitchColors.secondary.copy(alpha = 0.9f),
+                                StitchColors.primary.copy(alpha = 0.85f)
+                            )
                         }
                     )
                 )

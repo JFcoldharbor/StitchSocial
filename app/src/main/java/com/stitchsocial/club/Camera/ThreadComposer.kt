@@ -13,6 +13,7 @@
 
 package com.stitchsocial.club.camera
 
+import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.foundation.BasicUserInfo
 import android.net.Uri
 import androidx.compose.animation.*
@@ -404,19 +405,19 @@ private fun UserTagSection(
         OutlinedButton(
             onClick = onEditTags,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Cyan),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Cyan.copy(alpha = 0.5f))
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = StitchColors.primary),
+            border = androidx.compose.foundation.BorderStroke(1.dp, StitchColors.primary.copy(alpha = 0.5f))
         ) {
             Icon(
                 Icons.Filled.PersonAdd,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = Color.Cyan
+                tint = StitchColors.primary
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 if (taggedUserIds.isEmpty()) "Tag Users" else "Edit Tags",
-                color = Color.Cyan
+                color = StitchColors.primary
             )
         }
     }
@@ -523,7 +524,7 @@ private fun UserTagSheetContent(
                     ) {
                         Text(
                             "Done",
-                            color = if (selectedUsers.isNotEmpty()) Color.Cyan else Color.Gray,
+                            color = if (selectedUsers.isNotEmpty()) StitchColors.primary else Color.Gray,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -599,7 +600,7 @@ private fun UserTagSheetContent(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Cyan.copy(alpha = 0.1f))
+                        .background(StitchColors.primary.copy(alpha = 0.1f))
                         .padding(vertical = 12.dp)
                 ) {
                     Row(
@@ -644,7 +645,7 @@ private fun UserTagSheetContent(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            CircularProgressIndicator(color = Color.Cyan)
+                            CircularProgressIndicator(color = StitchColors.primary)
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("Searching...", color = Color.Gray)
                         }
@@ -658,7 +659,7 @@ private fun UserTagSheetContent(
                             Icon(
                                 Icons.Default.PersonAdd,
                                 contentDescription = null,
-                                tint = Color.Cyan,
+                                tint = StitchColors.primary,
                                 modifier = Modifier.size(56.dp)
                             )
                             Spacer(modifier = Modifier.height(16.dp))
@@ -712,7 +713,7 @@ private fun SelectedUserChip(
 ) {
     Row(
         modifier = Modifier
-            .background(Color.Cyan, RoundedCornerShape(50))
+            .background(StitchColors.primary, RoundedCornerShape(50))
             .padding(start = 6.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -756,7 +757,7 @@ private fun SearchResultRow(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer(alpha = if (isDisabled) 0.5f else 1f)
-            .background(if (isSelected) Color.Cyan.copy(alpha = 0.1f) else Color.Transparent)
+            .background(if (isSelected) StitchColors.primary.copy(alpha = 0.1f) else Color.Transparent)
             .clickable(enabled = !isDisabled) { onTap() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -771,7 +772,7 @@ private fun SearchResultRow(
                 .clip(CircleShape)
                 .background(Color(0xFF4D4D4D))
                 .then(
-                    if (isSelected) Modifier.border(2.dp, Color.Cyan, CircleShape)
+                    if (isSelected) Modifier.border(2.dp, StitchColors.primary, CircleShape)
                     else Modifier
                 ),
             contentScale = ContentScale.Crop
@@ -796,7 +797,7 @@ private fun SearchResultRow(
                     Icon(
                         Icons.Default.Verified,
                         contentDescription = "Verified",
-                        tint = Color.Cyan,
+                        tint = StitchColors.primary,
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -815,11 +816,11 @@ private fun SearchResultRow(
                 .size(24.dp)
                 .border(
                     2.dp,
-                    if (isSelected) Color.Cyan else Color.Gray,
+                    if (isSelected) StitchColors.primary else Color.Gray,
                     CircleShape
                 )
                 .background(
-                    if (isSelected) Color.Cyan else Color.Transparent,
+                    if (isSelected) StitchColors.primary else Color.Transparent,
                     CircleShape
                 ),
             contentAlignment = Alignment.Center
