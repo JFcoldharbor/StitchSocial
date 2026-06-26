@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.stitchsocial.club.foundation.CollectionContentType
 import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.ui.theme.Spacing
+import com.stitchsocial.club.ui.theme.StitchColors
 
 // ─────────────────────────────────────────────
 // MARK: - Profile Collections Row
@@ -76,13 +78,13 @@ fun ProfileCollectionsRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = Spacing.sm)
     ) {
         // ── Header ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = Spacing.md),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -94,18 +96,18 @@ fun ProfileCollectionsRow(
             )
             Text(
                 "See all",
-                color = Color.Cyan,
+                color = StitchColors.primary,
                 fontSize = 11.sp,
                 modifier = Modifier.clickable { onSeeAllTap() }
             )
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Spacing.sm))
 
         // ── Horizontal scroll ──
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             // Add button (own profile only)
             if (isOwnProfile) {
@@ -125,7 +127,9 @@ fun ProfileCollectionsRow(
                 CollectionThumbnailCard(
                     collection = collection,
                     onTap = { onCollectionTap(collection) },
-                    modifier = Modifier.width(140.dp)
+                    cardWidth = CollectionCardMetrics.width,
+                    cardHeight = CollectionCardMetrics.height,
+                    corner = CollectionCardMetrics.corner
                 )
             }
         }
@@ -170,10 +174,11 @@ fun ShowCard(
 
     Box(
         modifier = Modifier
-            .width(140.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .width(CollectionCardMetrics.width)
+            .height(CollectionCardMetrics.height)
+            .clip(RoundedCornerShape(CollectionCardMetrics.corner))
             .background(color.copy(alpha = 0.06f))
-            .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+            .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(CollectionCardMetrics.corner))
             .clickable { onTap() }
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -186,7 +191,7 @@ fun ShowCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(72.dp)
+                        .height(CollectionCardMetrics.media)
                 )
             }
 
@@ -305,30 +310,33 @@ private fun MiniEpisodeCell(
 
 @Composable
 private fun AddShowButton(onTap: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.clickable { onTap() }
+    // Same footprint as every other card in the row (iOS parity); the +/New
+    // sit centered inside instead of a label hanging below (which made the
+    // add card a different height than the rest).
+    Box(
+        modifier = Modifier
+            .size(width = CollectionCardMetrics.width, height = CollectionCardMetrics.height)
+            .clip(RoundedCornerShape(CollectionCardMetrics.corner))
+            .border(
+                width = 1.5.dp,
+                color = StitchColors.primary.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(CollectionCardMetrics.corner)
+            )
+            .clickable { onTap() },
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(width = 140.dp, height = 100.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .border(
-                    width = 1.5.dp,
-                    color = Color.Cyan.copy(alpha = 0.4f),
-                    shape = RoundedCornerShape(12.dp)
-                ),
-            contentAlignment = Alignment.Center
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
                 Icons.Default.Add,
                 contentDescription = "New Show",
-                tint = Color.Cyan.copy(alpha = 0.7f),
-                modifier = Modifier.size(24.dp)
+                tint = StitchColors.primary.copy(alpha = 0.8f),
+                modifier = Modifier.size(28.dp)
             )
+            Text("New", color = Color.Gray, fontSize = 10.sp)
         }
-        Text("New", color = Color.Gray, fontSize = 10.sp)
     }
 }
 

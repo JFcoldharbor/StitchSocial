@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,20 +113,20 @@ fun CollectionsDiscoveryRow(
 fun CollectionThumbnailCard(
     collection: VideoCollection,
     onTap: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cardWidth: Dp = 160.dp,
+    cardHeight: Dp = 220.dp,
+    corner: Dp = 12.dp
 ) {
-    val cardWidth = 160.dp
-    val cardHeight = 220.dp
-
     Box(
         modifier = modifier
             .width(cardWidth)
             .height(cardHeight)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(corner))
             .border(
                 width = 1.dp,
                 color = contentTypeAccent(collection.contentType).copy(alpha = 0.4f),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(corner)
             )
             .clickable { onTap() }
     ) {
