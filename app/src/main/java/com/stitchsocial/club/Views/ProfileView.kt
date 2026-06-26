@@ -1372,7 +1372,7 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(14.dp))
+                Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(14.dp))
                 Text("Hype Rating", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
             Text("${hypeRating.toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -1382,7 +1382,7 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
                     .background(
-                        Brush.horizontalGradient(listOf(Color(0xFF4CAF50), Color(0xFFFFEB3B), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF9C27B0))),
+                        Brush.horizontalGradient(listOf(StitchColors.gradientStart, StitchColors.gradientEnd)),
                         RoundedCornerShape(5.dp)
                     )
             )
@@ -1752,7 +1752,7 @@ private fun ProfileStreakSection() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("\uD83D\uDD25", fontSize = 16.sp) // flame
+        Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(18.dp))
         Text(
             if (current > 0) "$current day streak" else "Start your streak",
             fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
@@ -1782,7 +1782,7 @@ private fun StreakSheet(onDismiss: () -> Unit) {
                 modifier = Modifier.size(88.dp).clip(CircleShape)
                     .background(StitchColors.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
-            ) { Text("\uD83D\uDD25", fontSize = 40.sp) }
+            ) { Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(44.dp)) }
 
             Text(
                 "$current ${if (current == 1) "day" else "days"}",
