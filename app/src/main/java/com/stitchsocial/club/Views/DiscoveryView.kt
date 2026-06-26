@@ -1098,7 +1098,7 @@ fun DiscoveryView(
                                     // Thread3DInfoPanel's focus target if the user tapped
                                     // a specific reply in the preview.
                                     val threadID = currentVideo.threadID ?: currentVideo.id
-                                    onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
+                                    onShowThreadView(threadID, action.wtargetVideoID ?: currentVideo.id)
                                     if (BuildConfig.DEBUG) { println("DISCOVERY: Thread button tapped - navigating to $threadID") }
                                 }
                                 is OverlayAction.StitchRecording -> {

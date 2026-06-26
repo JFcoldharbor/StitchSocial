@@ -71,8 +71,10 @@ import com.stitchsocial.club.foundation.BasicVideoInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.foundation.CoinPriceTier
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.services.StreakService
+import com.stitchsocial.club.services.SubscriptionService
 import com.stitchsocial.club.ui.theme.color
 
 // Services
@@ -1201,6 +1203,13 @@ private fun ProfileHeader(
             }
         }
 
+        // Badges — directly under the avatar/identity (iOS parity).
+        ProfileBadgePreviewRow(
+            userID = user.id,
+            isOwner = isOwnProfile,
+            onTapView = onShowBadgePage
+        )
+
         // Bio
         BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
 
@@ -1227,16 +1236,6 @@ private fun ProfileHeader(
             targetUsername = user.username
         )
 
-        // Badge preview — pinned-first, taps open the badge page.
-        // Mounting the BadgePageView itself happens at the top of
-        // ProfileView (outside the scrolling container) — nesting
-        // BadgePageView's verticalScroll inside Profile's scroll
-        // throws "infinity max height".
-        ProfileBadgePreviewRow(
-            userID = user.id,
-            isOwner = isOwnProfile,
-            onTapView = onShowBadgePage
-        )
     }
 }
 
@@ -1244,31 +1243,37 @@ private fun ProfileHeader(
 
 @Composable
 private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emptyList()) {
-    val tierColors = getTierColors(user.tier)
-    val hypeProgress = calculateHypeLevel(user, videos, user.followerCount ?: 0) / 100f
-    val sweepAngle = 360f * hypeProgress.coerceIn(0f, 1f)
+    // Supporter (subscription) ring — colored by the owner's TOP supporter tier,
+    // with a count bubble. Was a hype-progress ring; hype now lives in the meter.
+    var supporterCount by remember(user.id) { mutableStateOf(0) }
+    var ringColor by remember(user.id) { mutableStateOf<Color?>(null) }
+    LaunchedEffect(user.id) {
+        try {
+            val subs = SubscriptionService.shared.fetchMySubscribers(user.id)
+            supporterCount = subs.size
+            ringColor = subs.maxByOrNull { it.coinTier.rawValue }?.let { coinTierColor(it.coinTier) }
+        } catch (_: Exception) { }
+    }
 
     Box(modifier = Modifier.size(76.dp), contentAlignment = Alignment.Center) {
-        // Background ring
+        // Neutral base ring
         Canvas(modifier = Modifier.size(76.dp)) {
             drawArc(
                 color = Color.Gray.copy(alpha = 0.3f),
-                startAngle = -90f, sweepAngle = 360f,
-                useCenter = false,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
                 style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             )
         }
 
-        // Hype progress ring
-        Canvas(modifier = Modifier.size(76.dp)) {
-            drawArc(
-                brush = Brush.sweepGradient(
-                    colors = if (tierColors.size > 1) tierColors else listOf(tierColors[0], tierColors[0])
-                ),
-                startAngle = -90f, sweepAngle = sweepAngle,
-                useCenter = false,
-                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-            )
+        // Supporter ring (full circle) when there are supporters
+        ringColor?.let { rc ->
+            Canvas(modifier = Modifier.size(76.dp)) {
+                drawArc(
+                    color = rc,
+                    startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
         }
 
         // Profile image
@@ -1281,7 +1286,31 @@ private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMeta
             modifier = Modifier.size(66.dp).clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
             contentScale = ContentScale.Crop
         )
+
+        // Supporter count bubble
+        if (supporterCount > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .clip(CircleShape)
+                    .background(ringColor ?: StitchColors.primary)
+                    .border(1.5.dp, Color.Black, CircleShape)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("$supporterCount", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            }
+        }
     }
+}
+
+/** Subscription coin-tier -> ring color (mirrors iOS SupporterRingView). */
+private fun coinTierColor(tier: CoinPriceTier): Color = when (tier) {
+    CoinPriceTier.STARTER -> Color(0xFF9CA3AF)  // gray
+    CoinPriceTier.BASIC   -> Color(0xFF4ADE80)  // green
+    CoinPriceTier.PLUS    -> Color(0xFF60A5FA)  // blue
+    CoinPriceTier.PRO     -> Color(0xFFC084FC)  // purple
+    CoinPriceTier.MAX     -> Color(0xFFFBBF24)  // gold
 }
 
 // ===== TIER BADGE =====

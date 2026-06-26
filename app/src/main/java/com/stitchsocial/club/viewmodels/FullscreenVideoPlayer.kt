@@ -148,8 +148,9 @@ fun FullscreenVideoPlayer(
                         // callback. Callers (ProfileView) MUST pass a real
                         // handler — MainActivity now does this since the
                         // recent fix.
+                        // Respect the Thread3DInfoPanel's focus target if set.
                         if (onShowThreadView != null) {
-                            onShowThreadView.invoke(threadID, video.id)
+                            onShowThreadView.invoke(threadID, action.targetVideoID ?: video.id)
                         } else {
                             if (BuildConfig.DEBUG) { println("FULLSCREEN: ⚠️ Navigate to thread but no onShowThreadView handler wired — caller forgot to pass it") }
                         }

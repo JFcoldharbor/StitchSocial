@@ -468,7 +468,10 @@ private fun ThreadVideoCard(
                         is OverlayAction.StitchRecording -> onStitchTap(currentVideo)
                         is OverlayAction.NavigateToThread -> {
                             val threadID = currentVideo.threadID ?: currentVideo.id
-                            onShowThreadView(threadID, currentVideo.id)
+                            // action.targetVideoID is set when the user taps a specific
+                            // reply in the Thread3DInfoPanel preview; null falls back to
+                            // the current feed video's id (existing behavior).
+                            onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
                         }
                         else -> {}
                     }

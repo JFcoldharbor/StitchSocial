@@ -17,7 +17,13 @@ package com.stitchsocial.club.views
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.*
+import com.stitchsocial.club.ui.components.Thread3DInfoPanel
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -180,7 +186,10 @@ enum class SwappableSlotMode { HYPE, TIP }
 
 sealed class OverlayAction {
     data class NavigateToProfile(val userID: String) : OverlayAction()
-    object NavigateToThread : OverlayAction()
+    // NavigateToThread carries an optional targetVideoID — when the user
+    // taps a specific reply in the Thread3DInfoPanel preview, this is the
+    // reply we want full ThreadView to focus on. Null = jump to thread root.
+    data class NavigateToThread(val targetVideoID: String? = null) : OverlayAction()
     object Follow : OverlayAction()
     object Unfollow : OverlayAction()
     data class Engagement(val type: EngagementType) : OverlayAction()
@@ -315,6 +324,16 @@ fun ContextualVideoOverlay(
     var videoEngagement by remember { mutableStateOf<ContextualVideoEngagement?>(null) }
     var videoDescription by remember { mutableStateOf<String?>(null) }
     var showViewersSheet by remember { mutableStateOf(false) }
+
+    // Thread preview panel state (Option 1 in-place transformation).
+    // Tapping the Thread button opens Thread3DInfoPanel as a holographic
+    // overlay over the bottom of the feed canvas — parent video keeps
+    // playing, no PAUSE_ALL_VIDEOS broadcast. Tapping a reply thumbnail
+    // in the panel is what triggers the push to full ThreadView focused
+    // on that reply. Mirrors iOS ContextualVideoOverlay.swift 1.7(50)+.
+    var showThreadPanel by remember { mutableStateOf(false) }
+    var threadPanelExpanded by remember { mutableStateOf(true) }
+    var threadPanelChildren by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
 
     // Services for view tracking
     val videoService = remember { VideoServiceImpl() }
@@ -659,7 +678,9 @@ fun ContextualVideoOverlay(
                 onViewersTap = { showViewersSheet = true },
                 onAction = onAction,
                 onThreadTap = {
-                    onAction?.invoke(OverlayAction.NavigateToThread)
+                    // Option 1: opens the preview panel locally instead of
+                    // pushing full ThreadView. Parent video keeps playing.
+                    showThreadPanel = true
                 }
             )
         }
@@ -670,6 +691,48 @@ fun ContextualVideoOverlay(
                 iconManager = manager,
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // Thread preview panel (Option 1). Holographic overlay anchored
+        // bottom; parent video keeps playing behind it. Tap a reply
+        // thumbnail = pause + push full ThreadView; tap close = dismiss.
+        AnimatedVisibility(
+            visible = showThreadPanel,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            Thread3DInfoPanel(
+                parentVideo = video,
+                childVideos = threadPanelChildren,
+                selectedVideo = null,
+                isExpanded = threadPanelExpanded,
+                onExpandChange = { threadPanelExpanded = it },
+                onVideoTap = { tappedChild ->
+                    showThreadPanel = false
+                    pauseAllVideos(context)
+                    scope.launch {
+                        delay(250)
+                        onAction?.invoke(OverlayAction.NavigateToThread(targetVideoID = tappedChild.id))
+                    }
+                },
+                onClose = { showThreadPanel = false }
+            )
+        }
+    }
+
+    // Lazy-load thread children when the panel opens for the first time.
+    // 1 Firestore round-trip per overlay instance; cached after.
+    LaunchedEffect(showThreadPanel) {
+        if (showThreadPanel && threadPanelChildren.isEmpty()) {
+            try {
+                val threadID = video.threadID ?: video.id
+                val (_, children) = videoService.getThreadData(threadID)
+                threadPanelChildren = children
+                Log.d("THREAD_PANEL", "Loaded ${children.size} children for $threadID")
+            } catch (e: Exception) {
+                Log.e("THREAD_PANEL", "Failed to load children: ${e.message}")
+            }
         }
     }
 
@@ -1287,9 +1350,10 @@ private fun BottomSection(
                     label = "Thread",
                     ringColor = Color.Cyan,
                     onClick = {
-                        pauseAllVideos(context)
+                        // Option 1 entry: parent video keeps playing — no
+                        // pauseAllVideos broadcast, no navigation. onThreadTap
+                        // is now the panel-open callback (see line ~661).
                         onThreadTap()
-                        onAction?.invoke(OverlayAction.NavigateToThread)
                     }
                 )
 
