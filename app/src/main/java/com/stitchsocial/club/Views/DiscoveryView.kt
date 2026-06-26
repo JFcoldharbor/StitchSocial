@@ -1286,7 +1286,7 @@ private fun DiscoveryHeader(
                 )
                 Row {
                     Text("Stitch", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
-                    Text("Social", color = StitchColors.primary, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
+                    Text("Social", color = Color.Cyan, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
                 }
             }
             if (isLoading) {
