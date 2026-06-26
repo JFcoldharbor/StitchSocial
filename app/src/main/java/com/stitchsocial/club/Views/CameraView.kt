@@ -703,6 +703,14 @@ private fun CameraBottomControls(
     }
 }
 
+/** Heat-phase fill colors by recording progress (iOS RecordButtonProgressRing
+ *  phases): cyan/blue early, orange mid, red-orange near the time limit. */
+private fun heatPhaseColors(progress: Float): List<Color> = when {
+    progress >= 0.7f -> listOf(Color(0xFFFF4500), Color(0xFFFF9500))
+    progress >= 0.3f -> listOf(Color(0xFFFF9500), Color(0xFFFF6600))
+    else             -> listOf(Color(0xFF00D9F2), Color(0xFF3366FF))
+}
+
 /**
  * Cinematic Recording Button — matches iOS CinematicRecordingButton.swift
  * Progress ring around a gradient circle with state-based center icon
@@ -727,9 +735,9 @@ private fun CinematicRecordButton(
     }
 
     // Base button gradient — iOS RecordButtonProgressRing fills the create button
-    // with the brand spectrum (StitchColors.primary + secondary), NOT orange. The
-    // old orange was pre-brand-pass debt; red stays as the active-recording state.
-    val recordingRed = Color(0xFFFF3B30)
+    // with the brand spectrum (StitchColors.primary + secondary). While recording,
+    // a heat-phase fill rises from the bottom (cyan -> orange -> red by progress).
+    val recordingRed = Color(0xFFFF3B30)  // idle center dot (classic record affordance)
 
     val scale by animateFloatAsState(
         targetValue = if (isRecording) 1.05f else 1f,
@@ -775,15 +783,11 @@ private fun CinematicRecordButton(
                 .clip(CircleShape)
                 .background(
                     Brush.linearGradient(
-                        colors = if (isRecording) {
-                            listOf(recordingRed.copy(alpha = 0.8f), recordingRed.copy(alpha = 0.6f))
-                        } else {
-                            listOf(
-                                StitchColors.primary.copy(alpha = 0.8f),
-                                StitchColors.secondary.copy(alpha = 0.9f),
-                                StitchColors.primary.copy(alpha = 0.85f)
-                            )
-                        }
+                        colors = listOf(
+                            StitchColors.primary.copy(alpha = 0.8f),
+                            StitchColors.secondary.copy(alpha = 0.9f),
+                            StitchColors.primary.copy(alpha = 0.85f)
+                        )
                     )
                 )
                 .then(
@@ -794,6 +798,18 @@ private fun CinematicRecordButton(
                     } else Modifier
                 )
         ) {
+            // Heat-phase fill rises from the bottom as recording progresses, masked
+            // to the circle (iOS RecordButtonProgressRing parity): cyan -> orange -> red.
+            if (progress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(progress.coerceIn(0f, 1f))
+                        .align(Alignment.BottomCenter)
+                        .background(Brush.verticalGradient(heatPhaseColors(progress)))
+                )
+            }
+
             // Center icon — matches iOS states
             if (isRecording) {
                 // Recording: white rounded square (matches iOS RoundedRectangle)
