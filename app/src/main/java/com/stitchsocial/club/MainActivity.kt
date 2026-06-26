@@ -114,6 +114,11 @@ class MainActivity : ComponentActivity() {
         // creates the cache directory under context.cacheDir.
         com.stitchsocial.club.live.StreamClipCache.init(this)
 
+        // Initialize the MAIN video disk cache. Without this,
+        // VideoDiskCache.buildCacheDataSourceFactory() throws, which broke
+        // ExoPlayer playback (black video) and all prefetch. One-shot setup.
+        com.stitchsocial.club.services.VideoDiskCache.init(this)
+
         // Bootstrap LinkedAccountManager so AuthService can use the
         // static `shared` accessor when seeding linked accounts on signIn.
         com.stitchsocial.club.services.LinkedAccountManager.getInstance(this)
