@@ -21,6 +21,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -176,44 +177,51 @@ val Pink40 = StitchColors.secondary
  */
 @Composable
 fun StitchSocialClubTheme(
-    darkTheme: Boolean = true, // Changed: Default to dark theme (video app standard)
-    dynamicColor: Boolean = false, // Changed: Disable by default for brand consistency
+    mode: AppThemeMode = AppThemeMode.DARK, // safe default — keeps the all-dark look until
+    // screens migrate to StitchTheme.colors; the Appearance picker overrides this.
+    dynamicColor: Boolean = false, // Disabled by default for brand consistency
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (mode) {
+        AppThemeMode.DARK -> true
+        AppThemeMode.LIGHT -> false
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+
     val colorScheme = when {
         // Dynamic color support for Android 12+ (but prefer brand colors)
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-
-        // Use Stitch brand colors (preferred)
         darkTheme -> StitchDarkColorScheme
         else -> StitchLightColorScheme
     }
 
+    val semantic = if (darkTheme) DarkSemanticColors else LightSemanticColors
     val view = LocalView.current
 
-    // Set system bar colors to match theme
+    // System bars follow the theme (black on dark, white on light).
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = StitchColors.background.toArgb() // Pure black status bar
-            window.navigationBarColor = StitchColors.background.toArgb() // Pure black nav bar
-
-            // Ensure status bar content is light (white icons/text on black background)
+            val barColor = semantic.bg.toArgb()
+            window.statusBarColor = barColor
+            window.navigationBarColor = barColor
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = false // White status bar content
-                isAppearanceLightNavigationBars = false // White nav bar content
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
             }
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography, // Keep existing typography
-        content = content
-    )
+    CompositionLocalProvider(LocalStitchColors provides semantic) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography, // Keep existing typography
+            content = content
+        )
+    }
 }
 
 // MARK: - Theme Extensions
