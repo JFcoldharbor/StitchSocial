@@ -21,6 +21,14 @@ sealed class RecordingContext {
     data class ContinueThread(val threadId: String, val threadInfo: ThreadInfo) : RecordingContext()
     // NEW: Spin-off from depth 2 video
     data class SpinOffFrom(val videoId: String, val threadId: String, val videoInfo: VideoInfo) : RecordingContext()
+
+    /** Engagement-streak classification: stitches/replies = reply; new threads,
+     *  continuations, and spin-offs = post. Mirrors iOS RecordingContext.countsAsReply. */
+    val countsAsReply: Boolean
+        get() = when (this) {
+            is ReplyToVideo, is StitchToThread -> true
+            is NewThread, is ContinueThread, is SpinOffFrom -> false
+        }
 }
 
 // MARK: - Context Info Data Classes

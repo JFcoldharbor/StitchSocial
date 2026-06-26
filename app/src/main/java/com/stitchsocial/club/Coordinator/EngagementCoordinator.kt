@@ -4,6 +4,8 @@
  */
 
 package com.stitchsocial.club.coordination
+import com.stitchsocial.club.services.StreakService
+import com.stitchsocial.club.services.StreakAction
 
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.engagement.*
@@ -159,6 +161,9 @@ class EngagementCoordinator(
                 state.resetHypeTaps()
                 return@withContext false
             }
+
+            // A hype is a qualifying daily action -> feed the engagement streak.
+            StreakService.shared.recordAction(StreakAction.HYPE)
 
             // Award clout
             if (cloutAwarded > 0) {

@@ -111,6 +111,11 @@ class UploadCoordinator(
                         HypeRatingService.shared.didPostOriginalContent(isInApp = isInApp)
                 }
 
+                // Engagement streak: stitches/replies = reply, new threads = post.
+                StreakService.shared.recordAction(
+                    if (recordingContext.countsAsReply) StreakAction.REPLY else StreakAction.POST
+                )
+
                 // Step 6: Return success result
                 VideoUploadResult(
                     success = true,
