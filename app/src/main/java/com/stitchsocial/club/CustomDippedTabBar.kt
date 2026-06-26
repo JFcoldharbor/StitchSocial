@@ -45,9 +45,9 @@ import com.stitchsocial.club.Views.EmberParticles
 
 // MARK: - Color System (Purple Theme)
 object StitchColors {
-    val primary = Color(0xFF8B5CF6)        // Purple-500
-    val secondary = Color(0xFFA855F7)      // Purple-400
-    val accent = Color(0xFF7C3AED)         // Purple-700
+    val primary = Color(0xFFE91E63)        // Magenta (brand)
+    val secondary = Color(0xFF3399FF)      // Brand blue
+    val accent = Color(0xFFC2185B)         // Dark magenta
     val textSecondary = Color(0xFF9CA3AF)
     val background = Color.Black
     val surface = Color(0xFF1F2937)
@@ -62,8 +62,8 @@ private object GlassColors {
     val topHighlight = Color.White.copy(alpha = 0.15f)
     val innerGlow = Color.White.copy(alpha = 0.05f)
 
-    // Purple tint
-    val purpleTint = Color(0xFF8B5CF6).copy(alpha = 0.08f)
+    // Brand tint (subtle magenta glow behind the tabs)
+    val purpleTint = Color(0xFFE91E63).copy(alpha = 0.08f)
 
     // Depth gradient
     val depthTop = Color.White.copy(alpha = 0.1f)
@@ -469,7 +469,9 @@ private fun GlassTabItem(
                 text = tab.title,
                 fontSize = 10.sp,
                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f)
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
