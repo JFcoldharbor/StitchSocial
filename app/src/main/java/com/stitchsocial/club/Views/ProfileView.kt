@@ -107,22 +107,10 @@ import com.stitchsocial.club.BuildConfig
 
 // ===== HELPER FUNCTIONS =====
 
-private fun getTierColors(tier: UserTier): List<Color> {
-    return when (tier) {
-        UserTier.ROOKIE -> listOf(Color(0xFF808080))
-        UserTier.RISING -> listOf(Color(0xFF4A90E2), Color(0xFF64B5F6))
-        UserTier.VETERAN -> listOf(Color(0xFF50C878), Color(0xFF81C784))
-        UserTier.INFLUENCER -> listOf(Color(0xFFFFD700), Color(0xFFFDD835))
-        UserTier.AMBASSADOR -> listOf(Color(0xFF9B59B6), Color(0xFFAB47BC))
-        UserTier.ELITE -> listOf(Color(0xFF9B59B6), Color(0xFFBA68C8))
-        UserTier.PARTNER -> listOf(Color(0xFFE74C3C), Color(0xFFEF5350))
-        UserTier.LEGENDARY -> listOf(Color(0xFFFF6B35), Color(0xFFFF8A65))
-        UserTier.TOP_CREATOR -> listOf(Color(0xFFFFD700), Color(0xFFFFA726))
-        UserTier.FOUNDER -> listOf(Color(0xFFFFD700), Color(0xFFFF6B35), Color(0xFFE91E63))
-        UserTier.CO_FOUNDER -> listOf(Color(0xFFFFD700), Color(0xFFFF6B35))
-        UserTier.BUSINESS -> listOf(Color(0xFF00BCD4), Color(0xFF26C6DA))
-    }
-}
+// Canonical tier-color gradient (2 stops from UserTier.color). Was a duplicated,
+// inconsistent per-tier switch — now matches the brand spectrum everywhere.
+private fun getTierColors(tier: UserTier): List<Color> =
+    listOf(tier.color, tier.color.copy(alpha = 0.7f))
 
 private fun getTierIcon(tier: UserTier): ImageVector {
     return when (tier) {

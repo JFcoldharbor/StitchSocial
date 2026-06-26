@@ -37,6 +37,7 @@ import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.ui.theme.color
 
 /**
  * Cached user data structure for tagged users
@@ -476,18 +477,5 @@ fun TaggedUserRow(
 /**
  * Get color for user tier
  */
-private fun tierColor(tier: UserTier): Color {
-    return when (tier) {
-        UserTier.FOUNDER, UserTier.CO_FOUNDER -> Color.Cyan
-        UserTier.TOP_CREATOR -> Color.Yellow
-        UserTier.LEGENDARY -> Color.Red
-        UserTier.PARTNER -> Color(0xFFE91E63) // Pink
-        UserTier.ELITE -> Color(0xFFFF8C00) // Orange
-        UserTier.AMBASSADOR -> Color(0xFF3F51B5) // Indigo
-        UserTier.INFLUENCER -> Color(0xFF9C27B0) // Purple
-        UserTier.VETERAN -> Color.Blue
-        UserTier.RISING -> Color.Green
-        UserTier.ROOKIE -> Color.Gray
-        UserTier.BUSINESS -> Color(0xFF00BCD4) // Teal
-    }
-}
+// Canonical tier color (UserTier.color). Was a duplicated, inconsistent switch.
+private fun tierColor(tier: UserTier): Color = tier.color
