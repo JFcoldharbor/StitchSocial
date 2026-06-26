@@ -63,6 +63,7 @@ import com.stitchsocial.club.coordination.NavigationCoordinator
 import com.stitchsocial.club.coordination.VideoCoordinator
 import com.stitchsocial.club.coordination.ModalState
 import com.stitchsocial.club.ui.theme.StitchSocialClubTheme
+import com.stitchsocial.club.ui.theme.ThemeState
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.camera.ThreadComposer
@@ -130,8 +131,9 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
+        ThemeState.load(this)
         setContent {
-            StitchSocialClubTheme {
+            StitchSocialClubTheme(mode = ThemeState.mode) {
                 MainScreen()
             }
         }

@@ -11,8 +11,12 @@
 
 package com.stitchsocial.club.ui.theme
 
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
@@ -64,10 +68,36 @@ val LightSemanticColors = StitchSemanticColors(
 /** Provided by StitchSocialClubTheme; defaults to dark. */
 val LocalStitchColors = staticCompositionLocalOf { DarkSemanticColors }
 
-/** Access adaptive neutrals in a composable: `StitchTheme.colors.bg`. */
-object StitchTheme {
+/**
+ * Access adaptive neutrals in a composable: `AppTheme.colors.bg`.
+ * (Named AppTheme to avoid the existing `StitchTheme` in Theme.kt, whose
+ * `.colors` returns the fixed brand StitchColors.)
+ */
+object AppTheme {
     val colors: StitchSemanticColors
         @Composable
         @ReadOnlyComposable
         get() = LocalStitchColors.current
+}
+
+/**
+ * Holds the selected AppThemeMode as Compose state + persists it to SharedPrefs
+ * ("stitch_prefs" / "app_theme"). MainActivity reads ThemeState.mode and passes
+ * it to StitchSocialClubTheme; the Appearance picker calls setMode().
+ */
+object ThemeState {
+    var mode by mutableStateOf(AppThemeMode.DARK)
+        private set
+
+    fun load(context: Context) {
+        val raw = context.getSharedPreferences("stitch_prefs", Context.MODE_PRIVATE)
+            .getString("app_theme", null)
+        mode = AppThemeMode.from(raw)
+    }
+
+    fun setMode(context: Context, newMode: AppThemeMode) {
+        mode = newMode
+        context.getSharedPreferences("stitch_prefs", Context.MODE_PRIVATE)
+            .edit().putString("app_theme", newMode.name).apply()
+    }
 }

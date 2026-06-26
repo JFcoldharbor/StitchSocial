@@ -178,7 +178,7 @@ val Pink40 = StitchColors.secondary
 @Composable
 fun StitchSocialClubTheme(
     mode: AppThemeMode = AppThemeMode.DARK, // safe default — keeps the all-dark look until
-    // screens migrate to StitchTheme.colors; the Appearance picker overrides this.
+    // screens migrate to AppTheme.colors; the Appearance picker overrides this.
     dynamicColor: Boolean = false, // Disabled by default for brand consistency
     content: @Composable () -> Unit
 ) {

@@ -40,6 +40,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.stitchsocial.club.ui.theme.ThemeState
+import com.stitchsocial.club.ui.theme.AppThemeMode
+import com.stitchsocial.club.ui.theme.StitchColors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -320,6 +323,37 @@ fun SettingsView(
                             notificationsEnabled = it; prefs.edit().putBoolean("notificationsEnabled", it).apply()
                         }
                         SNavRow(Icons.Default.Visibility, Color(0xFF0A84FF), "Privacy", "Account visibility") { showPrivacySettings = true }
+                    }
+                }
+
+                // ── Appearance ────────────────────────────────────
+                item {
+                    SSection("APPEARANCE", Icons.Default.DarkMode, Color(0xFFBF5AF2)) {
+                        AppThemeMode.entries.forEach { m ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { ThemeState.setMode(context, m) }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    m.label,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (ThemeState.mode == m) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = StitchColors.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
