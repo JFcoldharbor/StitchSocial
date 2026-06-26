@@ -1478,7 +1478,7 @@ private fun DiscoveryGridView(
 ) {
     val context = LocalContext.current
     // WiFi gate: only autoplay off cellular (raw MP4s are brutal on cellular).
-    val allowAutoplay = remember { isOnWifi(context) }
+    val allowAutoplay = remember { shouldAutoplay(context) }
     // One tile per row autoplays; the column zigzags via the [0,0,2] cycle.
     val rowCycle = listOf(0, 0, 2)
 
@@ -1491,7 +1491,8 @@ private fun DiscoveryGridView(
     ) {
         items(videos.size) { index ->
             val row = index / 3
-            val isAutoplay = allowAutoplay && (index % 3 == rowCycle[row % rowCycle.size])
+            val isAutoplay = allowAutoplay && videos[index].videoURL.isNotBlank() &&
+                    (index % 3 == rowCycle[row % rowCycle.size])
             DiscoveryVideoCard(
                 video = videos[index],
                 onTapped = { onVideoTapped(videos[index]) },
@@ -1651,12 +1652,19 @@ private fun buildGridPreviewPlayer(context: Context, url: String): ExoPlayer {
     }
 }
 
-/** True on WiFi/Ethernet. Cellular -> static grid, no autoplay (data/battery). */
-private fun isOnWifi(context: Context): Boolean {
-    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-    return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+/** Allow autoplay UNLESS we can confidently see metered cellular. Defaults to
+ *  allow when the network can't be classified (emulator / missing
+ *  ACCESS_NETWORK_STATE), so video still plays in dev. */
+private fun shouldAutoplay(context: Context): Boolean {
+    return try {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return true
+        // Block only when confidently on cellular.
+        !caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    } catch (_: Exception) {
+        true
+    }
 }
 
 // MARK: - Loading/Error Views
