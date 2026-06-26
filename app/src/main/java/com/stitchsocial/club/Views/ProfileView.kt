@@ -71,6 +71,8 @@ import com.stitchsocial.club.foundation.BasicVideoInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.ui.theme.StitchColors
+import com.stitchsocial.club.ui.theme.color
 
 // Services
 import com.stitchsocial.club.services.UserService
@@ -861,7 +863,8 @@ fun ProfileView(
                         }
                         is OverlayAction.NavigateToThread -> {
                             val threadID = currentVid.threadID ?: currentVid.id
-                            onShowThreadView(threadID, currentVid.id)
+                            // Respect the Thread3DInfoPanel's focus target if set.
+                            onShowThreadView(threadID, action.targetVideoID ?: currentVid.id)
                             scope.launch {
                                 delay(100)
                                 showingVideoPlayer = false
@@ -1195,14 +1198,17 @@ private fun ProfileHeader(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    if (user.isVerified) {
-                        Icon(Icons.Default.Verified, "Verified", tint = Color.Red, modifier = Modifier.size(16.dp))
+                    // Tier-as-verification: a tier-colored check IS the verification
+                    // (UserTier.color). Personal shows for tier != Rookie or verified;
+                    // business shows a teal check. Replaces the red icon + tier chip.
+                    if (user.isBusiness) {
+                        Icon(Icons.Default.Verified, "Business", tint = StitchColors.tierBusiness, modifier = Modifier.size(16.dp))
+                    } else if (user.tier != UserTier.ROOKIE || user.isVerified) {
+                        Icon(Icons.Default.Verified, "Verified", tint = user.tier.color, modifier = Modifier.size(16.dp))
                     }
                 }
 
                 Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
-
-                ProfileTierBadge(tier = user.tier)
             }
         }
 
