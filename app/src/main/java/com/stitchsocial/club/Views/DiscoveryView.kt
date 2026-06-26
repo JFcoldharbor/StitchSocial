@@ -905,12 +905,7 @@ fun DiscoveryView(
                                         modifier = Modifier.fillMaxSize()
                                     )
 
-                                    // Swipe Instructions Indicator (iOS style)
-                                    SwipeInstructionsIndicator(
-                                        modifier = Modifier
-                                            .align(Alignment.TopCenter)
-                                            .padding(top = 20.dp)
-                                    )
+                                    // Next/Back/Fullscreen instruction pill removed per request.
                                 }
                             }
                             DiscoveryMode.GRID -> {
@@ -1570,71 +1565,28 @@ private fun DiscoveryVideoCard(
                 )
         )
 
-        // Content Overlay
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Top badges
+        // Content overlay — HYPE ONLY. Title, @creator, replies, views and the
+        // temperature badge were removed per request; the grid shows just heat.
+        if (video.hypeCount > 0) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                // Temperature badge
-                if (video.temperature != Temperature.COOL) {
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                Color.White.copy(alpha = 0.2f),
-                                RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = video.temperature.emoji,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // Bottom info
-            Column {
+                Icon(
+                    imageVector = Icons.Default.LocalFireDepartment,
+                    contentDescription = null,
+                    tint = StitchColors.primary,
+                    modifier = Modifier.size(13.dp)
+                )
                 Text(
-                    text = video.title,
-                    fontSize = 14.sp,
+                    text = "${video.hypeCount}",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    color = Color.White
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "@${video.creatorName}",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.7f)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "ðŸ”¥ ${video.hypeCount}",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                    Text(
-                        text = "ðŸ’¬ ${video.replyCount}",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                    Text(
-                        text = "ðŸ‘ ${video.viewCount}",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-                }
             }
         }
     }
