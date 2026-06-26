@@ -1085,9 +1085,11 @@ fun DiscoveryView(
                                     onNavigateToProfile(action.userID)
                                 }
                                 is OverlayAction.NavigateToThread -> {
-                                    // Navigate to thread via parent callback
+                                    // Navigate to thread via parent callback. Respect the
+                                    // Thread3DInfoPanel's focus target if the user tapped
+                                    // a specific reply in the preview.
                                     val threadID = currentVideo.threadID ?: currentVideo.id
-                                    onShowThreadView(threadID, currentVideo.id)
+                                    onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
                                     if (BuildConfig.DEBUG) { println("DISCOVERY: Thread button tapped - navigating to $threadID") }
                                 }
                                 is OverlayAction.StitchRecording -> {
@@ -1466,10 +1468,10 @@ private fun DiscoveryGridView(
     onVideoTapped: (CoreVideoMetadata) -> Unit
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        columns = GridCells.Fixed(3),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(videos.size) { index ->
@@ -1491,7 +1493,7 @@ private fun DiscoveryVideoCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(240.dp)
+            .aspectRatio(9f / 16f)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onTapped() }
             .background(Color(0xFF1C1C1E))
