@@ -560,6 +560,19 @@ fun DiscoveryCard(
 }
 
 /**
+ * Process-wide cache of creator avatar URLs, keyed by creatorID. "" means
+ * "fetched, no avatar" so users without a photo aren't re-fetched; absent means
+ * never fetched. Survives recomposition and card recycling within the process.
+ */
+private object CreatorAvatarCache {
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun has(id: String): Boolean = cache.containsKey(id)
+    /** Cached URL, "" for known-no-avatar, or null if never fetched. */
+    fun cached(id: String): String? = cache[id]
+    fun put(id: String, url: String?) { cache[id] = url ?: "" }
+}
+
+/**
  * Standalone creator avatar (no name) for the clean Discovery overlay —
  * mirrors iOS DiscoverySwipeCards.creatorAvatar. Fetches the creator's profile
  * image lazily (it isn't on the video model) and rings it in the card's
@@ -575,12 +588,16 @@ private fun CreatorAvatar(
     val dim = if (isThread) 32.dp else 28.dp
     val context = LocalContext.current
     val userService = remember { UserService(context) }
-    var avatarURL by remember(creatorID) { mutableStateOf<String?>(null) }
+    // Seed from the process-wide cache so already-seen creators render instantly
+    // (no placeholder flash, no repeat Firestore read on card recycle).
+    var avatarURL by remember(creatorID) { mutableStateOf(CreatorAvatarCache.cached(creatorID)) }
     LaunchedEffect(creatorID) {
-        if (creatorID.isNotEmpty()) {
-            avatarURL = try {
+        if (creatorID.isNotEmpty() && !CreatorAvatarCache.has(creatorID)) {
+            val url = try {
                 userService.getUserProfile(creatorID)?.profileImageURL
             } catch (e: Exception) { null }
+            CreatorAvatarCache.put(creatorID, url)
+            avatarURL = url ?: ""
         }
     }
 
