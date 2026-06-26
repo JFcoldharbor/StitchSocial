@@ -40,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.stitchsocial.club.ui.theme.AppTheme
 import com.stitchsocial.club.ui.theme.ThemeState
 import com.stitchsocial.club.ui.theme.AppThemeMode
 import com.stitchsocial.club.ui.theme.StitchColors
@@ -160,7 +161,7 @@ fun SettingsView(
         catch (_: Exception) { "1" }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         // ── Main content ──────────────────────────────────────────
         Column(modifier = Modifier.fillMaxSize()) {
@@ -177,7 +178,7 @@ fun SettingsView(
                 }
                 Text(
                     "Settings", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    color = Color.White, modifier = Modifier.weight(1f),
+                    color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.size(40.dp))
@@ -199,7 +200,7 @@ fun SettingsView(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clickable { showWallet = true }
-                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                .background(AppTheme.colors.surfaceStrong, RoundedCornerShape(12.dp))
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -210,10 +211,10 @@ fun SettingsView(
                                 contentAlignment = Alignment.Center
                             ) { Text("🔥", fontSize = 16.sp) }
                             Column(Modifier.weight(1f)) {
-                                Text("Hype Coins", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text("Hype Coins", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
                                 Text("$coinBalance coins", fontSize = 12.sp, color = Color(0xFFFFD60A))
                             }
-                            Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(14.dp))
                         }
                         SNavRow(Icons.Default.Language, Color.Cyan, "Manage Account", "Profile, billing & security") { showManageAccount = true }
                         if (isCreator) SNavRow(Icons.Default.AttachMoney, Color(0xFF30D158), "Cash Out", "Withdraw your earnings") { showCashOut = true }
@@ -256,17 +257,17 @@ fun SettingsView(
                             // Revenue Share Card — DYNAMIC (matches iOS creatorSection revenue card)
                             Row(
                                 modifier = Modifier.fillMaxWidth()
-                                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                    .background(AppTheme.colors.surfaceStrong, RoundedCornerShape(12.dp))
                                     .padding(horizontal = 14.dp, vertical = 12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("Sub Revenue", fontSize = 11.sp, color = Color.Gray)
+                                    Text("Sub Revenue", fontSize = 11.sp, color = AppTheme.colors.textSecondary)
                                     Text("$subRevenuePercent%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF30D158))
                                 }
                                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text("Ad Revenue", fontSize = 11.sp, color = Color.Gray)
+                                    Text("Ad Revenue", fontSize = 11.sp, color = AppTheme.colors.textSecondary)
                                     Text("$adRevenuePercent%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Cyan)
                                 }
                             }
@@ -315,7 +316,7 @@ fun SettingsView(
 
                 // ── Preferences ───────────────────────────────────
                 item {
-                    SSection("PREFERENCES", Icons.Default.Tune, Color.Gray) {
+                    SSection("PREFERENCES", Icons.Default.Tune, AppTheme.colors.textSecondary) {
                         SToggleRow(Icons.Default.Vibration, Color.Cyan, "Haptic Feedback", "Vibrations", hapticEnabled) {
                             hapticEnabled = it; prefs.edit().putBoolean("hapticFeedbackEnabled", it).apply()
                         }
@@ -341,7 +342,7 @@ fun SettingsView(
                                     m.label,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = Color.White,
+                                    color = AppTheme.colors.textPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 if (ThemeState.mode == m) {
@@ -374,10 +375,10 @@ fun SettingsView(
                         }
                         // Privacy + Terms → open the same legal page used by
                         // LoginView. Single source of truth at stitchsocial.me/privacy.
-                        SNavRow(Icons.Default.Description, Color.Gray, "Privacy Policy", "How we use data") {
+                        SNavRow(Icons.Default.Description, AppTheme.colors.textSecondary, "Privacy Policy", "How we use data") {
                             openExternalURL(context, "https://stitchsocial.me/privacy")
                         }
-                        SNavRow(Icons.Default.Description, Color.Gray, "Terms of Service", "Terms & conditions") {
+                        SNavRow(Icons.Default.Description, AppTheme.colors.textSecondary, "Terms of Service", "Terms & conditions") {
                             openExternalURL(context, "https://stitchsocial.me/privacy")
                         }
                     }
@@ -385,7 +386,7 @@ fun SettingsView(
 
                 // ── About ─────────────────────────────────────────
                 item {
-                    SSection("ABOUT", Icons.Default.Info, Color.Gray) {
+                    SSection("ABOUT", Icons.Default.Info, AppTheme.colors.textSecondary) {
                         SAboutRow("Version", appVersion)
                         SAboutRow("Build", buildNumber)
                     }
@@ -530,7 +531,7 @@ fun SettingsView(
         }
 
         if (showFriendSuggestions) {
-            Box(Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
+            Box(Modifier.fillMaxSize().background(AppTheme.colors.bg).zIndex(10f)) {
                 val followManager = remember { FollowManager(context) }
                 SearchView(
                     followManager = followManager,
@@ -584,15 +585,15 @@ fun SettingsView(
         if (showError) {
             Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.BottomCenter) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+                    colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surface),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Error, null, tint = Color.Red, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(errorMessage, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(errorMessage, color = AppTheme.colors.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
                         IconButton(onClick = { showError = false }) {
-                            Icon(Icons.Default.Close, null, tint = Color.Gray)
+                            Icon(Icons.Default.Close, null, tint = AppTheme.colors.textSecondary)
                         }
                     }
                 }
@@ -604,8 +605,8 @@ fun SettingsView(
     if (showSignOutDialog) {
         AlertDialog(
             onDismissRequest = { showSignOutDialog = false },
-            title = { Text("Sign Out", color = Color.White) },
-            text = { Text("Are you sure you want to sign out?", color = Color.Gray) },
+            title = { Text("Sign Out", color = AppTheme.colors.textPrimary) },
+            text = { Text("Are you sure you want to sign out?", color = AppTheme.colors.textSecondary) },
             confirmButton = {
                 TextButton(onClick = {
                     showSignOutDialog = false
@@ -623,9 +624,9 @@ fun SettingsView(
                 }) { Text("Sign Out", color = Color(0xFFFF453A)) }
             },
             dismissButton = {
-                TextButton(onClick = { showSignOutDialog = false }) { Text("Cancel", color = Color.Gray) }
+                TextButton(onClick = { showSignOutDialog = false }) { Text("Cancel", color = AppTheme.colors.textSecondary) }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 }
@@ -639,7 +640,7 @@ fun SettingsView(
 private fun ProfileHeaderCard(user: BasicUserInfo) {
     Column(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(14.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(14.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -652,17 +653,17 @@ private fun ProfileHeaderCard(user: BasicUserInfo) {
                     contentDescription = user.displayName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.size(64.dp).clip(CircleShape)
-                        .background(Color.Gray.copy(alpha = 0.3f), CircleShape)
+                        .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f), CircleShape)
                 )
             } else {
                 Box(
                     Modifier.size(64.dp).clip(CircleShape)
-                        .background(Color.Gray.copy(alpha = 0.3f)),
+                        .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         if (user.isBusiness == true) Icons.Default.Business else Icons.Default.Person,
-                        null, tint = Color.Gray, modifier = Modifier.size(32.dp)
+                        null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(32.dp)
                     )
                 }
             }
@@ -673,7 +674,7 @@ private fun ProfileHeaderCard(user: BasicUserInfo) {
                     modifier = Modifier
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(Color.Black),
+                        .background(AppTheme.colors.bg),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -691,8 +692,8 @@ private fun ProfileHeaderCard(user: BasicUserInfo) {
 
         // Name + username
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(user.displayName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
+            Text(user.displayName, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+            Text("@${user.username}", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
         }
 
         // Business: category chip + website link.  Personal: tier badge.  (iOS parity, line 292-333)
@@ -757,26 +758,26 @@ private fun TierBadge(tier: UserTier) {
         UserTier.BUSINESS ->
             Brush.linearGradient(listOf(Color(0xFF64D2FF), Color(0xFF0A84FF))) to "Business"
         else ->
-            Brush.linearGradient(listOf(Color.Gray, Color.DarkGray)) to tier.displayName
+            Brush.linearGradient(listOf(AppTheme.colors.textSecondary, Color.DarkGray)) to tier.displayName
     }
     Box(
         modifier = Modifier.background(bg, RoundedCornerShape(16.dp)).padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
     }
 }
 
 @Composable
 private fun StatItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(label, fontSize = 11.sp, color = Color.Gray)
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+        Text(label, fontSize = 11.sp, color = AppTheme.colors.textSecondary)
     }
 }
 
 @Composable
 private fun StatDivider() {
-    Box(Modifier.width(1.dp).height(24.dp).background(Color.White.copy(alpha = 0.1f)))
+    Box(Modifier.width(1.dp).height(24.dp).background(AppTheme.colors.hairline))
 }
 
 // ─────────────────────────────────────────────
@@ -788,7 +789,7 @@ private fun SSection(title: String, icon: ImageVector, iconTint: Color, content:
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(icon, null, tint = iconTint, modifier = Modifier.size(12.dp))
-            Text(title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray,
+            Text(title, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textSecondary,
                 letterSpacing = 0.8.sp)
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
@@ -799,17 +800,17 @@ private fun SSection(title: String, icon: ImageVector, iconTint: Color, content:
 private fun SNavRow(icon: ImageVector, iconTint: Color, title: String, subtitle: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
             .padding(vertical = 10.dp, horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, color = Color.White)
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            Text(title, fontSize = 14.sp, color = AppTheme.colors.textPrimary)
+            Text(subtitle, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         }
-        Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+        Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -817,20 +818,20 @@ private fun SNavRow(icon: ImageVector, iconTint: Color, title: String, subtitle:
 private fun SToggleRow(icon: ImageVector, iconTint: Color, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
             .padding(vertical = 10.dp, horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, color = Color.White)
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            Text(title, fontSize = 14.sp, color = AppTheme.colors.textPrimary)
+            Text(subtitle, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         }
         Switch(
             checked = checked, onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White, checkedTrackColor = Color.Cyan,
+                checkedThumbColor = Color.White, checkedTrackColor = StitchColors.primary,
                 uncheckedThumbColor = Color.White, uncheckedTrackColor = Color(0xFF3A3A3C)
             )
         )
@@ -841,22 +842,22 @@ private fun SToggleRow(icon: ImageVector, iconTint: Color, title: String, subtit
 private fun SAboutRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
             .padding(vertical = 10.dp, horizontal = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 14.sp, color = Color.Gray)
-        Text(value, fontSize = 14.sp, color = Color.White)
+        Text(label, fontSize = 14.sp, color = AppTheme.colors.textSecondary)
+        Text(value, fontSize = 14.sp, color = AppTheme.colors.textPrimary)
     }
 }
 
 @Composable
 private fun BizStatCard(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Column(
-        modifier.background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(10.dp)).padding(12.dp),
+        modifier.background(AppTheme.colors.surface, RoundedCornerShape(10.dp)).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(label, fontSize = 12.sp, color = Color.Gray)
+        Text(label, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
     }
 }
