@@ -1478,9 +1478,7 @@ private fun DiscoveryGridView(
 ) {
     val context = LocalContext.current
     // WiFi gate: only autoplay off cellular (raw MP4s are brutal on cellular).
-    // TEMP: grid autoplay disabled until base video playback (swipe) is confirmed
-    // rendering. Flip back to remember { shouldAutoplay(context) } once that's fixed.
-    val allowAutoplay = false
+    val allowAutoplay = remember { shouldAutoplay(context) }
     // One tile per row autoplays; the column zigzags via the [0,0,2] cycle.
     val rowCycle = listOf(0, 0, 2)
 
