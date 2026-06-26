@@ -392,6 +392,10 @@ class HomeFeedService(
                 trendingScore = data[FirebaseSchema.VideoDocument.TRENDING_SCORE] as? Double ?: 0.0,
                 discoverabilityScore = data[FirebaseSchema.VideoDocument.DISCOVERABILITY_SCORE] as? Double ?: 0.5,
                 isPromoted = data[FirebaseSchema.VideoDocument.IS_PROMOTED] as? Boolean ?: false,
+                boostCoins = (data["boostCoins"] as? Number)?.toInt() ?: 0,
+                boostExpiresAt = (data["boostExpiresAt"] as? com.google.firebase.Timestamp)?.toDate(),
+                freeBoostExpiresAt = (data["freeBoostExpiresAt"] as? com.google.firebase.Timestamp)?.toDate(),
+                primaryCategory = data["primaryCategory"] as? String,
                 isProcessing = data["isProcessing"] as? Boolean ?: false,
                 isDeleted = data["isDeleted"] as? Boolean ?: false
             )

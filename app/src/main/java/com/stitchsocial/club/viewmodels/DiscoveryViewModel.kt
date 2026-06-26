@@ -12,6 +12,12 @@
  */
 package com.stitchsocial.club.viewsmodels
 
+import java.util.Date
+import kotlin.math.max
+import kotlin.math.pow
+import kotlin.random.Random
+import com.stitchsocial.club.engagement.BoostCalculator
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stitchsocial.club.foundation.*
@@ -66,7 +72,7 @@ class DiscoveryViewModel(
                 if (BuildConfig.DEBUG) { println("DISCOVERY VM: Loading real content for ${_selectedCategory.value.displayName}") }
 
                 val content = loadContentForCategory(_selectedCategory.value)
-                _discoveryContent.value = content
+                _discoveryContent.value = weightedShuffleWithRecencyPin(content)
 
                 if (BuildConfig.DEBUG) { println("DISCOVERY VM: ✅ Loaded ${content.size} real videos from Firebase") }
 
@@ -104,6 +110,33 @@ class DiscoveryViewModel(
      */
     fun retryLoading() {
         loadInitialDiscovery()
+    }
+
+    // ===== Weighted discovery shuffle (boost affects reach; port of iOS) =====
+
+    private fun weightedShuffleWithRecencyPin(input: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
+        val cutoff = Date(System.currentTimeMillis() - 48L * 60 * 60 * 1000)
+        val fresh = weightedShuffle(input.filter { it.createdAt.after(cutoff) })
+        val rest = weightedShuffle(input.filter { !it.createdAt.after(cutoff) })
+        return fresh + rest
+    }
+
+    /** Efraimidis-Spirakis weighted draw: key = u^(1/weight), sorted desc.
+     *  Equal weights -> uniform shuffle; higher weight -> earlier on average. */
+    private fun weightedShuffle(items: List<CoreVideoMetadata>): List<CoreVideoMetadata> =
+        items.map { v ->
+            val w = max(discoveryWeight(v), 1e-4)
+            val u = Random.nextDouble(1e-6, 1.0)
+            v to u.pow(1.0 / w)
+        }.sortedByDescending { it.second }.map { it.first }
+
+    /** discoverabilityScore + active boost magnitude, times affinity multiplier.
+     *  Affinity is 0 until a WatchTelemetry service lands (new-user behavior),
+     *  so the feed stays wide-open and the boost loads the dice. */
+    private fun discoveryWeight(v: CoreVideoMetadata): Double {
+        val boost = BoostCalculator.activeMagnitude(v.boostCoins, v.boostExpiresAt, v.freeBoostExpiresAt)
+        val affinity = 0.0
+        return (v.discoverabilityScore + boost) * (1.0 + affinity * 0.5)
     }
 
     /**

@@ -53,6 +53,12 @@ data class CoreVideoMetadata(
     val trendingScore: Double,
     val discoverabilityScore: Double,
 
+    // Boost + category (drives the weighted discovery shuffle; iOS BoostCalculator inputs)
+    val boostCoins: Int = 0,
+    val boostExpiresAt: Date? = null,
+    val freeBoostExpiresAt: Date? = null,
+    val primaryCategory: String? = null,
+
     // Status flags
     val isPromoted: Boolean,
     val isProcessing: Boolean,
