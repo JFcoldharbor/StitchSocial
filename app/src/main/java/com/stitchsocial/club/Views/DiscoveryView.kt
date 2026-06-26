@@ -32,6 +32,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.viewinterop.AndroidView
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1467,6 +1476,12 @@ private fun DiscoveryGridView(
     videos: List<CoreVideoMetadata>,
     onVideoTapped: (CoreVideoMetadata) -> Unit
 ) {
+    val context = LocalContext.current
+    // WiFi gate: only autoplay off cellular (raw MP4s are brutal on cellular).
+    val allowAutoplay = remember { isOnWifi(context) }
+    // One tile per row autoplays; the column zigzags via the [0,0,2] cycle.
+    val rowCycle = listOf(0, 0, 2)
+
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
@@ -1475,9 +1490,12 @@ private fun DiscoveryGridView(
         modifier = Modifier.fillMaxSize()
     ) {
         items(videos.size) { index ->
+            val row = index / 3
+            val isAutoplay = allowAutoplay && (index % 3 == rowCycle[row % rowCycle.size])
             DiscoveryVideoCard(
                 video = videos[index],
-                onTapped = { onVideoTapped(videos[index]) }
+                onTapped = { onVideoTapped(videos[index]) },
+                previewVideoURL = if (isAutoplay) videos[index].videoURL else null
             )
         }
     }
@@ -1485,11 +1503,14 @@ private fun DiscoveryGridView(
 
 // MARK: - Video Card
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun DiscoveryVideoCard(
     video: CoreVideoMetadata,
-    onTapped: () -> Unit
+    onTapped: () -> Unit,
+    previewVideoURL: String? = null
 ) {
+    val context = LocalContext.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1498,13 +1519,31 @@ private fun DiscoveryVideoCard(
             .clickable { onTapped() }
             .background(Color(0xFF1C1C1E))
     ) {
-        // Thumbnail
+        // Thumbnail (stays behind — shows through until the video renders)
         AsyncImage(
             model = video.thumbnailURL,
             contentDescription = video.title,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
+
+        // Muted preview — only on designated autoplay tiles (WiFi only). Sits
+        // above the thumbnail, below the overlays. Released when scrolled off.
+        if (previewVideoURL != null) {
+            val exo = remember(previewVideoURL) { buildGridPreviewPlayer(context, previewVideoURL) }
+            DisposableEffect(previewVideoURL) { onDispose { exo.release() } }
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exo
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    }
+                },
+                modifier = Modifier.matchParentSize()
+            )
+        }
 
         // Gradient Overlay
         Box(
@@ -1588,6 +1627,36 @@ private fun DiscoveryVideoCard(
             }
         }
     }
+}
+
+// MARK: - Grid autoplay helpers
+
+@OptIn(UnstableApi::class)
+private fun buildGridPreviewPlayer(context: Context, url: String): ExoPlayer {
+    val builder = try {
+        ExoPlayer.Builder(context).setMediaSourceFactory(
+            androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                com.stitchsocial.club.services.VideoDiskCache.buildCacheDataSourceFactory()
+            )
+        )
+    } catch (_: Exception) {
+        ExoPlayer.Builder(context)
+    }
+    return builder.build().apply {
+        volume = 0f
+        repeatMode = Player.REPEAT_MODE_ONE
+        setMediaItem(MediaItem.fromUri(url))
+        prepare()
+        playWhenReady = true
+    }
+}
+
+/** True on WiFi/Ethernet. Cellular -> static grid, no autoplay (data/battery). */
+private fun isOnWifi(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+    return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
 }
 
 // MARK: - Loading/Error Views
