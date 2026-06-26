@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -48,6 +49,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.platform.LocalContext
+import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.foundation.CollectionContentType
@@ -485,6 +490,16 @@ fun DiscoveryCard(
 
         // Bottom overlay — only on active/top card (matches iOS cardOverlay)
         if (shouldAutoPlay) {
+            // Creator avatar — top-left, no name (iOS parity), temperature ring.
+            CreatorAvatar(
+                creatorID = video.creatorID,
+                temperatureColors = temperatureColors(video.temperature),
+                isThread = video.isThread,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+            )
+
             // Gradient overlay at bottom
             Box(
                 modifier = Modifier
@@ -501,7 +516,8 @@ fun DiscoveryCard(
                     )
             )
 
-            // Video info at bottom
+            // Video info at bottom — stats only (no creator name, no title);
+            // the creator avatar moved to the top-left (iOS parity).
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -509,42 +525,6 @@ fun DiscoveryCard(
                     .padding(horizontal = 16.dp, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Creator pill (matches iOS CreatorPill with temperature colors)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = temperatureColors(video.temperature)
-                            )
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "🎬", fontSize = 12.sp)
-                    Text(
-                        text = video.creatorName.ifEmpty { "Creator" },
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // Title
-                if (video.title.isNotEmpty()) {
-                    Text(
-                        text = video.title,
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
                 // Stats row (matches iOS: hype, views, duration)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -575,6 +555,58 @@ fun DiscoveryCard(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Standalone creator avatar (no name) for the clean Discovery overlay —
+ * mirrors iOS DiscoverySwipeCards.creatorAvatar. Fetches the creator's profile
+ * image lazily (it isn't on the video model) and rings it in the card's
+ * temperature gradient.
+ */
+@Composable
+private fun CreatorAvatar(
+    creatorID: String,
+    temperatureColors: List<Color>,
+    isThread: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val dim = if (isThread) 32.dp else 28.dp
+    val context = LocalContext.current
+    val userService = remember { UserService(context) }
+    var avatarURL by remember(creatorID) { mutableStateOf<String?>(null) }
+    LaunchedEffect(creatorID) {
+        if (creatorID.isNotEmpty()) {
+            avatarURL = try {
+                userService.getUserProfile(creatorID)?.profileImageURL
+            } catch (e: Exception) { null }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .size(dim)
+            .clip(CircleShape)
+            .background(Color.Gray.copy(alpha = 0.3f))
+            .border(2.dp, Brush.linearGradient(temperatureColors), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        val url = avatarURL
+        if (!url.isNullOrEmpty()) {
+            AsyncImage(
+                model = url,
+                contentDescription = "Creator",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
+        } else {
+            Icon(
+                Icons.Default.Person,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.6f),
+                modifier = Modifier.size(dim * 0.45f)
+            )
         }
     }
 }

@@ -86,6 +86,9 @@ import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.coordination.DiscoveryEngagementTracker
 import com.stitchsocial.club.ui.theme.Spacing
 import com.stitchsocial.club.ui.theme.StitchColors
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.stitchsocial.club.R
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.SearchService
@@ -1270,12 +1273,22 @@ private fun DiscoveryHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
-            Text(
-                text = "Discovery",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            // Brand wordmark — logo glyph + "StitchSocial" (iOS parity; "Social"
+            // takes the magenta Discovery accent, matching the rest of the header).
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.stitchsociallogo),
+                    contentDescription = "Stitch Social",
+                    modifier = Modifier.size(28.dp)
+                )
+                Row {
+                    Text("Stitch", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
+                    Text("Social", color = StitchColors.primary, fontSize = 20.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
+                }
+            }
             if (isLoading) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
