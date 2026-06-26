@@ -72,6 +72,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.ui.theme.StitchColors
+import com.stitchsocial.club.services.StreakService
 import com.stitchsocial.club.ui.theme.color
 
 // Services
@@ -1215,6 +1216,11 @@ private fun ProfileHeader(
         // Bio
         BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
 
+        // Streak (own profile only) — above the hype meter; opens the streak sheet.
+        if (isOwnProfile) {
+            ProfileStreakSection()
+        }
+
         // Hype meter
         HypeMeter(user = user, videos = videos)
 
@@ -1734,4 +1740,90 @@ private fun CoreVideoMetadata.toBasicVideoInfo(): BasicVideoInfo {
         contentType = this.contentType,
         temperature = this.temperature
     )
+}
+
+
+// ===== STREAK (button + slide-up sheet) =====
+
+@Composable
+private fun ProfileStreakSection() {
+    val streak = StreakService.shared
+    val current by streak.current.collectAsState()
+    var showSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { streak.load() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .clickable { showSheet = true }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("\uD83D\uDD25", fontSize = 16.sp) // flame
+        Text(
+            if (current > 0) "$current day streak" else "Start your streak",
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+    }
+
+    if (showSheet) {
+        StreakSheet(onDismiss = { showSheet = false })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StreakSheet(onDismiss: () -> Unit) {
+    val streak = StreakService.shared
+    val current by streak.current.collectAsState()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF0A0B0D)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(88.dp).clip(CircleShape)
+                    .background(StitchColors.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) { Text("\uD83D\uDD25", fontSize = 40.sp) }
+
+            Text(
+                "$current ${if (current == 1) "day" else "days"}",
+                fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Color.White
+            )
+
+            // Streak-or-die: the bar to keep it escalates by week.
+            if (streak.todaySecured) {
+                Text("\u2705 secured today \u00B7 come back tomorrow",
+                    fontSize = 13.sp, color = Color(0xFFF572A6))
+            } else {
+                Text("Today to keep your streak", fontSize = 12.sp, color = Color.Gray)
+                Text(streak.todayRequirementLabel, fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold, color = Color(0xFFF572A6))
+            }
+
+            if (streak.hasWeeklyBoost) {
+                Text("\uD83D\uDE80 ${streak.weeklyBoostDays}-day boost active",
+                    fontSize = 13.sp, color = StitchColors.secondary)
+            } else {
+                streak.daysToNextTier?.let { d ->
+                    Text("$d ${if (d == 1) "day" else "days"} to your next boost",
+                        fontSize = 12.sp, color = Color.Gray)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text("Maybe later", fontSize = 13.sp, color = Color.Gray,
+                modifier = Modifier.clickable { onDismiss() }.padding(8.dp))
+        }
+    }
 }
