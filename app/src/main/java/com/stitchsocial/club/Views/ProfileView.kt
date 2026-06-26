@@ -73,6 +73,8 @@ import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.CoinPriceTier
 import kotlin.math.log10
+import androidx.compose.foundation.BorderStroke
+import com.stitchsocial.club.ui.theme.Spacing
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.services.StreakService
 import com.stitchsocial.club.services.SubscriptionService
@@ -1162,23 +1164,38 @@ private fun ProfileHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 36.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(top = Spacing.xxl, bottom = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        // Profile image + info row
+        // Profile image + info row (iOS layout: avatar + badge stack | name/handle/bio)
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.Top
         ) {
-            EnhancedProfileImage(user = user, videos = videos)
-
+            // Left column: avatar with the compact badge stack tucked underneath
+            // (non-business only — business accounts don't show badges, iOS parity).
             Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                EnhancedProfileImage(user = user, videos = videos)
+                if (!user.isBusiness) {
+                    ProfileBadgeStack(
+                        userID = user.id,
+                        isOwner = isOwnProfile,
+                        onTapView = onShowBadgePage
+                    )
+                }
+            }
+
+            // Right column: name + tier check, @handle, and the bio directly below.
+            Column(
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 modifier = Modifier.weight(1f)
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -1193,18 +1210,11 @@ private fun ProfileHeader(
                 }
 
                 Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
+
+                // Bio sits directly under the handle, not under the badges (iOS parity).
+                BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
             }
         }
-
-        // Badges — directly under the avatar/identity (iOS parity).
-        ProfileBadgePreviewRow(
-            userID = user.id,
-            isOwner = isOwnProfile,
-            onTapView = onShowBadgePage
-        )
-
-        // Bio
-        BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
 
         // Streak (own profile only) — above the hype meter; opens the streak sheet.
         if (isOwnProfile) {
@@ -1346,7 +1356,9 @@ private fun BioSection(
     val contextualBio = if (bioText.isEmpty()) generateContextualBio(user) else null
     val displayBio = bioText.ifEmpty { contextualBio ?: "" }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+    // No horizontal padding here — the bio now lives inside the already-padded
+    // right column of the identity row (iOS parity), so it inherits that inset.
+    Column(modifier = Modifier.fillMaxWidth()) {
         if (displayBio.isNotEmpty()) {
             val shouldTruncate = displayBio.length > 80
 
@@ -1448,36 +1460,41 @@ private fun ActionButtonsRow(
     targetUsername: String = ""
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         if (isOwnProfile) {
+            // Edit profile — surface fill + magenta hairline (iOS: Theme.surface + accent stroke)
             Button(
                 onClick = onEditProfile,
-                modifier = Modifier.weight(1f).height(36.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray.copy(alpha = 0.8f)),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
+                border = BorderStroke(1.5.dp, StitchColors.primary),
+                shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Text("Edit Profile", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                Text("Edit profile", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
+            // Settings — surface fill + neutral hairline. No ad-market button on
+            // Android (no ad-marketplace feature here); iOS gates a $ button by tier.
             Button(
                 onClick = onSettingsClick,
-                modifier = Modifier.size(36.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray.copy(alpha = 0.8f)),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.size(width = 46.dp, height = 44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Icon(Icons.Default.Settings, "Settings", tint = Color.White, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Settings, "Settings", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         } else {
             Button(
                 onClick = onFollowToggle,
                 enabled = !isFollowLoading,
-                modifier = Modifier.weight(1f).height(36.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = if (isFollowing) Color.White else Color.Cyan),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = if (isFollowing) Color.White else StitchColors.primary),
+                shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
                 if (isFollowLoading) {
@@ -1488,7 +1505,7 @@ private fun ActionButtonsRow(
                 } else {
                     Text(
                         if (isFollowing) "Following" else "Follow",
-                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold,
                         color = if (isFollowing) Color.Black else Color.White
                     )
                 }
@@ -1496,12 +1513,13 @@ private fun ActionButtonsRow(
 
             Button(
                 onClick = { /* TODO: Subscribe */ },
-                modifier = Modifier.weight(1f).height(36.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Gray.copy(alpha = 0.8f)),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
             // More menu (Report / Block) — App Store Guideline 1.2 / Play Store UGC
