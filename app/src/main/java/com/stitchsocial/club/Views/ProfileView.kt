@@ -72,6 +72,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.CoinPriceTier
+import kotlin.math.log10
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.services.StreakService
 import com.stitchsocial.club.services.SubscriptionService
@@ -132,8 +133,14 @@ private fun getTierIcon(tier: UserTier): ImageVector {
 }
 
 private fun calculateHypeLevel(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emptyList(), followerCount: Int = 0): Float {
-    // Tier base rating (matches iOS tierBaseRating)
-    val defaultStartingClout = 160.0
+    // Server-authoritative hype rating — mirrors iOS ProfileView.calculateHypeRating.
+    // Reads the SERVER aggregates (totalHypesReceived / totalCoolsReceived, kept
+    // current by the aggregateCreatorEngagement Cloud Function) so every viewer of
+    // the same profile computes the identical number. `videos` is intentionally
+    // unused now — it used to be a per-page local sum that differed per viewer.
+    val defaultStartingClout = 1500.0  // OptimizationConfig.User.defaultStartingClout
+
+    // Tier base rating (iOS tierBaseRating)
     val tierBase = when (user.tier) {
         UserTier.FOUNDER, UserTier.CO_FOUNDER -> defaultStartingClout * 0.063
         UserTier.TOP_CREATOR -> defaultStartingClout * 0.057
@@ -147,55 +154,41 @@ private fun calculateHypeLevel(user: BasicUserInfo, videos: List<CoreVideoMetada
         else -> defaultStartingClout * 0.017
     }
 
-    // Starting bonus (matches iOS getUserStartingBonus)
-    val startingBonus = when {
-        user.isVerified -> 2.0   // betaTester
-        user.tier == UserTier.FOUNDER || user.tier == UserTier.CO_FOUNDER -> 1.5 // earlyAdopter
-        else -> 1.0              // newcomer
+    // Starting-bonus amount (iOS getUserStartingBonus -> UserStartingBonus.bonusAmount).
+    // A freshly-built HypeRating's effectiveRating is baseRating + bonusAmount
+    // (decay ~1, bonus unexpired), so this is an additive bonus, NOT a multiplier.
+    val startingBonusAmount = when {
+        user.isVerified -> 75.0  // betaTester
+        user.tier == UserTier.FOUNDER || user.tier == UserTier.CO_FOUNDER -> 50.0  // earlyAdopter
+        else -> 10.0             // newcomer
     }
-    val effectiveRating = tierBase * startingBonus
+    val effectiveRating = tierBase + startingBonusAmount
 
-    // Engagement score from videos (matches iOS engagementScore)
-    val engagementScore = if (videos.isNotEmpty()) {
-        val totalHypes = videos.sumOf { it.hypeCount }
-        val totalCools = videos.sumOf { it.coolCount }
-        val totalViews = videos.sumOf { it.viewCount }
-        val totalReplies = videos.sumOf { it.replyCount }
+    // Engagement score from SERVER aggregates (iOS engagementScore)
+    val totalHypes = user.totalHypesReceived
+    val totalCools = user.totalCoolsReceived
+    val totalReactions = totalHypes + totalCools
 
-        val totalReactions = totalHypes + totalCools
-        val engagementRatio = if (totalReactions > 0) totalHypes.toDouble() / totalReactions else 0.5
-        val engagementPoints = engagementRatio * 10.0 * 1.5 // InteractionType.hype.pointValue = 10
-
-        val viewEngagementRatio = if (totalViews > 0) totalReactions.toDouble() / totalViews else 0.0
-        val viewPoints = minOf(10.0, viewEngagementRatio * 1000.0)
-
-        val replyBonus = minOf(5.0, totalReplies.toDouble() / 50.0 * 5.0)
-
-        engagementPoints + viewPoints + replyBonus
-    } else 0.0
-
-    // Activity score (matches iOS activityScore)
-    val activityScore = if (videos.isNotEmpty()) {
-        val recentCount = videos.count {
-            val ageHours = (System.currentTimeMillis() - (it.createdAt?.time ?: 0)) / 3_600_000.0
-            ageHours < 168.0 // 7 days (trendingWindowHours)
-        }
-        minOf(15.0, recentCount * 2.5)
-    } else 0.0
+    // Quality: share of reactions that are positive (neutral 0.5 when none).
+    val engagementRatio = if (totalReactions > 0) totalHypes.toDouble() / totalReactions else 0.5
+    val ratioPoints = engagementRatio * 10.0 * 1.5  // InteractionType.hype.pointValue = 10
+    // Volume: rewards reach with diminishing returns (log curve, capped at 25).
+    val volumePoints = minOf(25.0, log10(totalReactions.toDouble() + 1.0) * 8.0)
+    val engagementScore = ratioPoints + volumePoints
 
     // Clout bonus
     val cloutBonus = minOf(10.0, (user.clout ?: 0).toDouble() / defaultStartingClout * 10.0)
 
-    // Social bonus
+    // Social bonus (iOS threshold = OptimizationConfig.Performance.maxBackgroundTasks)
     val actualFollowers = if (followerCount > 0) followerCount else (user.followerCount ?: 0)
-    val socialBonus = minOf(8.0, actualFollowers.toDouble() / 10.0 * 8.0)
+    val socialBonus = minOf(8.0, actualFollowers.toDouble() / 5.0 * 8.0)
 
     // Verification bonus
     val verificationBonus = if (user.isVerified) 5.0 else 0.0
 
-    // Final calculation (matches iOS)
+    // Final calculation (iOS finalRating)
     val baseRating = effectiveRating / 100.0 * 50.0
-    val bonusPoints = engagementScore + activityScore + cloutBonus + socialBonus + verificationBonus
+    val bonusPoints = engagementScore + cloutBonus + socialBonus + verificationBonus
     val finalRating = baseRating + bonusPoints
 
     return finalRating.coerceIn(0.0, 100.0).toFloat()
