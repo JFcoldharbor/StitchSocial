@@ -1543,12 +1543,18 @@ private fun DiscoveryVideoCard(
                 modifier = Modifier.matchParentSize()
             )
         } else {
-            AsyncImage(
-                model = video.thumbnailURL,
-                contentDescription = video.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+            // Thumbnail with a placeholder fallback as the BASE — it shows through
+            // while the image loads and stands in when thumbnailURL is missing or
+            // fails (mirrors iOS DiscoveryGridView's generated-frame fallback).
+            GridThumbnailPlaceholder()
+            if (video.thumbnailURL.isNotBlank()) {
+                AsyncImage(
+                    model = video.thumbnailURL,
+                    contentDescription = video.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
 
         // Gradient Overlay
@@ -1589,6 +1595,29 @@ private fun DiscoveryVideoCard(
                 )
             }
         }
+    }
+}
+
+/** Fallback shown under a grid thumbnail when thumbnailURL is missing / still
+ *  loading — a subtle gradient + film glyph (iOS DiscoveryGridView placeholder). */
+@Composable
+private fun GridThumbnailPlaceholder() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.03f))
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Movie,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.25f),
+            modifier = Modifier.size(30.dp)
+        )
     }
 }
 
