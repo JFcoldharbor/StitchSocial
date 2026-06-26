@@ -13,6 +13,7 @@
 package com.stitchsocial.club.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import com.stitchsocial.club.foundation.UserTier
 
 /**
  * Complete Stitch Social color system
@@ -22,14 +23,14 @@ object StitchColors {
 
     // MARK: - Primary Brand Colors (iOS 26 Purple Theme)
 
-    /** Primary brand color - Purple-500 (iOS primary) */
-    val primary = Color(0xFF8B5CF6)
+    /** Primary brand color — Magenta #E91E63 (matches iOS StitchColors.primary) */
+    val primary = Color(0xFFE91E63)
 
-    /** Secondary brand color - Purple-400 (iOS secondary) */
-    val secondary = Color(0xFFA855F7)
+    /** Secondary brand color — brand blue (matches iOS StitchColors.secondary) */
+    val secondary = Color(0xFF3399FF)
 
-    /** Accent color - Purple-700 (iOS accent) */
-    val accent = Color(0xFF7C3AED)
+    /** Accent — darker magenta for containers (was purple-700) */
+    val accent = Color(0xFFC2185B)
 
     /** Tertiary purple for depth */
     val tertiary = Color(0xFFBB86FC)
@@ -174,10 +175,29 @@ object StitchColors {
     /** Placeholder text color */
     val placeholder = Color.Gray
 
-    // MARK: - Tier Colors
+    // MARK: - Brand Gradient (blue → magenta)
 
-    /** Business account tier color — teal, matches iOS StitchColors.tierBusiness */
-    val tierBusiness = Color(0xFF00BCD4)
+    /** Gradient start — brand blue (iOS gradientStart). */
+    val gradientStart = secondary
+    /** Gradient end — magenta (iOS gradientEnd). */
+    val gradientEnd = primary
+    /** Brand gradient stops (blue → magenta). Use with Brush.linearGradient. */
+    val brandGradient = listOf(gradientStart, gradientEnd)
+
+    // MARK: - Tier Colors (ascending spectrum, matches iOS StitchColors.tier*)
+
+    val tierRookie     = Color(0xFF8A8F98) // grey · entry
+    val tierRising     = Color(0xFF34C759) // green
+    val tierVeteran    = Color(0xFF00C2FF) // cyan
+    val tierInfluencer = Color(0xFF3B82F6) // blue
+    val tierAmbassador = Color(0xFF6366F1) // indigo
+    val tierElite      = Color(0xFFA05CFF) // purple
+    val tierPartner    = Color(0xFFE91E63) // magenta · brand
+    val tierLegendary  = Color(0xFFFF5A3C) // coral
+    val tierTopCreator = Color(0xFFF0A830) // amber · apex earned
+    val tierFounder    = Color(0xFFFFD24A) // gold · role
+    val tierCoFounder  = Color(0xFFE5C56B) // light gold · role
+    val tierBusiness   = Color(0xFF00BFD9) // teal · account type
 
     // MARK: - Creator Pill Colors (Context-Aware)
 
@@ -279,3 +299,21 @@ object StitchColors {
         }
     }
 }
+
+// MARK: - Canonical tier → color (ascending spectrum). Single source of truth,
+// mirrors iOS UserTier.color so Android and iOS agree on every tier's color.
+val UserTier.color: Color
+    get() = when (this) {
+        UserTier.ROOKIE -> StitchColors.tierRookie
+        UserTier.RISING -> StitchColors.tierRising
+        UserTier.VETERAN -> StitchColors.tierVeteran
+        UserTier.INFLUENCER -> StitchColors.tierInfluencer
+        UserTier.AMBASSADOR -> StitchColors.tierAmbassador
+        UserTier.ELITE -> StitchColors.tierElite
+        UserTier.PARTNER -> StitchColors.tierPartner
+        UserTier.LEGENDARY -> StitchColors.tierLegendary
+        UserTier.TOP_CREATOR -> StitchColors.tierTopCreator
+        UserTier.FOUNDER -> StitchColors.tierFounder
+        UserTier.CO_FOUNDER -> StitchColors.tierCoFounder
+        UserTier.BUSINESS -> StitchColors.tierBusiness
+    }
