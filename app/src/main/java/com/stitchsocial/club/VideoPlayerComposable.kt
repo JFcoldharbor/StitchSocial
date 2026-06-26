@@ -61,6 +61,8 @@ fun VideoPlayerComposable(
     video: Any, // Generic type to accept any video metadata
     isActive: Boolean,
     modifier: Modifier = Modifier,
+    muted: Boolean = false,   // grid previews play silent
+    managed: Boolean = true,  // false = don't register with VideoManager (allows concurrent players)
     onEngagement: ((InteractionType) -> Unit)? = null,
     onVideoClick: (() -> Unit)? = null,
     onSwipeUp: (() -> Unit)? = null  // Callback for swipe up to exit
@@ -192,7 +194,8 @@ fun VideoPlayerComposable(
     LaunchedEffect(isActive) {
         Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive")
         if (isActive && !isError) {
-            VideoManager.setActivePlayer(exoPlayer, videoId)
+            if (managed) VideoManager.setActivePlayer(exoPlayer, videoId)
+            exoPlayer.volume = if (muted) 0f else 1f
             exoPlayer.play()
             Log.i("VIDEO_PLAYER", "▶️ PLAYING $videoId (now active via VideoManager)")
         } else {

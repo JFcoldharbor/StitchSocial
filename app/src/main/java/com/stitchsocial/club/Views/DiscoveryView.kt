@@ -41,6 +41,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import com.stitchsocial.club.VideoPlayerComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1520,29 +1521,25 @@ private fun DiscoveryVideoCard(
             .clickable { onTapped() }
             .background(Color(0xFF1C1C1E))
     ) {
-        // Thumbnail (stays behind — shows through until the video renders)
-        AsyncImage(
-            model = video.thumbnailURL,
-            contentDescription = video.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-
-        // Muted preview — only on designated autoplay tiles (WiFi only). Sits
-        // above the thumbnail, below the overlays. Released when scrolled off.
+        // Muted player when this tile autoplays, else the thumbnail. Shown as
+        // the BASE (not layered under a thumbnail) — a SurfaceView under a Compose
+        // thumbnail won't render. Reuses the proven VideoPlayerComposable with
+        // managed=false so multiple grid tiles can play concurrently.
         if (previewVideoURL != null) {
-            val exo = remember(previewVideoURL) { buildGridPreviewPlayer(context, previewVideoURL) }
-            DisposableEffect(previewVideoURL) { onDispose { exo.release() } }
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exo
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    }
-                },
+            VideoPlayerComposable(
+                video = video,
+                isActive = true,
+                muted = true,
+                managed = false,
+                onVideoClick = onTapped,
                 modifier = Modifier.matchParentSize()
+            )
+        } else {
+            AsyncImage(
+                model = video.thumbnailURL,
+                contentDescription = video.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
             )
         }
 
