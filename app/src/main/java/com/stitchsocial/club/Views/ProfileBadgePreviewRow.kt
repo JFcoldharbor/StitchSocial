@@ -22,6 +22,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.*
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,11 +84,7 @@ fun ProfileBadgePreviewRow(
                             .size(34.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
-                            .border(
-                                2.dp,
-                                if (eb.isNew) def.rarity.uiColor else Color.Transparent,
-                                CircleShape
-                            ),
+                            .border(2.dp, Color.Black, CircleShape),  // neutral separator, no rarity color
                         contentAlignment = Alignment.Center
                     ) {
                         Text(def.emoji, fontSize = 16.sp)
@@ -107,33 +106,26 @@ fun ProfileBadgePreviewRow(
             }
         }
 
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    "$totalEarned ${if (totalEarned == 1) "Badge" else "Badges"}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White
-                )
-                if (newCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color(0xFFFB923C))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Text("$newCount new", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                    }
-                }
-            }
-            Text(
-                if (totalEarned == 0) "Tap to see what's available" else "View collection",
-                fontSize = 10.sp,
-                color = Color.Gray
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Pulsing red dot when there are unseen badges (clears on opening the
+        // page). Replaces the "N Badges / N new" label + colored rings — iOS parity.
+        if (newCount > 0) {
+            val transition = rememberInfiniteTransition(label = "badgeDot")
+            val pulseScale by transition.animateFloat(
+                initialValue = 0.9f, targetValue = 2.2f,
+                animationSpec = infiniteRepeatable(animation = tween(1400, easing = LinearEasing)),
+                label = "scale"
             )
+            val pulseAlpha by transition.animateFloat(
+                initialValue = 0.6f, targetValue = 0f,
+                animationSpec = infiniteRepeatable(animation = tween(1400, easing = LinearEasing)),
+                label = "alpha"
+            )
+            Box(modifier = Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(7.dp).scale(pulseScale).alpha(pulseAlpha).clip(CircleShape).background(Color.Red))
+                Box(Modifier.size(7.dp).clip(CircleShape).background(Color.Red))
+            }
         }
 
         Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
