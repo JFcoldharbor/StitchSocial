@@ -84,6 +84,8 @@ import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.CollectionService
 import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.coordination.DiscoveryEngagementTracker
+import com.stitchsocial.club.ui.theme.Spacing
+import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.SearchService
@@ -1263,7 +1265,7 @@ private fun DiscoveryHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1282,22 +1284,22 @@ private fun DiscoveryHeader(
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
                         strokeWidth = 2.dp,
-                        color = Color.Cyan
+                        color = StitchColors.primary
                     )
-                    Text(text = "Loading...", fontSize = 12.sp, color = Color.Cyan)
+                    Text(text = "Loading...", fontSize = 12.sp, color = StitchColors.primary)
                 }
             }
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             // Shuffle button
             IconButton(onClick = onShuffleTapped) {
                 Icon(
                     imageVector = Icons.Default.Shuffle,
                     contentDescription = "Shuffle",
-                    tint = Color.Cyan
+                    tint = StitchColors.primary
                 )
             }
 
@@ -1306,7 +1308,7 @@ private fun DiscoveryHeader(
                 Icon(
                     imageVector = discoveryMode.icon,
                     contentDescription = "Toggle ${discoveryMode.displayName}",
-                    tint = if (discoveryMode == DiscoveryMode.SWIPE) Color.Cyan else Color.White.copy(alpha = 0.7f)
+                    tint = if (discoveryMode == DiscoveryMode.SWIPE) StitchColors.primary else Color.White.copy(alpha = 0.7f)
                 )
             }
 
@@ -1333,40 +1335,39 @@ private fun DiscoveryCategorySelector(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
+        // Capsule pills (iOS parity): selected = magenta foreground on a magenta
+        // tint + hairline; unselected = white 0.5 on a faint fill. Replaces the
+        // off-brand cyan underline.
         DiscoveryCategory.values().forEach { category ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { onCategorySelected(category) }
+            val selected = selectedCategory == category
+            val accent = StitchColors.primary
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (selected) accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.06f))
+                    .then(
+                        if (selected) Modifier.border(1.dp, accent.copy(alpha = 0.4f), CircleShape)
+                        else Modifier
+                    )
+                    .clickable { onCategorySelected(category) }
+                    .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = category.icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (selectedCategory == category) Color.Cyan else Color.White.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = category.displayName,
-                        fontSize = 14.sp,
-                        fontWeight = if (selectedCategory == category) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (selectedCategory == category) Color.Cyan else Color.White.copy(alpha = 0.7f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Underline indicator
-                Box(
-                    modifier = Modifier
-                        .width(if (selectedCategory == category) 40.dp else 0.dp)
-                        .height(2.dp)
-                        .background(if (selectedCategory == category) Color.Cyan else Color.Transparent)
+                Icon(
+                    imageVector = category.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = if (selected) accent else Color.White.copy(alpha = 0.5f)
+                )
+                Text(
+                    text = category.displayName,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) accent else Color.White.copy(alpha = 0.5f)
                 )
             }
         }
@@ -1673,7 +1674,7 @@ private fun DiscoveryLoadingView() {
         verticalArrangement = Arrangement.Center
     ) {
         CircularProgressIndicator(
-            color = Color.Cyan,
+            color = StitchColors.primary,
             modifier = Modifier.size(48.dp)
         )
 
@@ -1737,7 +1738,7 @@ private fun DiscoveryErrorView(
         Button(
             onClick = onRetry,
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Cyan,
+                containerColor = StitchColors.primary,
                 contentColor = Color.Black
             ),
             shape = RoundedCornerShape(25.dp),
