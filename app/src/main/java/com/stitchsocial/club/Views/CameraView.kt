@@ -21,6 +21,12 @@ import androidx.camera.video.*
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import com.stitchsocial.club.ui.theme.StitchColors
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -711,6 +717,38 @@ private fun heatPhaseColors(progress: Float): List<Color> = when {
     else             -> listOf(Color(0xFF00D9F2), Color(0xFF3366FF))
 }
 
+/** Embers drifting up inside the record button during the hot phases (iOS
+ *  EmberParticlesView). One Canvas + one looping clock; per-ember x/size are
+ *  deterministic by index. Caller masks it to the button circle. */
+@Composable
+private fun EmberParticles(intensity: Float, modifier: Modifier = Modifier) {
+    val count = if (intensity > 0.7f) 9 else 5
+    val emberColors = listOf(
+        Color(0xFFFF4500), Color(0xFFFF6600), Color(0xFFFF8C00), Color(0xFFFFB300)
+    )
+    val clock by rememberInfiniteTransition(label = "embers").animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(2600, easing = LinearEasing)),
+        label = "emberClock"
+    )
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        for (i in 0 until count) {
+            val phase = (clock + i.toFloat() / count) % 1f      // staggered rise
+            val xFrac = ((i * 41 + 17) % 100) / 100f            // deterministic x
+            val y = h * (1f - phase)                            // bottom -> top
+            val x = w * (0.15f + 0.7f * xFrac)
+            val alpha = (1f - phase) * 0.85f                    // fade as it rises
+            drawCircle(
+                color = emberColors[i % emberColors.size].copy(alpha = alpha),
+                radius = (2f + (i % 3)).dp.toPx() * (0.4f + 0.6f * (1f - phase)),
+                center = Offset(x, y)
+            )
+        }
+    }
+}
+
 /**
  * Cinematic Recording Button — matches iOS CinematicRecordingButton.swift
  * Progress ring around a gradient circle with state-based center icon
@@ -807,6 +845,15 @@ private fun CinematicRecordButton(
                         .fillMaxHeight(progress.coerceIn(0f, 1f))
                         .align(Alignment.BottomCenter)
                         .background(Brush.verticalGradient(heatPhaseColors(progress)))
+                )
+            }
+
+            // Embers rise inside the button during the hot phases (iOS parity),
+            // masked to the circle by the parent Box's clip.
+            if (isRecording && progress >= 0.3f) {
+                EmberParticles(
+                    intensity = if (progress >= 0.7f) 0.8f else 0.4f,
+                    modifier = Modifier.matchParentSize()
                 )
             }
 
