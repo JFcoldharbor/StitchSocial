@@ -113,6 +113,18 @@ class StreakService private constructor() {
     val isAtRisk: Boolean
         get() = _current.value >= 1 && (lastSecuredAt?.let { isYesterday(it) } ?: false)
 
+    /** Whole hours until the streak breaks at local midnight (clamped 1..24). */
+    val hoursUntilBreak: Int
+        get() {
+            val cal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, 1)
+                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }
+            val ms = cal.timeInMillis - System.currentTimeMillis()
+            return (ms / 3_600_000L).toInt().coerceIn(1, 24)
+        }
+
     // MARK: - Load (applies the "die" when a day was missed)
 
     fun load() { scope.launch { loadSuspend() } }

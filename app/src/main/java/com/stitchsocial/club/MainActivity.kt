@@ -639,6 +639,12 @@ fun MainScreen() {
                     // Tab content with explicit lower z-index
                     var isShowingCollectionPlayer by remember { mutableStateOf(false) }
 
+                    // Streak "or die" banner — loaded once per session, shown
+                    // globally (every tab) when the streak is at risk, until dismissed.
+                    var streakBannerDismissed by remember { mutableStateOf(false) }
+                    val streakCurrent by StreakService.shared.current.collectAsState()
+                    LaunchedEffect(currentUser?.id) { StreakService.shared.load() }
+
                     // Hide the entire tab content (Discovery, Home, Profile tab,
                     // Notifications, etc.) when a modal is active. Compose
                     // zIndex / opaque overlays don't reliably cover ExoPlayer's
@@ -687,6 +693,30 @@ fun MainScreen() {
                                     .zIndex(200f)  // Above all TabContent elements including DiscoveryView (100f)
                             )
                         }
+                    }
+
+                    // Streak "or die" banner — global top overlay (renders over
+                    // every tab, same pattern as the tab bar). Suppressed during
+                    // modals / thread view / announcements / the collection player.
+                    // (streakCurrent is read here so this recomposes once load()
+                    // populates the streak — isAtRisk alone reads the raw value.)
+                    if (streakCurrent >= 1 && currentModal == ModalState.NONE && !isShowingThreadView &&
+                        !isShowingAnnouncement && !isShowingCollectionPlayer &&
+                        !streakBannerDismissed && StreakService.shared.isAtRisk) {
+                        StreakBanner(
+                            hoursLeft = StreakService.shared.hoursUntilBreak,
+                            current = streakCurrent,
+                            onKeep = {
+                                streakBannerDismissed = true
+                                navigationCoordinator.showModal(ModalState.RECORDING)
+                            },
+                            onDismiss = { streakBannerDismissed = true },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .zIndex(60f)
+                        )
                     }
 
                     // ThreadView and ModalOverlay are intentionally moved OUT
