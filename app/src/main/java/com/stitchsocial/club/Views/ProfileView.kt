@@ -22,6 +22,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -493,7 +494,7 @@ fun ProfileView(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(AppTheme.colors.bg)
             .then(
                 if (!isOwnProfile && onDismiss != null) {
                     Modifier.pointerInput(Unit) {
@@ -714,7 +715,7 @@ fun ProfileView(
                     onClick = { onDismiss.invoke() },
                     modifier = Modifier.size(40.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape)
                 ) {
-                    Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Close, "Close", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -772,7 +773,7 @@ fun ProfileView(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(AppTheme.colors.bg)
                 .pointerInput(selectedVideoIndex, currentVideoList.size) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -882,7 +883,7 @@ fun ProfileView(
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "Close",
-                    tint = Color.White
+                    tint = AppTheme.colors.textPrimary
                 )
             }
 
@@ -975,7 +976,7 @@ fun ProfileView(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
+                    .background(AppTheme.colors.bg)
             ) {
                 Column(Modifier.fillMaxSize()) {
                     // Header
@@ -987,13 +988,13 @@ fun ProfileView(
                     ) {
                         Text(
                             "Shows",
-                            color = Color.White,
+                            color = AppTheme.colors.textPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(onClick = { showingAllCollections = false }) {
-                            Icon(Icons.Default.Close, "Close", tint = Color.White)
+                            Icon(Icons.Default.Close, "Close", tint = AppTheme.colors.textPrimary)
                         }
                     }
                     // Show grid grouped by showId
@@ -1065,7 +1066,7 @@ fun ProfileView(
     // BadgePageView's verticalScroll has bounded constraints. Mounting
     // it inside the scrollable header throws "infinity max height".
     if (showingBadgePage && currentUser != null) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(60f)) {
+        Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg).zIndex(60f)) {
             BadgePageView(
                 userID = currentUser!!.id,
                 isOwner = isOwnProfile,
@@ -1085,11 +1086,11 @@ fun ProfileView(
     if (showingDeleteConfirmation && videoToDelete != null) {
         AlertDialog(
             onDismissRequest = { showingDeleteConfirmation = false },
-            title = { Text("Delete Video", color = Color.White) },
+            title = { Text("Delete Video", color = AppTheme.colors.textPrimary) },
             text = {
                 Text(
                     "Are you sure you want to delete '${videoToDelete?.title}'? This action cannot be undone.",
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
             },
             confirmButton = {
@@ -1109,7 +1110,7 @@ fun ProfileView(
                 }) { Text("Delete", color = Color.Red) }
             },
             dismissButton = {
-                TextButton(onClick = { showingDeleteConfirmation = false }) { Text("Cancel", color = Color.Gray) }
+                TextButton(onClick = { showingDeleteConfirmation = false }) { Text("Cancel", color = AppTheme.colors.textSecondary) }
             },
             containerColor = Color(0xFF1A1A1A)
         )
@@ -1198,7 +1199,7 @@ private fun ProfileHeader(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
                     // Tier-as-verification: a tier-colored check IS the verification
                     // (UserTier.color). Personal shows for tier != Rookie or verified;
                     // business shows a teal check. Replaces the red icon + tier chip.
@@ -1209,7 +1210,7 @@ private fun ProfileHeader(
                     }
                 }
 
-                Text("@${user.username}", fontSize = 13.sp, color = Color.Gray)
+                Text("@${user.username}", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
 
                 // Bio sits directly under the handle, not under the badges (iOS parity).
                 BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
@@ -1286,7 +1287,7 @@ private fun EnhancedProfileImage(user: BasicUserInfo, videos: List<CoreVideoMeta
                 .crossfade(true)
                 .build(),
             contentDescription = "Profile",
-            modifier = Modifier.size(66.dp).clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
+            modifier = Modifier.size(66.dp).clip(CircleShape).background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
             contentScale = ContentScale.Crop
         )
 
@@ -1338,7 +1339,7 @@ private fun ProfileTierBadge(tier: UserTier) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(tierIcon, null, tint = tierColors.firstOrNull() ?: Color.White, modifier = Modifier.size(12.dp))
-        Text(tier.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(tier.displayName, color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1363,9 +1364,9 @@ private fun BioSection(
             val shouldTruncate = displayBio.length > 80
 
             if (shouldTruncate && !isShowingFullBio) {
-                Text(displayBio, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(displayBio, color = AppTheme.colors.textPrimary, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             } else {
-                Text(displayBio, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
+                Text(displayBio, color = AppTheme.colors.textPrimary, fontSize = 14.sp, lineHeight = 20.sp)
             }
 
             if (shouldTruncate) {
@@ -1381,8 +1382,8 @@ private fun BioSection(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.clickable { onEditProfile() }
             ) {
-                Icon(Icons.Default.AddCircleOutline, null, tint = Color.Gray.copy(alpha = 0.8f), modifier = Modifier.size(14.dp))
-                Text("Add bio", color = Color.Gray.copy(alpha = 0.8f), fontSize = 14.sp)
+                Icon(Icons.Default.AddCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.8f), modifier = Modifier.size(14.dp))
+                Text("Add bio", color = AppTheme.colors.textSecondary.copy(alpha = 0.8f), fontSize = 14.sp)
             }
         }
     }
@@ -1399,20 +1400,20 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
+            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(12.dp))
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(14.dp))
-                Text("Hype Rating", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hype Rating", color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("${hypeRating.toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("${hypeRating.toInt()}%", color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
         Box(modifier = Modifier.fillMaxWidth().height(10.dp)) {
-            Box(Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(5.dp)))
+            Box(Modifier.fillMaxSize().background(AppTheme.colors.textSecondary.copy(alpha = 0.2f), RoundedCornerShape(5.dp)))
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
                     .background(
@@ -1441,8 +1442,8 @@ private fun StatItem(count: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(formatLargeNumber(count), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = if (label == "Stitchers") Color.Cyan else Color.Gray, fontSize = 11.sp)
+        Text(formatLargeNumber(count), color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = if (label == "Stitchers") Color.Cyan else AppTheme.colors.textSecondary, fontSize = 11.sp)
     }
 }
 
@@ -1468,12 +1469,12 @@ private fun ActionButtonsRow(
             Button(
                 onClick = onEditProfile,
                 modifier = Modifier.weight(1f).height(44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
                 border = BorderStroke(1.5.dp, StitchColors.primary),
                 shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Text("Edit profile", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Edit profile", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
             }
 
             // Settings — surface fill + neutral hairline. No ad-market button on
@@ -1481,12 +1482,12 @@ private fun ActionButtonsRow(
             Button(
                 onClick = onSettingsClick,
                 modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
+                border = BorderStroke(1.dp, AppTheme.colors.hairline),
                 shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Icon(Icons.Default.Settings, "Settings", tint = Color.White, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Settings, "Settings", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
             }
         } else {
             Button(
@@ -1514,12 +1515,12 @@ private fun ActionButtonsRow(
             Button(
                 onClick = { /* TODO: Subscribe */ },
                 modifier = Modifier.weight(1f).height(44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.06f)),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
+                border = BorderStroke(1.dp, AppTheme.colors.hairline),
                 shape = RoundedCornerShape(13.dp),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
             }
 
             // More menu (Report / Block) — App Store Guideline 1.2 / Play Store UGC
@@ -1555,14 +1556,14 @@ private fun ProfileMoreMenu(
         Button(
             onClick = { menuExpanded = true },
             modifier = Modifier.size(36.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Gray.copy(alpha = 0.8f)),
+            colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.textSecondary.copy(alpha = 0.8f)),
             shape = RoundedCornerShape(8.dp),
             contentPadding = PaddingValues(0.dp)
         ) {
             Icon(
                 Icons.Default.MoreHoriz,
                 contentDescription = "More",
-                tint = Color.White,
+                tint = AppTheme.colors.textPrimary,
                 modifier = Modifier.size(16.dp)
             )
         }
@@ -1650,7 +1651,7 @@ private fun CollectionsRowPlaceholder(isOwnProfile: Boolean, tier: UserTier) {
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Collections", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Collections", color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("See All", color = Color.Cyan, fontSize = 13.sp, modifier = Modifier.clickable { /* TODO */ })
         }
 
@@ -1662,14 +1663,14 @@ private fun CollectionsRowPlaceholder(isOwnProfile: Boolean, tier: UserTier) {
                     Box(
                         modifier = Modifier
                             .size(width = 100.dp, height = 140.dp)
-                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
+                            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Add, null, tint = Color.Cyan, modifier = Modifier.size(28.dp))
                             Spacer(Modifier.height(4.dp))
-                            Text("New", color = Color.Gray, fontSize = 11.sp)
+                            Text("New", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                         }
                     }
                 }
@@ -1682,7 +1683,7 @@ private fun CollectionsRowPlaceholder(isOwnProfile: Boolean, tier: UserTier) {
 
 @Composable
 private fun ProfileTabBar(selectedTab: Int, tabCounts: List<Int>, onTabSelected: (Int) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().background(Color.Black).padding(top = 20.dp)) {
+    Row(modifier = Modifier.fillMaxWidth().background(AppTheme.colors.bg).padding(top = 20.dp)) {
         profileTabs.forEachIndexed { index, tab ->
             val isSelected = selectedTab == index
             Column(
@@ -1693,11 +1694,11 @@ private fun ProfileTabBar(selectedTab: Int, tabCounts: List<Int>, onTabSelected:
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         tab.icon, null,
-                        tint = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else Color.Gray.copy(alpha = 0.6f),
+                        tint = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                         modifier = Modifier.size(14.dp)
                     )
-                    Text(tab.title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (isSelected) Color.Cyan else Color.Gray)
-                    Text("(${tabCounts.getOrNull(index) ?: 0})", fontSize = 10.sp, color = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else Color.Gray.copy(alpha = 0.6f))
+                    Text(tab.title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (isSelected) Color.Cyan else AppTheme.colors.textSecondary)
+                    Text("(${tabCounts.getOrNull(index) ?: 0})", fontSize = 10.sp, color = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else AppTheme.colors.textSecondary.copy(alpha = 0.6f))
                 }
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth().height(2.dp).background(if (isSelected) Color.Cyan else Color.Transparent))
@@ -1712,8 +1713,8 @@ private fun ProfileTabBar(selectedTab: Int, tabCounts: List<Int>, onTabSelected:
 private fun ProfileLoadingView() {
     Box(Modifier.fillMaxSize(), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(36.dp))
-            Text("Loading Profile...", color = Color.Gray, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            CircularProgressIndicator(color = AppTheme.colors.textPrimary, modifier = Modifier.size(36.dp))
+            Text("Loading Profile...", color = AppTheme.colors.textSecondary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -1727,8 +1728,8 @@ private fun ProfileErrorView(error: String, onRetry: () -> Unit) {
             modifier = Modifier.padding(40.dp)
         ) {
             Icon(Icons.Default.Warning, null, tint = Color.Red, modifier = Modifier.size(50.dp))
-            Text("Error", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(error, color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text("Error", color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(error, color = AppTheme.colors.textSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
             Button(
                 onClick = onRetry,
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
@@ -1744,8 +1745,8 @@ private fun ProfileErrorView(error: String, onRetry: () -> Unit) {
 private fun NoUserView() {
     Box(Modifier.fillMaxSize(), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(Icons.Default.PersonOff, null, tint = Color.Gray, modifier = Modifier.size(50.dp))
-            Text("No User Found", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Icon(Icons.Default.PersonOff, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(50.dp))
+            Text("No User Found", color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1786,7 +1787,7 @@ private fun ProfileStreakSection() {
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.06f))
+            .background(AppTheme.colors.surface)
             .clickable { showSheet = true }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1795,10 +1796,10 @@ private fun ProfileStreakSection() {
         Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(18.dp))
         Text(
             if (current > 0) "$current day streak" else "Start your streak",
-            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary,
             modifier = Modifier.weight(1f)
         )
-        Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+        Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
     }
 
     if (showSheet) {
@@ -1826,7 +1827,7 @@ private fun StreakSheet(onDismiss: () -> Unit) {
 
             Text(
                 "$current ${if (current == 1) "day" else "days"}",
-                fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Color.White
+                fontSize = 34.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
             )
 
             // Streak-or-die: the bar to keep it escalates by week.
@@ -1834,7 +1835,7 @@ private fun StreakSheet(onDismiss: () -> Unit) {
                 Text("\u2705 secured today \u00B7 come back tomorrow",
                     fontSize = 13.sp, color = Color(0xFFF572A6))
             } else {
-                Text("Today to keep your streak", fontSize = 12.sp, color = Color.Gray)
+                Text("Today to keep your streak", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                 Text(streak.todayRequirementLabel, fontSize = 15.sp,
                     fontWeight = FontWeight.Bold, color = Color(0xFFF572A6))
             }
@@ -1845,12 +1846,12 @@ private fun StreakSheet(onDismiss: () -> Unit) {
             } else {
                 streak.daysToNextTier?.let { d ->
                     Text("$d ${if (d == 1) "day" else "days"} to your next boost",
-                        fontSize = 12.sp, color = Color.Gray)
+                        fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                 }
             }
 
             Spacer(Modifier.height(8.dp))
-            Text("Maybe later", fontSize = 13.sp, color = Color.Gray,
+            Text("Maybe later", fontSize = 13.sp, color = AppTheme.colors.textSecondary,
                 modifier = Modifier.clickable { onDismiss() }.padding(8.dp))
         }
     }
