@@ -9,6 +9,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -77,7 +78,7 @@ fun TopVideosView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(AppTheme.colors.bg)
             .statusBarsPadding()
     ) {
         // Top bar
@@ -90,7 +91,7 @@ fun TopVideosView(
                 "\uD83D\uDD25 Top Videos",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 modifier = Modifier.align(Alignment.Center)
             )
             TextButton(
@@ -107,7 +108,7 @@ fun TopVideosView(
         Text(
             "Most hyped videos from the last 7 days",
             fontSize = 13.sp,
-            color = Color.Gray,
+            color = AppTheme.colors.textSecondary,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
 
@@ -121,7 +122,7 @@ fun TopVideosView(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         CircularProgressIndicator(color = Color(0xFF9C27B0))
-                        Text("Loading top videos...", fontSize = 14.sp, color = Color.Gray)
+                        Text("Loading top videos...", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                     }
                 }
                 errorMessage != null -> {
@@ -133,7 +134,7 @@ fun TopVideosView(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Icon(Icons.Default.Warning, null, tint = Color(0xFFFF9800), modifier = Modifier.size(50.dp))
-                        Text(errorMessage!!, fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                        Text(errorMessage!!, fontSize = 16.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
                         TextButton(onClick = {
                             scope.launch {
                                 isLoading = true; errorMessage = null
@@ -161,8 +162,8 @@ fun TopVideosView(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Icon(Icons.Default.Whatshot, null, tint = Color.Gray, modifier = Modifier.size(50.dp))
-                        Text("No trending videos yet", fontSize = 16.sp, color = Color.Gray)
+                        Icon(Icons.Default.Whatshot, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(50.dp))
+                        Text("No trending videos yet", fontSize = 16.sp, color = AppTheme.colors.textSecondary)
                     }
                 }
                 else -> {
@@ -196,7 +197,7 @@ private fun TopVideoCard(
 ) {
     val rankColor = when (rank) {
         1 -> Color.Yellow
-        2 -> Color.Gray
+        2 -> AppTheme.colors.textSecondary
         3 -> Color(0xFFFF9800)
         else -> Color(0xFF9C27B0)
     }
@@ -204,7 +205,7 @@ private fun TopVideoCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .clickable(onClick = onTap)
             .padding(8.dp)
     ) {
@@ -215,7 +216,7 @@ private fun TopVideoCard(
                     .fillMaxWidth()
                     .height(200.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Gray.copy(alpha = 0.3f)),
+                    .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
                 contentAlignment = Alignment.Center
             ) {
                 if (!video.thumbnailURL.isNullOrEmpty()) {
@@ -229,7 +230,7 @@ private fun TopVideoCard(
                     Icon(
                         Icons.Default.PlayArrow,
                         null,
-                        tint = Color.White.copy(alpha = 0.5f),
+                        tint = AppTheme.colors.textPrimary.copy(alpha = 0.5f),
                         modifier = Modifier.size(30.dp)
                     )
                 }
@@ -240,7 +241,7 @@ private fun TopVideoCard(
                 video.creatorName,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -261,7 +262,7 @@ private fun TopVideoCard(
                 Text(
                     formatVideoCount(video.hypeCount),
                     fontSize = 12.sp,
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(video.temperatureEmoji, fontSize = 12.sp)
@@ -281,7 +282,7 @@ private fun TopVideoCard(
                 "#$rank",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = AppTheme.colors.textPrimary
             )
         }
     }

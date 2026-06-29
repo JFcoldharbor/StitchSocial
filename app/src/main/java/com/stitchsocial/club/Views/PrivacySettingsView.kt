@@ -12,6 +12,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -136,7 +137,7 @@ fun PrivacySettingsView(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -151,7 +152,7 @@ fun PrivacySettingsView(
                 }
                 Text(
                     "Privacy", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    color = Color.White, modifier = Modifier.weight(1f),
+                    color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.size(60.dp))
@@ -159,7 +160,7 @@ fun PrivacySettingsView(
 
             if (!isLoaded) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                    CircularProgressIndicator(color = AppTheme.colors.textPrimary, strokeWidth = 2.dp)
                 }
             } else {
                 Column(
@@ -171,7 +172,7 @@ fun PrivacySettingsView(
 
                     // Account visibility
                     PrivacySection(title = "ACCOUNT VISIBILITY", icon = Icons.Default.Visibility, iconColor = Color(0xFF0A84FF)) {
-                        Text("Who can see your profile", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                        Text("Who can see your profile", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
                         SegmentedRow(
                             values = AccountVisibility.values().toList(),
                             selected = accountVisibility,
@@ -181,7 +182,7 @@ fun PrivacySettingsView(
 
                     // Discoverability
                     PrivacySection(title = "DISCOVERABILITY", icon = Icons.Default.Search, iconColor = Color.Cyan) {
-                        Text("Show my stitches in Discovery", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                        Text("Show my stitches in Discovery", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
                         SegmentedRow(
                             values = DiscoverabilityMode.values().toList(),
                             selected = discoverability,
@@ -193,13 +194,13 @@ fun PrivacySettingsView(
                                 DiscoverabilityMode.FOLLOWERS -> "Only people who follow you will see your stitches"
                                 DiscoverabilityMode.NONE -> "Your stitches won't appear in Discovery — only via your profile"
                             },
-                            fontSize = 11.sp, color = Color.Gray
+                            fontSize = 11.sp, color = AppTheme.colors.textSecondary
                         )
                     }
 
                     // Default stitch visibility
                     PrivacySection(title = "DEFAULT STITCH VISIBILITY", icon = Icons.Default.Videocam, iconColor = Color(0xFFBF5AF2)) {
-                        Text("New stitches default to", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                        Text("New stitches default to", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
                         SegmentedRow(
                             values = ContentVisibility.values().toList(),
                             selected = defaultStitchVisibility,
@@ -212,13 +213,13 @@ fun PrivacySettingsView(
                                 ContentVisibility.TAGGED -> "Only people you tag can view"
                                 ContentVisibility.PRIVATE -> "Only you can see — saved as draft"
                             },
-                            fontSize = 11.sp, color = Color.Gray
+                            fontSize = 11.sp, color = AppTheme.colors.textSecondary
                         )
                     }
 
                     // Age Group
                     PrivacySection(title = "CONTENT SAFETY", icon = Icons.Default.Shield, iconColor = Color(0xFF30D158)) {
-                        Text("Age Group", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                        Text("Age Group", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
                         SegmentedRow(
                             values = AgeGroup.values().toList(),
                             selected = ageGroup,
@@ -234,7 +235,7 @@ fun PrivacySettingsView(
                                 AgeGroup.TEEN -> "Content filtered for safety. Uploads go to the teen-safe bucket."
                                 AgeGroup.ADULT -> "Full content access. Standard community guidelines apply."
                             },
-                            fontSize = 11.sp, color = Color.Gray
+                            fontSize = 11.sp, color = AppTheme.colors.textSecondary
                         )
                         if (ageVerified) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -251,11 +252,11 @@ fun PrivacySettingsView(
     if (showAgeConfirm) {
         AlertDialog(
             onDismissRequest = { showAgeConfirm = false; pendingAge = null },
-            title = { Text("Change Age Group?", color = Color.White) },
+            title = { Text("Change Age Group?", color = AppTheme.colors.textPrimary) },
             text = {
                 Text(
                     "This changes your content routing and cannot be easily reversed. Teen accounts see restricted content only.",
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
             },
             confirmButton = {
@@ -271,10 +272,10 @@ fun PrivacySettingsView(
             },
             dismissButton = {
                 TextButton(onClick = { showAgeConfirm = false; pendingAge = null }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = AppTheme.colors.textSecondary)
                 }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 }
@@ -289,11 +290,11 @@ private fun PrivacySection(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(icon, null, tint = iconColor, modifier = Modifier.size(12.dp))
-            Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 0.8.sp)
+            Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textSecondary, letterSpacing = 0.8.sp)
         }
         Column(
             modifier = Modifier.fillMaxWidth()
-                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             content = content
@@ -310,7 +311,7 @@ private fun <T> SegmentedRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
             .padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {

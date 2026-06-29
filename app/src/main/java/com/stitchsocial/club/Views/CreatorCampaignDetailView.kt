@@ -1,5 +1,6 @@
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -80,10 +81,10 @@ fun CreatorCampaignDetailView(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(campaign.title, color = Color.White, fontSize = 16.sp) },
+                title = { Text(campaign.title, color = AppTheme.colors.textPrimary, fontSize = 16.sp) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Close", tint = Color.White)
+                        Icon(Icons.Default.Close, "Close", tint = AppTheme.colors.textPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
@@ -95,7 +96,7 @@ fun CreatorCampaignDetailView(
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator(color = Color.White) }
+            ) { CircularProgressIndicator(color = AppTheme.colors.textPrimary) }
         } else {
             Column(
                 modifier = Modifier
@@ -169,7 +170,7 @@ private fun BriefCard(campaign: CreatorCampaign) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -177,16 +178,16 @@ private fun BriefCard(campaign: CreatorCampaign) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     campaign.brandName ?: "Brand",
-                    color = Color.White,
+                    color = AppTheme.colors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
                 campaign.category?.let {
-                    Text(it.replaceFirstChar { c -> c.uppercase() }, color = Color.Gray, fontSize = 11.sp)
+                    Text(it.replaceFirstChar { c -> c.uppercase() }, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("Payout", color = Color.Gray, fontSize = 11.sp)
+                Text("Payout", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                 Text(
                     "$${campaign.payoutDollars.toInt()}",
                     color = Color(0xFF1E8E3E),
@@ -195,7 +196,7 @@ private fun BriefCard(campaign: CreatorCampaign) {
                 )
             }
         }
-        Text(campaign.brief, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+        Text(campaign.brief, color = AppTheme.colors.textPrimary.copy(alpha = 0.85f), fontSize = 14.sp)
     }
 }
 
@@ -205,11 +206,11 @@ private fun CriteriaCard(c: CreatorCampaignCriteria) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+            .background(AppTheme.colors.surface)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text("Requirements", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text("Requirements", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         c.minTier?.let { Bullet("Minimum tier: ${it.replaceFirstChar { c -> c.uppercase() }}") }
         c.minStitchers?.takeIf { it > 0 }?.let { Bullet("Minimum stitchers: $it") }
         c.minViewsPerVideo?.takeIf { it > 0 }?.let { Bullet("Avg views per video: $it+") }
@@ -222,8 +223,8 @@ private fun CriteriaCard(c: CreatorCampaignCriteria) {
 @Composable
 private fun Bullet(text: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("•", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
-        Text(text, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+        Text("•", color = AppTheme.colors.textPrimary.copy(alpha = 0.7f), fontSize = 13.sp)
+        Text(text, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f), fontSize = 13.sp)
     }
 }
 
@@ -271,17 +272,17 @@ private fun ApplicationStatusCard(app: CreatorCampaignApplication) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Your application", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text("Your application", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Spacer(modifier = Modifier.weight(1f))
             StatusBadge(app.status)
         }
         app.pitch?.takeIf { it.isNotEmpty() }?.let {
-            Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+            Text(it, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f), fontSize = 13.sp)
         }
         app.aiFitScore?.let {
             Text("AI fit: $it%", color = Color.Cyan, fontSize = 12.sp)
@@ -295,12 +296,12 @@ private fun DeliverableStatusCard(d: CreatorCampaignDeliverable, onResubmit: () 
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Deliverable", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text("Deliverable", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Spacer(modifier = Modifier.weight(1f))
             StatusBadge(d.approvalStatus)
         }
@@ -309,7 +310,7 @@ private fun DeliverableStatusCard(d: CreatorCampaignDeliverable, onResubmit: () 
         }
         if (d.approvalStatus == "revision_requested" && !d.revisionNotes.isNullOrEmpty()) {
             Text("Revision notes:", color = Color(0xFFFFA000), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(d.revisionNotes, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            Text(d.revisionNotes, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f), fontSize = 12.sp)
             TextButton(onClick = onResubmit) {
                 Text("Submit revision", color = Color(0xFFFFA000), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -334,7 +335,7 @@ private fun PayoutStatusRow(status: String, net: Int?) {
         "held_no_connect_account" -> Triple("Held — set up payouts", Color(0xFFFFA000), Icons.Default.Inbox)
         "failed" -> Triple("Failed", Color.Red, Icons.Default.Error)
         "pending_stripe" -> Triple("Processing", Color.Yellow, Icons.Default.HourglassEmpty)
-        else -> Triple(status, Color.Gray, Icons.Default.Circle)
+        else -> Triple(status, AppTheme.colors.textSecondary, Icons.Default.Circle)
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Icon(icon, null, tint = color, modifier = Modifier.size(14.dp))
@@ -342,7 +343,7 @@ private fun PayoutStatusRow(status: String, net: Int?) {
         if (net != null && status.startsWith("paid")) {
             Text(
                 "• $${String.format("%.2f", net / 100.0)}",
-                color = Color.White.copy(alpha = 0.6f),
+                color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
                 fontSize = 12.sp
             )
         }
@@ -362,7 +363,7 @@ private fun BrandSections(
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "Applicants (${applications.size})",
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -376,7 +377,7 @@ private fun BrandSections(
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "Deliverables (${deliverables.size})",
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -389,7 +390,7 @@ private fun BrandSections(
     if (applications.isEmpty() && deliverables.isEmpty()) {
         Text(
             "No applications yet — creators will appear here as they apply.",
-            color = Color.Gray,
+            color = AppTheme.colors.textSecondary,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 20.dp)
         )
@@ -410,7 +411,7 @@ private fun ApplicantRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -418,12 +419,12 @@ private fun ApplicantRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     app.creatorName ?: app.creatorID,
-                    color = Color.White,
+                    color = AppTheme.colors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
                 app.creatorTier?.let {
-                    Text(it.replaceFirstChar { c -> c.uppercase() }, color = Color.Gray, fontSize = 11.sp)
+                    Text(it.replaceFirstChar { c -> c.uppercase() }, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                 }
             }
             app.aiFitScore?.let {
@@ -440,7 +441,7 @@ private fun ApplicantRow(
         }
 
         app.pitch?.takeIf { it.isNotEmpty() }?.let {
-            Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 4)
+            Text(it, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 4)
         }
 
         app.metricSnapshot?.let { s ->
@@ -488,11 +489,11 @@ private fun ApplicantRow(
         } else {
             Text(
                 app.status.replaceFirstChar { it.uppercase() },
-                color = Color.Gray,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                    .background(AppTheme.colors.surfaceStrong, CircleShape)
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             )
         }
@@ -502,8 +503,8 @@ private fun ApplicantRow(
 @Composable
 private fun MetricChip(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(label, color = Color.Gray, fontSize = 11.sp)
-        Text(value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
+        Text(value, color = AppTheme.colors.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -523,21 +524,21 @@ private fun DeliverableRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 deliverable.creatorID,
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 fontSize = 11.sp,
                 maxLines = 1,
                 modifier = Modifier.weight(1f)
             )
             Text(
                 deliverable.approvalStatus.replace("_", " ").replaceFirstChar { it.uppercase() },
-                color = Color.Gray,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -585,16 +586,16 @@ private fun DeliverableRow(
     if (showRevisionDialog) {
         AlertDialog(
             onDismissRequest = { showRevisionDialog = false },
-            title = { Text("Request revision", color = Color.White) },
+            title = { Text("Request revision", color = AppTheme.colors.textPrimary) },
             text = {
                 BasicTextField(
                     value = revisionNotes,
                     onValueChange = { revisionNotes = it },
-                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                    textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 100.dp)
-                        .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+                        .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
                         .padding(10.dp),
                     cursorBrush = SolidColor(Color.White)
                 )
@@ -614,7 +615,7 @@ private fun DeliverableRow(
             },
             dismissButton = {
                 TextButton(onClick = { showRevisionDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = AppTheme.colors.textSecondary)
                 }
             },
             containerColor = Color(0xFF1A1A1A)
@@ -652,10 +653,10 @@ private fun StatusBadge(status: String) {
         "pending" -> Color.Yellow to "Pending"
         "approved" -> Color(0xFF1E8E3E) to "Approved"
         "rejected" -> Color.Red to "Rejected"
-        "withdrawn" -> Color.Gray to "Withdrawn"
+        "withdrawn" -> AppTheme.colors.textSecondary to "Withdrawn"
         "awaiting" -> Color.Yellow to "Awaiting review"
         "revision_requested" -> Color(0xFFFFA000) to "Revision requested"
-        else -> Color.Gray to status.replaceFirstChar { it.uppercase() }
+        else -> AppTheme.colors.textSecondary to status.replaceFirstChar { it.uppercase() }
     }
     Text(
         label,
@@ -686,10 +687,10 @@ private fun ApplyPitchSheet(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Apply", color = Color.White) },
+                title = { Text("Apply", color = AppTheme.colors.textPrimary) },
                 navigationIcon = {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White)
+                        Text("Cancel", color = AppTheme.colors.textPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
@@ -704,23 +705,23 @@ private fun ApplyPitchSheet(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("Why should they pick you?", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Why should they pick you?", color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(
                 "Tell the brand what you'd make. Keep it short — they're reviewing many applications.",
-                color = Color.Gray,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 13.sp
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 140.dp, max = 240.dp)
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(10.dp))
                     .padding(12.dp)
             ) {
                 if (pitch.isEmpty()) {
                     Text(
                         "e.g., I'd build a 3-stitch reaction thread reviewing the product honestly. My fitness audience loves unfiltered first-takes.",
-                        color = Color.Gray.copy(alpha = 0.6f),
+                        color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                         fontSize = 13.sp
                     )
                 }
@@ -728,7 +729,7 @@ private fun ApplyPitchSheet(
                     value = pitch,
                     onValueChange = { pitch = it },
                     modifier = Modifier.fillMaxSize(),
-                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                     cursorBrush = SolidColor(Color.White)
                 )
             }
@@ -786,9 +787,9 @@ private fun SubmitDeliverableSheet(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Submit deliverable", color = Color.White) },
+                title = { Text("Submit deliverable", color = AppTheme.colors.textPrimary) },
                 navigationIcon = {
-                    TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White) }
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = AppTheme.colors.textPrimary) }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
             )
@@ -802,43 +803,43 @@ private fun SubmitDeliverableSheet(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Submit your content", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Submit your content", color = AppTheme.colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(
                 "Paste a link to your draft (private YouTube, Drive, Dropbox, Stitch video, etc).",
-                color = Color.Gray,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 13.sp
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(10.dp))
                     .padding(12.dp)
             ) {
                 if (draftURL.isEmpty()) {
-                    Text("https://…", color = Color.Gray.copy(alpha = 0.6f), fontSize = 14.sp)
+                    Text("https://…", color = AppTheme.colors.textSecondary.copy(alpha = 0.6f), fontSize = 14.sp)
                 }
                 BasicTextField(
                     value = draftURL,
                     onValueChange = { draftURL = it },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                    textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
                     cursorBrush = SolidColor(Color.White)
                 )
             }
 
-            Text("Notes (optional)", color = Color.Gray, fontSize = 11.sp)
+            Text("Notes (optional)", color = AppTheme.colors.textSecondary, fontSize = 11.sp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 100.dp, max = 180.dp)
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(10.dp))
                     .padding(12.dp)
             ) {
                 BasicTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     modifier = Modifier.fillMaxSize(),
-                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                    textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
                     cursorBrush = SolidColor(Color.White)
                 )
             }
@@ -862,7 +863,7 @@ private fun SubmitDeliverableSheet(
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (canSubmit) Color.Cyan else Color.Gray.copy(alpha = 0.3f),
+                    containerColor = if (canSubmit) Color.Cyan else AppTheme.colors.textSecondary.copy(alpha = 0.3f),
                     contentColor = Color.Black
                 ),
                 shape = RoundedCornerShape(12.dp)

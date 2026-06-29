@@ -1,5 +1,6 @@
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -67,9 +68,9 @@ fun CreateCreatorCampaignView(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("New campaign", color = Color.White) },
+                title = { Text("New campaign", color = AppTheme.colors.textPrimary) },
                 navigationIcon = {
-                    TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White) }
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = AppTheme.colors.textPrimary) }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
             )
@@ -99,7 +100,7 @@ fun CreateCreatorCampaignView(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                        .background(AppTheme.colors.surface, RoundedCornerShape(10.dp))
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -108,16 +109,16 @@ fun CreateCreatorCampaignView(
                     BasicTextField(
                         value = payoutDollars,
                         onValueChange = { payoutDollars = it.filter { c -> c.isDigit() } },
-                        textStyle = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                        textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold),
                         modifier = Modifier.weight(0.4f),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         cursorBrush = SolidColor(Color.White)
                     )
-                    Text("per approved deliverable", color = Color.Gray, fontSize = 12.sp)
+                    Text("per approved deliverable", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
                 }
                 Text(
                     "Stitch takes 20% — creator nets $$creatorNet per approved delivery",
-                    color = Color.Gray,
+                    color = AppTheme.colors.textSecondary,
                     fontSize = 11.sp
                 )
             }
@@ -187,7 +188,7 @@ fun CreateCreatorCampaignView(
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (canSubmit) Color.White else Color.Gray.copy(alpha = 0.3f),
+                    containerColor = if (canSubmit) Color.White else AppTheme.colors.textSecondary.copy(alpha = 0.3f),
                     contentColor = Color.Black
                 ),
                 shape = RoundedCornerShape(12.dp)
@@ -201,7 +202,7 @@ fun CreateCreatorCampaignView(
 
             Text(
                 "By posting, you agree to fund payouts in full upon approval. Creators receive earnings via Stripe Connect.",
-                color = Color.Gray,
+                color = AppTheme.colors.textSecondary,
                 fontSize = 10.sp
             )
             Spacer(modifier = Modifier.height(20.dp))
@@ -214,7 +215,7 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             title.uppercase(),
-            color = Color.Gray,
+            color = AppTheme.colors.textSecondary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
@@ -232,21 +233,21 @@ private fun InputField(
     placeholder: String = ""
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = Color.Gray, fontSize = 12.sp)
+        Text(label, color = AppTheme.colors.textSecondary, fontSize = 12.sp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
                 .padding(10.dp)
         ) {
             if (value.isEmpty() && placeholder.isNotEmpty()) {
-                Text(placeholder, color = Color.Gray.copy(alpha = 0.5f), fontSize = 14.sp)
+                Text(placeholder, color = AppTheme.colors.textSecondary.copy(alpha = 0.5f), fontSize = 14.sp)
             }
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
                 modifier = Modifier.fillMaxWidth(),
-                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
                 keyboardOptions = KeyboardOptions(keyboardType = keyboard),
                 cursorBrush = SolidColor(Color.White),
                 singleLine = true
@@ -263,22 +264,22 @@ private fun MultilineField(
     placeholder: String
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = Color.Gray, fontSize = 12.sp)
+        Text(label, color = AppTheme.colors.textSecondary, fontSize = 12.sp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 100.dp, max = 160.dp)
-                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
                 .padding(12.dp)
         ) {
             if (value.isEmpty()) {
-                Text(placeholder, color = Color.Gray.copy(alpha = 0.5f), fontSize = 14.sp)
+                Text(placeholder, color = AppTheme.colors.textSecondary.copy(alpha = 0.5f), fontSize = 14.sp)
             }
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
                 modifier = Modifier.fillMaxSize(),
-                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
                 cursorBrush = SolidColor(Color.White)
             )
         }
@@ -295,23 +296,23 @@ private fun DropdownField(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = Color.Gray, fontSize = 12.sp)
+        Text(label, color = AppTheme.colors.textSecondary, fontSize = 12.sp)
         Box {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
                     .clickable { expanded = true }
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     value.replaceFirstChar { it.uppercase() },
-                    color = Color.White,
+                    color = AppTheme.colors.textPrimary,
                     fontSize = 14.sp,
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Default.ArrowDropDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.ArrowDropDown, null, tint = AppTheme.colors.textPrimary, modifier = Modifier.size(20.dp))
             }
             DropdownMenu(
                 expanded = expanded,
@@ -320,7 +321,7 @@ private fun DropdownField(
             ) {
                 options.forEach { opt ->
                     DropdownMenuItem(
-                        text = { Text(opt.replaceFirstChar { it.uppercase() }, color = Color.White) },
+                        text = { Text(opt.replaceFirstChar { it.uppercase() }, color = AppTheme.colors.textPrimary) },
                         onClick = {
                             onChange(opt)
                             expanded = false

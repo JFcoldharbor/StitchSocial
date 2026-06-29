@@ -9,6 +9,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -52,13 +53,13 @@ fun HypeLeaderboardSection(
                 "\uD83D\uDD25 Hype Leaderboard",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = AppTheme.colors.textPrimary
             )
             Text(
                 "Last 7 Days",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White.copy(alpha = 0.6f)
+                color = AppTheme.colors.textPrimary.copy(alpha = 0.6f)
             )
         }
 
@@ -67,7 +68,7 @@ fun HypeLeaderboardSection(
             Text(
                 "No videos with hype yet",
                 fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.6f),
+                color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
             )
         } else {
@@ -97,7 +98,7 @@ private fun LeaderboardCard(
 ) {
     val rankColor = when (rank) {
         1 -> Color.Yellow
-        2 -> Color.Gray
+        2 -> AppTheme.colors.textSecondary
         3 -> Color(0xFFCD7F32) // bronze
         else -> Color.White.copy(alpha = 0.3f)
     }
@@ -105,7 +106,7 @@ private fun LeaderboardCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.hairline, RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -132,7 +133,7 @@ private fun LeaderboardCard(
             modifier = Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color.Gray.copy(alpha = 0.3f)),
+                .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
             contentAlignment = Alignment.Center
         ) {
             if (!video.thumbnailURL.isNullOrEmpty()) {
@@ -146,7 +147,7 @@ private fun LeaderboardCard(
                 Icon(
                     Icons.Default.PlayArrow,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.5f),
+                    tint = AppTheme.colors.textPrimary.copy(alpha = 0.5f),
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -160,7 +161,7 @@ private fun LeaderboardCard(
                 video.title,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -168,7 +169,7 @@ private fun LeaderboardCard(
             Text(
                 video.creatorName,
                 fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.7f),
+                color = AppTheme.colors.textPrimary.copy(alpha = 0.7f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -183,7 +184,7 @@ private fun LeaderboardCard(
                     "${video.hypeCount}",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = AppTheme.colors.textPrimary
                 )
                 Spacer(Modifier.width(4.dp))
                 Icon(

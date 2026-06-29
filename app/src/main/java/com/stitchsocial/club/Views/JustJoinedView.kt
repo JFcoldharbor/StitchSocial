@@ -9,6 +9,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,7 +88,7 @@ fun JustJoinedView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(AppTheme.colors.bg)
             .statusBarsPadding()
     ) {
         // Top bar
@@ -100,7 +101,7 @@ fun JustJoinedView(
                 "Just Joined",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 modifier = Modifier.align(Alignment.Center)
             )
             TextButton(
@@ -121,7 +122,7 @@ fun JustJoinedView(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         CircularProgressIndicator(color = Color(0xFF9C27B0))
-                        Text("Loading new users...", fontSize = 14.sp, color = Color.Gray)
+                        Text("Loading new users...", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                     }
                 }
                 errorMessage != null -> {
@@ -131,7 +132,7 @@ fun JustJoinedView(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Icon(Icons.Default.Warning, null, tint = Color(0xFFFF9800), modifier = Modifier.size(50.dp))
-                        Text(errorMessage!!, fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                        Text(errorMessage!!, fontSize = 16.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
                         TextButton(onClick = {
                             scope.launch {
                                 isLoading = true; errorMessage = null
@@ -159,8 +160,8 @@ fun JustJoinedView(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Icon(Icons.Default.Group, null, tint = Color.Gray, modifier = Modifier.size(50.dp))
-                        Text("No new users yet", fontSize = 16.sp, color = Color.Gray)
+                        Icon(Icons.Default.Group, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(50.dp))
+                        Text("No new users yet", fontSize = 16.sp, color = AppTheme.colors.textSecondary)
                     }
                 }
                 else -> {
@@ -199,8 +200,8 @@ private fun JustJoinedUserCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(16.dp))
             .clickable(onClick = onTap)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -219,14 +220,14 @@ private fun JustJoinedUserCard(
                     model = imageUrl,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f))
+                    modifier = Modifier.fillMaxSize().clip(CircleShape).background(AppTheme.colors.textSecondary.copy(alpha = 0.3f))
                 )
             } else {
                 Box(
-                    modifier = Modifier.fillMaxSize().clip(CircleShape).background(Color.Gray.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxSize().clip(CircleShape).background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Person, null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(32.dp))
+                    Icon(Icons.Default.Person, null, tint = AppTheme.colors.textPrimary.copy(alpha = 0.5f), modifier = Modifier.size(32.dp))
                 }
             }
         }
@@ -236,7 +237,7 @@ private fun JustJoinedUserCard(
             user.username,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White,
+            color = AppTheme.colors.textPrimary,
             maxLines = 1
         )
 
@@ -244,7 +245,7 @@ private fun JustJoinedUserCard(
         Text(
             "Joined ${timeAgo(user.joinedAt.time)}",
             fontSize = 11.sp,
-            color = Color.Gray
+            color = AppTheme.colors.textSecondary
         )
 
         // Follow button
@@ -252,26 +253,26 @@ private fun JustJoinedUserCard(
             onClick = onFollow,
             enabled = !isFollowLoading,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (isFollowing) Color.Gray.copy(alpha = 0.3f) else Color(0xFF9C27B0)
+                containerColor = if (isFollowing) AppTheme.colors.textSecondary.copy(alpha = 0.3f) else Color(0xFF9C27B0)
             ),
             shape = RoundedCornerShape(16.dp),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             modifier = Modifier.height(32.dp)
         ) {
             if (isFollowLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = AppTheme.colors.textPrimary)
             } else {
                 if (isFollowing) {
-                    Icon(Icons.Default.Check, null, modifier = Modifier.size(10.dp), tint = Color.White)
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(10.dp), tint = AppTheme.colors.textPrimary)
                 } else {
-                    Icon(Icons.Default.PersonAdd, null, modifier = Modifier.size(10.dp), tint = Color.White)
+                    Icon(Icons.Default.PersonAdd, null, modifier = Modifier.size(10.dp), tint = AppTheme.colors.textPrimary)
                 }
                 Spacer(Modifier.width(4.dp))
                 Text(
                     if (isFollowing) "Following" else "Follow",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = AppTheme.colors.textPrimary
                 )
             }
         }

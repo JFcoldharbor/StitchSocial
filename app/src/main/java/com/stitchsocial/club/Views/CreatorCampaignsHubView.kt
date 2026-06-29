@@ -1,5 +1,6 @@
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -85,13 +86,13 @@ fun CreatorCampaignsHubView(
                 title = {
                     Text(
                         if (isBrandAccount) "Campaigns" else "Marketplace",
-                        color = Color.White,
+                        color = AppTheme.colors.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                        Icon(Icons.Default.ArrowBack, "Back", tint = AppTheme.colors.textPrimary)
                     }
                 },
                 actions = {
@@ -125,7 +126,7 @@ fun CreatorCampaignsHubView(
                     ) {
                         Text(
                             label,
-                            color = if (selectedTab == i) Color.White else Color.Gray,
+                            color = if (selectedTab == i) Color.White else AppTheme.colors.textSecondary,
                             fontSize = 14.sp,
                             fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Medium
                         )
@@ -139,13 +140,13 @@ fun CreatorCampaignsHubView(
                     }
                 }
             }
-            Divider(color = Color.White.copy(alpha = 0.1f))
+            Divider(color = AppTheme.colors.hairline)
 
             // Content
             when {
                 isLoading && currentList.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.White)
+                        CircularProgressIndicator(color = AppTheme.colors.textPrimary)
                     }
                 }
                 currentList.isEmpty() -> EmptyState(isBrandAccount, selectedTab)
@@ -205,7 +206,7 @@ private fun CampaignRowCard(campaign: CreatorCampaign, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(AppTheme.colors.surface)
             .clickable(onClick = onClick)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -214,13 +215,13 @@ private fun CampaignRowCard(campaign: CreatorCampaign, onClick: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     campaign.title,
-                    color = Color.White,
+                    color = AppTheme.colors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
                     maxLines = 2
                 )
                 campaign.brandName?.let {
-                    Text(it, color = Color.Gray, fontSize = 11.sp)
+                    Text(it, color = AppTheme.colors.textSecondary, fontSize = 11.sp)
                 }
             }
             Text(
@@ -233,7 +234,7 @@ private fun CampaignRowCard(campaign: CreatorCampaign, onClick: () -> Unit) {
 
         Text(
             campaign.brief,
-            color = Color.White.copy(alpha = 0.7f),
+            color = AppTheme.colors.textPrimary.copy(alpha = 0.7f),
             fontSize = 12.sp,
             maxLines = 2
         )
@@ -267,7 +268,7 @@ private fun statusColor(status: String): Color = when (status) {
     "open" -> Color(0xFF1E8E3E)
     "reviewing" -> Color(0xFFFFA000)
     "in_progress" -> Color.Cyan
-    "completed" -> Color.Gray
+    "completed" -> AppTheme.colors.textSecondary
     "cancelled" -> Color.Red
     else -> Color.White
 }
@@ -288,10 +289,10 @@ private fun EmptyState(isBrandAccount: Boolean, selectedTab: Int) {
         Icon(
             if (isBrandAccount) Icons.Default.Campaign else Icons.Default.Search,
             null,
-            tint = Color.Gray.copy(alpha = 0.5f),
+            tint = AppTheme.colors.textSecondary.copy(alpha = 0.5f),
             modifier = Modifier.size(40.dp)
         )
         Spacer(modifier = Modifier.height(14.dp))
-        Text(msg, color = Color.Gray, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Text(msg, color = AppTheme.colors.textSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
     }
 }
