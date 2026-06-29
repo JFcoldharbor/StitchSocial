@@ -13,6 +13,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -110,7 +111,7 @@ fun CashOutSheet(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -120,10 +121,10 @@ fun CashOutSheet(
                     .padding(top = 40.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray, fontSize = 15.sp) }
+                TextButton(onClick = onDismiss) { Text("Cancel", color = AppTheme.colors.textSecondary, fontSize = 15.sp) }
                 Text(
                     "Cash Out", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    color = Color.White, modifier = Modifier.weight(1f),
+                    color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.size(64.dp))
@@ -146,9 +147,9 @@ fun CashOutSheet(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("AVAILABLE BALANCE", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray, letterSpacing = 0.8.sp)
+                    Text("AVAILABLE BALANCE", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textSecondary, letterSpacing = 0.8.sp)
                     Text("$availableCoins coins", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD60A))
-                    Text("≈ $${"%.2f".format(HypeCoinValue.toDollars(availableCoins))}", fontSize = 12.sp, color = Color.Gray)
+                    Text("≈ $${"%.2f".format(HypeCoinValue.toDollars(availableCoins))}", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                 }
 
                 // Amount field
@@ -156,13 +157,13 @@ fun CashOutSheet(
                     BasicTextField(
                         value = amountStr,
                         onValueChange = { amountStr = it.filter { c -> c.isDigit() } },
-                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                        textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 16.sp),
                         cursorBrush = SolidColor(Color.Cyan),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                         decorationBox = { inner ->
                             if (amountStr.isEmpty()) {
-                                Text("Min ${CashOutLimits.MINIMUM_COINS} coins", color = Color.White.copy(alpha = 0.25f), fontSize = 16.sp)
+                                Text("Min ${CashOutLimits.MINIMUM_COINS} coins", color = AppTheme.colors.textPrimary.copy(alpha = 0.25f), fontSize = 16.sp)
                             }
                             inner()
                         }
@@ -171,19 +172,19 @@ fun CashOutSheet(
                 if (coinAmount > 0) {
                     Text(
                         "You'll receive ≈ $${"%.2f".format(creatorAmount)} (70% creator share)",
-                        fontSize = 12.sp, color = Color.Gray
+                        fontSize = 12.sp, color = AppTheme.colors.textSecondary
                     )
                 }
 
                 // Method picker
-                Text("PAYOUT METHOD", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 0.8.sp)
+                Text("PAYOUT METHOD", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textSecondary, letterSpacing = 0.8.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PayoutMethod.values().forEach { m ->
                         val sel = m == method
                         Box(
                             modifier = Modifier.weight(1f)
                                 .background(
-                                    if (sel) Color.Cyan.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f),
+                                    if (sel) Color.Cyan.copy(alpha = 0.2f) else AppTheme.colors.surface,
                                     RoundedCornerShape(12.dp)
                                 )
                                 .clickable { method = m }
@@ -191,8 +192,8 @@ fun CashOutSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(m.icon, null, tint = if (sel) Color.Cyan else Color.Gray, modifier = Modifier.size(16.dp))
-                                Text(m.display, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (sel) Color.White else Color.Gray)
+                                Icon(m.icon, null, tint = if (sel) Color.Cyan else AppTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
+                                Text(m.display, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (sel) Color.White else AppTheme.colors.textSecondary)
                             }
                         }
                     }
@@ -204,12 +205,12 @@ fun CashOutSheet(
                             BasicTextField(
                                 value = paypalEmail,
                                 onValueChange = { paypalEmail = it },
-                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                                 cursorBrush = SolidColor(Color.Cyan),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                 modifier = Modifier.fillMaxWidth(),
                                 decorationBox = { inner ->
-                                    if (paypalEmail.isEmpty()) Text("you@example.com", color = Color.White.copy(alpha = 0.25f), fontSize = 15.sp)
+                                    if (paypalEmail.isEmpty()) Text("you@example.com", color = AppTheme.colors.textPrimary.copy(alpha = 0.25f), fontSize = 15.sp)
                                     inner()
                                 }
                             )
@@ -219,30 +220,30 @@ fun CashOutSheet(
                         LabeledField(label = "ACCOUNT HOLDER", placeholder = "Full name") {
                             BasicTextField(
                                 value = bankName, onValueChange = { bankName = it },
-                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                                 cursorBrush = SolidColor(Color.Cyan),
                                 modifier = Modifier.fillMaxWidth(),
-                                decorationBox = { inner -> if (bankName.isEmpty()) Text("Full name", color = Color.White.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
+                                decorationBox = { inner -> if (bankName.isEmpty()) Text("Full name", color = AppTheme.colors.textPrimary.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
                             )
                         }
                         LabeledField(label = "ROUTING NUMBER", placeholder = "9 digits") {
                             BasicTextField(
                                 value = bankRouting, onValueChange = { bankRouting = it.filter { c -> c.isDigit() } },
-                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                                 cursorBrush = SolidColor(Color.Cyan),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth(),
-                                decorationBox = { inner -> if (bankRouting.isEmpty()) Text("9 digits", color = Color.White.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
+                                decorationBox = { inner -> if (bankRouting.isEmpty()) Text("9 digits", color = AppTheme.colors.textPrimary.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
                             )
                         }
                         LabeledField(label = "ACCOUNT NUMBER", placeholder = "Bank account") {
                             BasicTextField(
                                 value = bankAccount, onValueChange = { bankAccount = it.filter { c -> c.isDigit() } },
-                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                                 cursorBrush = SolidColor(Color.Cyan),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth(),
-                                decorationBox = { inner -> if (bankAccount.isEmpty()) Text("Bank account", color = Color.White.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
+                                decorationBox = { inner -> if (bankAccount.isEmpty()) Text("Bank account", color = AppTheme.colors.textPrimary.copy(alpha = 0.25f), fontSize = 15.sp); inner() }
                             )
                         }
                     }
@@ -256,7 +257,7 @@ fun CashOutSheet(
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Cyan,
-                        disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                        disabledContainerColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -273,11 +274,11 @@ fun CashOutSheet(
     if (showSuccess) {
         AlertDialog(
             onDismissRequest = { showSuccess = false; onDismiss() },
-            title = { Text("Cash Out Submitted!", color = Color.White) },
+            title = { Text("Cash Out Submitted!", color = AppTheme.colors.textPrimary) },
             text = {
                 Text(
                     "You'll receive ≈ $${"%.2f".format(creatorAmount)} via ${method.display} within 3-5 business days.",
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
             },
             confirmButton = {
@@ -285,7 +286,7 @@ fun CashOutSheet(
                     Text("Done", color = Color.Cyan)
                 }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 
@@ -293,10 +294,10 @@ fun CashOutSheet(
     if (err != null) {
         AlertDialog(
             onDismissRequest = { errorMessage = null },
-            title = { Text("Error", color = Color.White) },
-            text = { Text(err, color = Color.Gray) },
+            title = { Text("Error", color = AppTheme.colors.textPrimary) },
+            text = { Text(err, color = AppTheme.colors.textSecondary) },
             confirmButton = { TextButton(onClick = { errorMessage = null }) { Text("OK", color = Color.Cyan) } },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 }
@@ -308,10 +309,10 @@ private fun LabeledField(
     field: @Composable () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 0.8.sp)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textSecondary, letterSpacing = 0.8.sp)
         Box(
             modifier = Modifier.fillMaxWidth()
-                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+                .background(AppTheme.colors.surface, RoundedCornerShape(10.dp))
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) { field() }
     }

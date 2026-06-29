@@ -1,5 +1,6 @@
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -62,7 +63,7 @@ fun ReportSheet(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(AppTheme.colors.bg),
             color = Color.Black
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -70,17 +71,17 @@ fun ReportSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black)
+                        .background(AppTheme.colors.bg)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White)
+                        Text("Cancel", color = AppTheme.colors.textPrimary)
                     }
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
                         "Report",
-                        color = Color.White,
+                        color = AppTheme.colors.textPrimary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     )
@@ -89,7 +90,7 @@ fun ReportSheet(
                     Spacer(modifier = Modifier.width(64.dp))
                 }
 
-                Divider(color = Color.White.copy(alpha = 0.08f))
+                Divider(color = AppTheme.colors.surfaceStrong)
 
                 Column(
                     modifier = Modifier
@@ -99,14 +100,14 @@ fun ReportSheet(
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         "What's the issue?",
-                        color = Color.White,
+                        color = AppTheme.colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 22.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         "Our team reviews every report. False reports can affect your standing.",
-                        color = Color.Gray,
+                        color = AppTheme.colors.textSecondary,
                         fontSize = 13.sp
                     )
 
@@ -128,7 +129,7 @@ fun ReportSheet(
                         Spacer(modifier = Modifier.height(20.dp))
                         Text(
                             "Add context (optional)",
-                            color = Color.Gray,
+                            color = AppTheme.colors.textSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -138,7 +139,7 @@ fun ReportSheet(
                                 .fillMaxWidth()
                                 .heightIn(min = 80.dp, max = 160.dp)
                                 .background(
-                                    Color.White.copy(alpha = 0.06f),
+                                    AppTheme.colors.surface,
                                     RoundedCornerShape(10.dp)
                                 )
                                 .padding(12.dp)
@@ -146,7 +147,7 @@ fun ReportSheet(
                             if (note.isEmpty()) {
                                 Text(
                                     "What should we know?",
-                                    color = Color.Gray.copy(alpha = 0.6f),
+                                    color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                                     fontSize = 15.sp
                                 )
                             }
@@ -154,13 +155,13 @@ fun ReportSheet(
                                 value = note,
                                 onValueChange = { if (it.length <= 1000) note = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 15.sp),
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White)
                             )
                         }
                         Text(
                             "${note.length} / 1000",
-                            color = Color.Gray.copy(alpha = 0.6f),
+                            color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                             fontSize = 11.sp,
                             modifier = Modifier
                                 .align(Alignment.End)
@@ -204,9 +205,9 @@ fun ReportSheet(
                             .fillMaxWidth()
                             .height(48.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedReason != null) Color.White else Color.Gray.copy(alpha = 0.3f),
+                            containerColor = if (selectedReason != null) Color.White else AppTheme.colors.textSecondary.copy(alpha = 0.3f),
                             contentColor = Color.Black,
-                            disabledContainerColor = Color.Gray.copy(alpha = 0.3f),
+                            disabledContainerColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f),
                             disabledContentColor = Color.Black
                         ),
                         shape = RoundedCornerShape(12.dp)
@@ -228,7 +229,7 @@ fun ReportSheet(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "If someone is in immediate danger, contact local emergency services. For DMCA takedowns, email dmca@stitchsocial.me.",
-                        color = Color.Gray.copy(alpha = 0.7f),
+                        color = AppTheme.colors.textSecondary.copy(alpha = 0.7f),
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
@@ -248,7 +249,7 @@ fun ReportSheet(
                 ) {
                     Text(
                         "Report sent. Thanks for keeping Stitch safe.",
-                        color = Color.White,
+                        color = AppTheme.colors.textPrimary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         modifier = Modifier
@@ -272,7 +273,7 @@ private fun ReasonRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(
-                if (selected) Color.White else Color.White.copy(alpha = 0.08f),
+                if (selected) Color.White else AppTheme.colors.surfaceStrong,
                 RoundedCornerShape(12.dp)
             )
             .clickable { onClick() }

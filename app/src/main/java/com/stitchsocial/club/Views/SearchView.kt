@@ -14,6 +14,7 @@
 
 package com.stitchsocial.club
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
@@ -343,7 +344,7 @@ private fun SearchHeader(onDismiss: () -> Unit) {
             text = "Search",
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White
+            color = AppTheme.colors.textPrimary
         )
         // Close button — used to be Icons.Default.Search (the magnifying glass)
         // which was unrecognizable as a dismiss control. Now an actual X.
@@ -352,10 +353,10 @@ private fun SearchHeader(onDismiss: () -> Unit) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "Close",
-                    tint = Color.White,
+                    tint = AppTheme.colors.textPrimary,
                     modifier = Modifier
                         .size(36.dp)
-                        .background(Color.White.copy(alpha = 0.1f), CircleShape)
+                        .background(AppTheme.colors.hairline, CircleShape)
                         .padding(8.dp)
                 )
             }
@@ -379,20 +380,20 @@ private fun SearchBar(
                 color = Color(0xFF262626),
                 shape = RoundedCornerShape(16.dp)
             )
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp))
+        Icon(Icons.Default.Search, contentDescription = null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
-                Text("Search users...", color = Color.Gray, fontSize = 16.sp)
+                Text("Search users...", color = AppTheme.colors.textSecondary, fontSize = 16.sp)
             }
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChanged,
-                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 16.sp),
                 singleLine = true,
                 cursorBrush = SolidColor(Color.Cyan),
                 modifier = Modifier.fillMaxWidth()
@@ -402,7 +403,7 @@ private fun SearchBar(
             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Cyan, strokeWidth = 2.dp)
         } else if (query.isNotEmpty()) {
             TextButton(onClick = { onQueryChanged("") }, contentPadding = PaddingValues(0.dp)) {
-                Text("✕", color = Color.Gray, fontSize = 18.sp)
+                Text("✕", color = AppTheme.colors.textSecondary, fontSize = 18.sp)
             }
         }
     }
@@ -434,7 +435,7 @@ private fun TabSelector(
                     text = tab.title,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isSelected) Color.Cyan else Color.Gray
+                    color = if (isSelected) Color.Cyan else AppTheme.colors.textSecondary
                 )
                 Spacer(Modifier.height(8.dp))
                 Box(
@@ -539,9 +540,9 @@ private fun EmptyState(
                     Text("👥", fontSize = 56.sp)
                 }
                 Spacer(Modifier.height(16.dp))
-                Text("Discover Amazing Creators", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Discover Amazing Creators", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
                 Spacer(Modifier.height(8.dp))
-                Text("Find people to follow and connect with", fontSize = 15.sp, color = Color.Gray)
+                Text("Find people to follow and connect with", fontSize = 15.sp, color = AppTheme.colors.textSecondary)
             }
         }
 
@@ -603,7 +604,7 @@ private fun EmptyState(
 private fun SectionHeader(
     icon: String,
     title: String,
-    iconColor: Color = Color.Gray,
+    iconColor: Color = AppTheme.colors.textSecondary,
     showClear: Boolean = false,
     onClear: () -> Unit = {}
 ) {
@@ -615,10 +616,10 @@ private fun SectionHeader(
     ) {
         Text(icon, fontSize = 16.sp, color = iconColor)
         Spacer(Modifier.width(8.dp))
-        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f))
         if (showClear) {
             TextButton(onClick = onClear) {
-                Text("Clear", color = Color.Gray, fontSize = 14.sp)
+                Text("Clear", color = AppTheme.colors.textSecondary, fontSize = 14.sp)
             }
         }
     }
@@ -639,7 +640,7 @@ private fun TrendingHashtagsRow(
         ) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFFFF2D55), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
-            Text("Loading hashtags...", color = Color.Gray, fontSize = 13.sp)
+            Text("Loading hashtags...", color = AppTheme.colors.textSecondary, fontSize = 13.sp)
         }
         return
     }
@@ -661,13 +662,13 @@ private fun TrendingHashtagChip(hashtag: TrendingHashtag, onTap: () -> Unit) {
     Button(
         onClick = onTap,
         shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f)),
+        colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.hairline),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Text(hashtag.velocityTier.emoji, fontSize = 12.sp)
         Spacer(Modifier.width(4.dp))
-        Text(hashtag.displayTag, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+        Text(hashtag.displayTag, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
     }
 }
 
@@ -700,7 +701,7 @@ fun ModernUserRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp)
-                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -733,12 +734,12 @@ fun ModernUserRow(
                     text = user.displayName,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = AppTheme.colors.textPrimary
                 )
                 Text(
                     text = "@${user.username}",
                     fontSize = 14.sp,
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
             }
 
@@ -749,9 +750,9 @@ fun ModernUserRow(
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isFollowing) Color.Transparent else Color.Cyan,
-                    contentColor = if (isFollowing) Color.Gray else Color.Black
+                    contentColor = if (isFollowing) AppTheme.colors.textSecondary else Color.Black
                 ),
-                border = if (isFollowing) BorderStroke(1.dp, Color.Gray) else null,
+                border = if (isFollowing) BorderStroke(1.dp, AppTheme.colors.textSecondary) else null,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 if (isFollowLoading) {
@@ -772,7 +773,7 @@ private fun VideoSearchCard(video: CoreVideoMetadata, onTap: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
             .clickable(onClick = onTap)
             .padding(12.dp)
     ) {
@@ -788,8 +789,8 @@ private fun VideoSearchCard(video: CoreVideoMetadata, onTap: () -> Unit) {
             )
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(video.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color.White, maxLines = 2)
-                Text(video.creatorName, fontSize = 13.sp, color = Color.Gray)
+                Text(video.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary, maxLines = 2)
+                Text(video.creatorName, fontSize = 13.sp, color = AppTheme.colors.textSecondary)
             }
         }
     }
@@ -813,7 +814,7 @@ private fun LoadingView(modifier: Modifier = Modifier) {
             CircularProgressIndicator(color = Color.Cyan, modifier = Modifier.size(36.dp))
         }
         Spacer(Modifier.height(16.dp))
-        Text("Searching...", fontSize = 15.sp, color = Color.Gray)
+        Text("Searching...", fontSize = 15.sp, color = AppTheme.colors.textSecondary)
     }
 }
 
@@ -833,8 +834,8 @@ private fun NoResultsView(modifier: Modifier = Modifier) {
             Text("🤷", fontSize = 48.sp)
         }
         Spacer(Modifier.height(16.dp))
-        Text("No Results", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("No Results", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
         Spacer(Modifier.height(8.dp))
-        Text("Try a different search term", fontSize = 15.sp, color = Color.Gray)
+        Text("Try a different search term", fontSize = 15.sp, color = AppTheme.colors.textSecondary)
     }
 }

@@ -19,6 +19,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,7 +89,7 @@ fun WalletView(
         else -> null
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -147,8 +148,8 @@ fun WalletView(
     if (errorToShow != null) {
         AlertDialog(
             onDismissRequest = { vm.clearError() },
-            title = { Text("Error", color = Color.White) },
-            text = { Text(errorToShow, color = Color.Gray) },
+            title = { Text("Error", color = AppTheme.colors.textPrimary) },
+            text = { Text(errorToShow, color = AppTheme.colors.textSecondary) },
             confirmButton = { TextButton(onClick = { vm.clearError() }) { Text("OK", color = Color.Cyan) } },
             containerColor = Color(0xFF1A1A1A)
         )
@@ -170,7 +171,7 @@ fun WalletView(
 @Composable
 private fun WalletTopBar(isLoading: Boolean, onDismiss: () -> Unit, onRefresh: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().background(AppTheme.colors.bg).padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -183,7 +184,7 @@ private fun WalletTopBar(isLoading: Boolean, onDismiss: () -> Unit, onRefresh: (
             }
         }
 
-        Text("Hype Coins", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text("Hype Coins", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
 
         TextButton(onClick = onDismiss) {
             Text("Done", color = Color.Cyan, fontWeight = FontWeight.SemiBold)
@@ -215,11 +216,11 @@ private fun WalletBalanceHeader(availableCoins: Int, pendingCoins: Int) {
 
         Text(
             "$availableCoins",
-            fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Color.White,
+            fontSize = 40.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary,
             fontFamily = FontFamily.Default
         )
 
-        Text("Hype Coins", fontSize = 15.sp, color = Color.Gray)
+        Text("Hype Coins", fontSize = 15.sp, color = AppTheme.colors.textSecondary)
 
         if (pendingCoins > 0) {
             Row(
@@ -237,7 +238,7 @@ private fun WalletBalanceHeader(availableCoins: Int, pendingCoins: Int) {
 
 @Composable
 private fun WalletTabBar(selectedTab: WalletTab, onTabSelected: (WalletTab) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().background(Color.Black)) {
+    Row(modifier = Modifier.fillMaxWidth().background(AppTheme.colors.bg)) {
         WalletTab.values().forEach { tab ->
             val isSelected = tab == selectedTab
             Column(
@@ -248,7 +249,7 @@ private fun WalletTabBar(selectedTab: WalletTab, onTabSelected: (WalletTab) -> U
                     tab.label,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isSelected) Color.White else Color.Gray,
+                    color = if (isSelected) Color.White else AppTheme.colors.textSecondary,
                     modifier = Modifier.padding(vertical = 10.dp)
                 )
                 Box(
@@ -288,16 +289,16 @@ private fun BalanceTab(
         if (balance != null) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color.White.copy(alpha = 0.07f),
+                color = AppTheme.colors.surface,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatRow("Lifetime Earned", "${balance.lifetimeEarned}")
-                    Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
                     StatRow("Lifetime Spent", "${balance.lifetimeSpent}")
-                    Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
                     StatRow("Your Tier", userTier.displayName, valueColor = Color(0xFF9C27B0))
-                    Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
                     StatRow(
                         "Cash Out Rate",
                         "${(SubscriptionRevenueShare.creatorShare(userTier) * 100).toInt()}%",
@@ -320,7 +321,7 @@ private fun QuickActionButton(
     Surface(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
-        color = Color.White.copy(alpha = 0.07f)
+        color = AppTheme.colors.surface
     ) {
         Column(
             modifier = Modifier.padding(vertical = 16.dp),
@@ -328,7 +329,7 @@ private fun QuickActionButton(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(28.dp))
-            Text(title, fontSize = 13.sp, color = Color.White)
+            Text(title, fontSize = 13.sp, color = AppTheme.colors.textPrimary)
         }
     }
 }
@@ -336,7 +337,7 @@ private fun QuickActionButton(
 @Composable
 private fun StatRow(label: String, value: String, valueColor: Color = Color.White) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, fontSize = 15.sp, color = Color.Gray)
+        Text(label, fontSize = 15.sp, color = AppTheme.colors.textSecondary)
         Text(value, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = valueColor)
     }
 }
@@ -379,7 +380,7 @@ private fun BuyCoinsTab(
         // Packages — mirrors iOS CoinPackageDisplayCard with buy button
         Text(
             "Available Packages",
-            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White
+            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
         )
 
         packageDetails.forEach { (pkg, priceStr) ->
@@ -395,7 +396,7 @@ private fun BuyCoinsTab(
 
         Text(
             "Purchases are processed securely via Google Play. Your balance updates automatically.",
-            fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center,
+            fontSize = 12.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
         )
     }
@@ -411,7 +412,7 @@ private fun CoinPackageCard(
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = Color.White.copy(alpha = 0.07f),
+        color = AppTheme.colors.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -432,9 +433,9 @@ private fun CoinPackageCard(
 
             // Coin info
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(pkg.displayName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text("${pkg.coins} coins", fontSize = 13.sp, color = Color.Gray)
-                Text("≈ \$${String.format("%.2f", pkg.cashValue)} value", fontSize = 11.sp, color = Color.Gray.copy(alpha = 0.7f))
+                Text(pkg.displayName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+                Text("${pkg.coins} coins", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
+                Text("≈ \$${String.format("%.2f", pkg.cashValue)} value", fontSize = 11.sp, color = AppTheme.colors.textSecondary.copy(alpha = 0.7f))
             }
 
             // Buy button
@@ -443,7 +444,7 @@ private fun CoinPackageCard(
                 enabled = billingReady && !isPurchasing,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFFFFD700),
-                    disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                    disabledContainerColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
                 ),
                 shape = RoundedCornerShape(10.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
@@ -479,8 +480,8 @@ private fun HistoryTab(transactions: List<CoinTransaction>) {
     if (transactions.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.History, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
-                Text("No transactions yet", fontSize = 16.sp, color = Color.Gray)
+                Icon(Icons.Default.History, contentDescription = null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(48.dp))
+                Text("No transactions yet", fontSize = 16.sp, color = AppTheme.colors.textSecondary)
             }
         }
     } else {
@@ -515,8 +516,8 @@ private fun TransactionRow(transaction: CoinTransaction) {
         }
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(transaction.description, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White)
-            Text(sdf.format(transaction.createdAt), fontSize = 12.sp, color = Color.Gray)
+            Text(transaction.description, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
+            Text(sdf.format(transaction.createdAt), fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         }
 
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -525,11 +526,11 @@ private fun TransactionRow(transaction: CoinTransaction) {
                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = color,
                 fontFamily = FontFamily.Monospace
             )
-            Text("${transaction.balanceAfter}", fontSize = 11.sp, color = Color.Gray.copy(alpha = 0.7f))
+            Text("${transaction.balanceAfter}", fontSize = 11.sp, color = AppTheme.colors.textSecondary.copy(alpha = 0.7f))
         }
     }
 
-    Divider(color = Color.Gray.copy(alpha = 0.1f))
+    Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.1f))
 }
 
 // MARK: - Purchase Success Banner
@@ -582,7 +583,7 @@ private fun CashOutSheet(
             modifier = Modifier.fillMaxWidth().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Cash Out", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Cash Out", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
 
             if (cashOutSuccess) {
                 Column(
@@ -592,7 +593,7 @@ private fun CashOutSheet(
                 ) {
                     Text("🎉", fontSize = 48.sp)
                     Text("Request Submitted!", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Green)
-                    Text("Processing in 3-5 business days", fontSize = 14.sp, color = Color.Gray)
+                    Text("Processing in 3-5 business days", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                     Button(
                         onClick = onDismiss,
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Green),
@@ -600,28 +601,28 @@ private fun CashOutSheet(
                     ) { Text("Done", color = Color.Black, fontWeight = FontWeight.Bold) }
                 }
             } else {
-                Text("Available: $availableCoins coins", fontSize = 14.sp, color = Color.Gray)
+                Text("Available: $availableCoins coins", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
 
                 OutlinedTextField(
                     value = cashOutAmount,
                     onValueChange = { vm.updateCashOutAmount(it) },
-                    label = { Text("Coins to cash out", color = Color.Gray) },
-                    placeholder = { Text("Min 1,000", color = Color.Gray.copy(alpha = 0.5f)) },
+                    label = { Text("Coins to cash out", color = AppTheme.colors.textSecondary) },
+                    placeholder = { Text("Min 1,000", color = AppTheme.colors.textSecondary.copy(alpha = 0.5f)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.Cyan,
-                        unfocusedBorderColor = Color.Gray,
+                        unfocusedBorderColor = AppTheme.colors.textSecondary,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     )
                 )
 
                 if (isValid) {
-                    Surface(shape = RoundedCornerShape(10.dp), color = Color.White.copy(alpha = 0.05f)) {
+                    Surface(shape = RoundedCornerShape(10.dp), color = AppTheme.colors.surface) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             StatRow("You receive", "$${String.format("%.2f", breakdown.first)}", Color.Green)
-                            StatRow("Platform fee", "$${String.format("%.2f", breakdown.second)}", Color.Gray)
+                            StatRow("Platform fee", "$${String.format("%.2f", breakdown.second)}", AppTheme.colors.textSecondary)
                             StatRow("Rate", "${(SubscriptionRevenueShare.creatorShare(userTier) * 100).toInt()}%", Color(0xFF9C27B0))
                         }
                     }
@@ -633,7 +634,7 @@ private fun CashOutSheet(
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Green,
-                        disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                        disabledContainerColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
                     ),
                     shape = RoundedCornerShape(14.dp)
                 ) {

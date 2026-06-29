@@ -17,6 +17,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -108,7 +109,7 @@ fun MySubscriptionsView(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(Color.Black)
+        modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)
     ) {
         // Header
         Row(
@@ -121,7 +122,7 @@ fun MySubscriptionsView(
             Text(
                 if (selectedTab == SupporterTab.SUBSCRIPTIONS) "Supporting" else "Top Supporters",
                 fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.size(48.dp))
         }
@@ -189,8 +190,8 @@ fun MySubscriptionsView(
     showCancelConfirm?.let { creatorID ->
         AlertDialog(
             onDismissRequest = { showCancelConfirm = null },
-            title = { Text("Cancel Subscription", color = Color.White) },
-            text = { Text("You'll keep access until the end of your current period.", color = Color.Gray) },
+            title = { Text("Cancel Subscription", color = AppTheme.colors.textPrimary) },
+            text = { Text("You'll keep access until the end of your current period.", color = AppTheme.colors.textSecondary) },
             confirmButton = {
                 TextButton(onClick = {
                     showCancelConfirm = null
@@ -205,9 +206,9 @@ fun MySubscriptionsView(
                 }) { Text("Cancel Sub", color = Color(0xFFFF453A)) }
             },
             dismissButton = {
-                TextButton(onClick = { showCancelConfirm = null }) { Text("Keep", color = Color.Gray) }
+                TextButton(onClick = { showCancelConfirm = null }) { Text("Keep", color = AppTheme.colors.textSecondary) }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 }
@@ -220,7 +221,7 @@ private fun ActiveSubscriptionCard(
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
     val tierColor = when (subscription.coinTier) {
-        CoinPriceTier.STARTER -> Color.Gray
+        CoinPriceTier.STARTER -> AppTheme.colors.textSecondary
         CoinPriceTier.BASIC   -> Color.Cyan
         CoinPriceTier.PLUS    -> Color(0xFF30D158)
         CoinPriceTier.PRO     -> Color(0xFFBF5AF2)
@@ -229,7 +230,7 @@ private fun ActiveSubscriptionCard(
 
     Column(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -250,7 +251,7 @@ private fun ActiveSubscriptionCard(
             }
             Text(
                 "${subscription.coinTier.rawValue} coins/mo",
-                fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
             )
         }
 
@@ -259,21 +260,21 @@ private fun ActiveSubscriptionCard(
             subscription.perks.forEach { perk ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(perk.emoji, fontSize = 14.sp)
-                    Text(perk.displayName, fontSize = 14.sp, color = Color.Gray)
+                    Text(perk.displayName, fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                 }
             }
         }
 
-        Divider(color = Color.White.copy(alpha = 0.1f))
+        Divider(color = AppTheme.colors.hairline)
 
         // Period info
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column {
-                Text("Renews", fontSize = 12.sp, color = Color.Gray)
-                Text(dateFormat.format(subscription.currentPeriodEnd), fontSize = 14.sp, color = Color.White)
+                Text("Renews", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
+                Text(dateFormat.format(subscription.currentPeriodEnd), fontSize = 14.sp, color = AppTheme.colors.textPrimary)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("Days left", fontSize = 12.sp, color = Color.Gray)
+                Text("Days left", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                 Text("${subscription.daysRemaining}", fontSize = 14.sp, color = Color.Cyan)
             }
         }
@@ -299,8 +300,8 @@ private fun EmptySubscriptionsView() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("⭐", fontSize = 48.sp)
-            Text("No Active Subscriptions", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Text("Support your favourite creators with Hype Coins", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            Text("No Active Subscriptions", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
+            Text("Support your favourite creators with Hype Coins", fontSize = 14.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
         }
     }
 }
@@ -310,8 +311,8 @@ private fun EmptyTopSupportersView() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("💗", fontSize = 48.sp)
-            Text("No Top Supporters Yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Text("Tippers who back your videos will show up here.", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+            Text("No Top Supporters Yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
+            Text("Tippers who back your videos will show up here.", fontSize = 14.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
         }
     }
 }
@@ -321,7 +322,7 @@ private fun SupporterTabPill(label: String, active: Boolean, onClick: () -> Unit
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (active) Color.White else Color.White.copy(alpha = 0.08f))
+            .background(if (active) Color.White else AppTheme.colors.surfaceStrong)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
@@ -344,7 +345,7 @@ private fun TopSupporterRow(rank: Int, entry: TopSupporterEntry) {
     }
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(14.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(14.dp))
             .border(1.dp, medalColor.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -365,18 +366,18 @@ private fun TopSupporterRow(rank: Int, entry: TopSupporterEntry) {
         // Avatar (initial)
         Box(
             modifier = Modifier.size(40.dp).clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.08f))
+                .background(AppTheme.colors.surfaceStrong)
                 .border(1.5.dp, medalColor.copy(alpha = 0.4f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 entry.username.take(1).uppercase(),
-                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White
+                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
             )
         }
         Text(
             entry.username,
-            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary,
             maxLines = 1
         )
         Spacer(Modifier.weight(1f))
@@ -424,7 +425,7 @@ fun CreatorSubscriptionSettingsView(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    Column(Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
         // Header
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 52.dp, bottom = 8.dp),
@@ -435,7 +436,7 @@ fun CreatorSubscriptionSettingsView(
             }
             Text(
                 "Subscription Settings", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             TextButton(
                 onClick = {
@@ -482,14 +483,14 @@ fun CreatorSubscriptionSettingsView(
             // Enable toggle
             Row(
                 modifier = Modifier.fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Enable Subscriptions", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.White)
-                    Text("Let fans subscribe with Hype Coins", fontSize = 13.sp, color = Color.Gray)
+                    Text("Enable Subscriptions", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
+                    Text("Let fans subscribe with Hype Coins", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
                 }
                 Switch(
                     checked = isEnabled, onCheckedChange = { isEnabled = it },
@@ -503,7 +504,7 @@ fun CreatorSubscriptionSettingsView(
                     if (p.subscriberCount > 0) {
                         Row(
                             modifier = Modifier.fillMaxWidth()
-                                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                                .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                                 .padding(16.dp),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
@@ -531,10 +532,10 @@ fun CreatorSubscriptionSettingsView(
                 }
 
                 // Tier cards — show all 5 tiers
-                Text("Subscription Tiers", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Subscription Tiers", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
                 Text(
                     "Prices are fixed by platform. You can customize perks on each tier (Influencer+ only).",
-                    fontSize = 13.sp, color = Color.Gray
+                    fontSize = 13.sp, color = AppTheme.colors.textSecondary
                 )
 
                 CoinPriceTier.entries.forEach { tier ->
@@ -554,22 +555,22 @@ fun CreatorSubscriptionSettingsView(
 
                 // Welcome message
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Welcome Message", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                    Text("Welcome Message", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
                     OutlinedTextField(
                         value = welcomeMessage,
                         onValueChange = { if (it.length <= 200) welcomeMessage = it },
                         modifier = Modifier.fillMaxWidth().height(100.dp),
-                        placeholder = { Text("Welcome new subscribers...", color = Color.Gray) },
+                        placeholder = { Text("Welcome new subscribers...", color = AppTheme.colors.textSecondary) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color.Cyan, unfocusedBorderColor = Color.Gray.copy(alpha = 0.4f),
-                            focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                            unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                            focusedBorderColor = Color.Cyan, unfocusedBorderColor = AppTheme.colors.textSecondary.copy(alpha = 0.4f),
+                            focusedContainerColor = AppTheme.colors.surface,
+                            unfocusedContainerColor = AppTheme.colors.surface,
                             cursorColor = Color.Cyan
                         ),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    Text("${welcomeMessage.length}/200", fontSize = 12.sp, color = Color.Gray,
+                    Text("${welcomeMessage.length}/200", fontSize = 12.sp, color = AppTheme.colors.textSecondary,
                         modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End)
                 }
             }
@@ -598,7 +599,7 @@ private fun TierCard(
     onTogglePerk: (SubscriptionPerk) -> Unit,
 ) {
     val tierColor = when (tier) {
-        CoinPriceTier.STARTER -> Color.Gray
+        CoinPriceTier.STARTER -> AppTheme.colors.textSecondary
         CoinPriceTier.BASIC   -> Color.Cyan
         CoinPriceTier.PLUS    -> Color(0xFF30D158)
         CoinPriceTier.PRO     -> Color(0xFFBF5AF2)
@@ -633,7 +634,7 @@ private fun TierCard(
                 Text(
                     "${tierPerks.size} perks",
                     fontSize = 11.sp,
-                    color = Color.Gray,
+                    color = AppTheme.colors.textSecondary,
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -647,7 +648,7 @@ private fun TierCard(
                     Icon(
                         if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = if (isExpanded) "Collapse" else "Expand",
-                        tint = Color.Gray,
+                        tint = AppTheme.colors.textSecondary,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -656,7 +657,7 @@ private fun TierCard(
 
         // Expanded perk toggles
         if (isExpanded && canCustomize) {
-            Divider(color = Color.Gray.copy(alpha = 0.2f))
+            Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
             // Locked-on supporter badge row
             Row(
                 modifier = Modifier
@@ -668,13 +669,13 @@ private fun TierCard(
                 Text(
                     SubscriptionPerk.SUPPORT_BADGE.displayName,
                     fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
                     Icons.Default.Lock,
                     contentDescription = "Always on",
-                    tint = Color.Gray,
+                    tint = AppTheme.colors.textSecondary,
                     modifier = Modifier.size(14.dp),
                 )
             }
@@ -699,13 +700,13 @@ private fun TierCard(
                     Text(
                         perk.displayName,
                         fontSize = 13.sp,
-                        color = if (isOn) Color.White else Color.Gray,
+                        color = if (isOn) Color.White else AppTheme.colors.textSecondary,
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
                         if (isOn) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                         contentDescription = if (isOn) "On" else "Off",
-                        tint = if (isOn) Color.Cyan else Color.Gray.copy(alpha = 0.4f),
+                        tint = if (isOn) Color.Cyan else AppTheme.colors.textSecondary.copy(alpha = 0.4f),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -719,14 +720,14 @@ private fun TierCard(
                 tierPerks.take(3).forEach { perk ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(perk.emoji, fontSize = 13.sp)
-                        Text(perk.displayName, fontSize = 12.sp, color = Color.Gray)
+                        Text(perk.displayName, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                     }
                 }
                 if (tierPerks.size > 3) {
                     Text(
                         "+ ${tierPerks.size - 3} more",
                         fontSize = 11.sp,
-                        color = Color.Gray.copy(alpha = 0.6f),
+                        color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                     )
                 }
             }
@@ -736,7 +737,7 @@ private fun TierCard(
             Text(
                 "Reach Influencer tier to customize perks",
                 fontSize = 11.sp,
-                color = Color.Gray.copy(alpha = 0.6f),
+                color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
             )
         }
@@ -747,7 +748,7 @@ private fun TierCard(
 private fun StatPill(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = color)
-        Text(label, fontSize = 12.sp, color = Color.Gray)
+        Text(label, fontSize = 12.sp, color = AppTheme.colors.textSecondary)
     }
 }
 
@@ -776,7 +777,7 @@ fun MySubscribersView(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    Column(Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 52.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -786,7 +787,7 @@ fun MySubscribersView(
             }
             Text(
                 "My Subscribers", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.size(48.dp))
         }
@@ -801,8 +802,8 @@ fun MySubscribersView(
             subscribers.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("🏅", fontSize = 48.sp)
-                    Text("No Subscribers Yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                    Text("Enable subscriptions to start earning", fontSize = 14.sp, color = Color.Gray)
+                    Text("No Subscribers Yet", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary)
+                    Text("Enable subscriptions to start earning", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                 }
             }
             else -> LazyColumn(
@@ -813,7 +814,7 @@ fun MySubscribersView(
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
@@ -834,7 +835,7 @@ fun MySubscribersView(
 @Composable
 private fun SubscriberRow(sub: SubscriberInfo) {
     val tierColor = when (sub.coinTier) {
-        CoinPriceTier.STARTER -> Color.Gray
+        CoinPriceTier.STARTER -> AppTheme.colors.textSecondary
         CoinPriceTier.BASIC   -> Color.Cyan
         CoinPriceTier.PLUS    -> Color(0xFF30D158)
         CoinPriceTier.PRO     -> Color(0xFFBF5AF2)
@@ -844,7 +845,7 @@ private fun SubscriberRow(sub: SubscriberInfo) {
 
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
             .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -852,21 +853,21 @@ private fun SubscriberRow(sub: SubscriberInfo) {
         // Avatar placeholder
         Box(
             Modifier.size(44.dp).clip(CircleShape)
-                .background(Color.Gray.copy(alpha = 0.3f)),
+                .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
             contentAlignment = Alignment.Center
         ) {
             if (!sub.profileImageURL.isNullOrEmpty()) {
                 AsyncImage(model = sub.profileImageURL, contentDescription = null,
                     contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(CircleShape))
             } else {
-                Icon(Icons.Default.Person, null, tint = Color.Gray, modifier = Modifier.size(24.dp))
+                Icon(Icons.Default.Person, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(24.dp))
             }
         }
 
         Column(Modifier.weight(1f)) {
             val name = sub.displayName.ifEmpty { sub.subscriberID.take(8) }
-            Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color.White)
-            Text("Since ${dateFormat.format(sub.subscribedAt)}", fontSize = 12.sp, color = Color.Gray)
+            Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary)
+            Text("Since ${dateFormat.format(sub.subscribedAt)}", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         }
 
         Column(horizontalAlignment = Alignment.End) {
@@ -875,7 +876,7 @@ private fun SubscriberRow(sub: SubscriberInfo) {
             ) {
                 Text(sub.coinTier.displayName, fontSize = 11.sp, color = tierColor, fontWeight = FontWeight.SemiBold)
             }
-            Text("${sub.totalPaid} coins", fontSize = 12.sp, color = Color.Gray)
+            Text("${sub.totalPaid} coins", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
         }
     }
 }

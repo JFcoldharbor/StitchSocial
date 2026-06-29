@@ -14,6 +14,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,7 +84,7 @@ fun BadgeArtwork(definition: BadgeDefinition, size: Int) {
         Text(
             definition.emoji,
             fontSize = (size * 0.55).sp,
-            color = Color.White
+            color = AppTheme.colors.textPrimary
         )
     }
 }
@@ -154,7 +155,7 @@ fun BadgePageView(
             }
             Text(
                 "Badges", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.size(48.dp))
         }
@@ -283,7 +284,7 @@ private fun HeaderBlock(earnedCount: Int, totalCount: Int) {
             },
             modifier = Modifier.fillMaxWidth().height(3.dp),
             color = Color(0xFFFBBF24),
-            trackColor = Color.White.copy(alpha = 0.06f),
+            trackColor = AppTheme.colors.surface,
             strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
         )
         // Rarity legend
@@ -291,7 +292,7 @@ private fun HeaderBlock(earnedCount: Int, totalCount: Int) {
             BadgeRarity.values().forEach { r ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(modifier = Modifier.size(6.dp).background(r.uiColor, CircleShape))
-                    Text(r.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.30f))
+                    Text(r.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary.copy(alpha = 0.30f))
                 }
             }
         }
@@ -303,14 +304,14 @@ private fun StatPill(value: String, label: String, accent: Color) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+            .background(AppTheme.colors.surface)
             .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.45f))
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.colors.textPrimary)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary.copy(alpha = 0.45f))
     }
 }
 
@@ -337,7 +338,7 @@ private fun FilterChip(label: String, active: Boolean, accent: Color, onClick: (
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (active) accent else Color.White.copy(alpha = 0.05f))
+            .background(if (active) accent else AppTheme.colors.surface)
             .border(1.dp, if (active) accent else Color.White.copy(alpha = 0.09f), RoundedCornerShape(50))
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -359,8 +360,8 @@ private fun SectionHeader(label: String, count: Int, accent: Color) {
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = accent, letterSpacing = 1.6.sp)
-        Text("$count", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White.copy(alpha = 0.30f))
-        Box(modifier = Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.05f)))
+        Text("$count", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = AppTheme.colors.textPrimary.copy(alpha = 0.30f))
+        Box(modifier = Modifier.weight(1f).height(1.dp).background(AppTheme.colors.surface))
     }
 }
 
@@ -414,7 +415,7 @@ private fun EarnedHeroCard(def: BadgeDefinition, eb: EarnedBadge, onTap: () -> U
 
             Text(
                 def.name.replace(Regex(" — .*"), ""),
-                fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary,
                 maxLines = 2,
                 textAlign = TextAlign.Center
             )
@@ -458,7 +459,7 @@ private fun LockedCard(def: BadgeDefinition, onTap: () -> Unit) {
             Text(
                 def.name.replace(Regex(" — .*"), ""),
                 fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.7f),
+                color = AppTheme.colors.textPrimary.copy(alpha = 0.7f),
                 maxLines = 2,
                 textAlign = TextAlign.Center
             )
@@ -476,20 +477,20 @@ private fun InProgressCard(progress: BadgeProgress, onTap: () -> Unit) {
             .height(120.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF0C0C12))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+            .border(1.dp, AppTheme.colors.surfaceStrong, RoundedCornerShape(16.dp))
             .clickable { onTap() }
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(modifier = Modifier.alpha(0.5f)) { BadgeArtwork(definition = def, size = 40) }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
-                Text(def.name.replace(Regex(" — .*"), ""), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.9f), maxLines = 1)
-                Text("${progress.currentValue} / ${progress.targetValue}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                Text(def.name.replace(Regex(" — .*"), ""), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary.copy(alpha = 0.9f), maxLines = 1)
+                Text("${progress.currentValue} / ${progress.targetValue}", fontSize = 10.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.5f))
                 LinearProgressIndicator(
                     progress = { progress.progressFraction },
                     modifier = Modifier.fillMaxWidth().height(3.dp),
                     color = def.rarity.uiColor,
-                    trackColor = Color.White.copy(alpha = 0.06f),
+                    trackColor = AppTheme.colors.surface,
                     strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
                 )
             }
@@ -502,8 +503,8 @@ private fun EmptyBadgesView() {
     Box(modifier = Modifier.fillMaxWidth().padding(60.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("🏆", fontSize = 44.sp)
-            Text("No badges yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.7f))
-            Text("Stick around — they show up as you tap, post, and tip.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.4f), textAlign = TextAlign.Center)
+            Text("No badges yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary.copy(alpha = 0.7f))
+            Text("Stick around — they show up as you tap, post, and tip.", fontSize = 12.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.4f), textAlign = TextAlign.Center)
         }
     }
 }
@@ -524,8 +525,8 @@ private fun BadgeDetailSheet(
         Box(modifier = Modifier.alpha(if (isEarned) 1f else 0.4f)) {
             BadgeArtwork(definition = def, size = 110)
         }
-        Text(def.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
-        Text(def.description, fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
+        Text(def.name, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary, textAlign = TextAlign.Center)
+        Text(def.description, fontSize = 13.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.7f), textAlign = TextAlign.Center)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Rarity pill
             Box(
@@ -552,7 +553,7 @@ private fun BadgeDetailSheet(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(if (isPinned) Color(0xFFFBBF24) else Color.White.copy(alpha = 0.08f))
+                    .background(if (isPinned) Color(0xFFFBBF24) else AppTheme.colors.surfaceStrong)
                     .clickable { onTogglePin() }
                     .padding(horizontal = 18.dp, vertical = 10.dp)
             ) {

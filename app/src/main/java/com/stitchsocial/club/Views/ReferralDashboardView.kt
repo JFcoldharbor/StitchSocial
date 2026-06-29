@@ -13,6 +13,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.*
@@ -111,7 +112,7 @@ fun ReferralDashboardView(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         // Purple gradient accent — mirrors iOS RadialGradient overlay
         Box(
@@ -179,7 +180,7 @@ fun ReferralDashboardView(
     if (showingError) {
         AlertDialog(
             onDismissRequest = { showingError = false },
-            title = { Text("Error", color = Color.White) },
+            title = { Text("Error", color = AppTheme.colors.textPrimary) },
             text = { Text(errorMessage, color = StitchColors.textSecondary) },
             confirmButton = { TextButton(onClick = { showingError = false }) { Text("OK", color = StitchColors.primary) } },
             containerColor = StitchColors.surface
@@ -197,13 +198,13 @@ private fun ReferralNavBar(onDismiss: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)).clickable { onDismiss() },
+            modifier = Modifier.size(36.dp).clip(CircleShape).background(AppTheme.colors.hairline).clickable { onDismiss() },
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(16.dp))
         }
 
-        Text("Ambassador", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("Ambassador", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
 
         Spacer(modifier = Modifier.size(36.dp))
     }
@@ -220,7 +221,7 @@ private fun ReferralCodeCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(20.dp))
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
@@ -238,7 +239,7 @@ private fun ReferralCodeCard(
             Text(
                 "YOUR INVITE CODE",
                 fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                color = Color.Gray, letterSpacing = 2.sp
+                color = AppTheme.colors.textSecondary, letterSpacing = 2.sp
             )
 
             Row(
@@ -250,7 +251,7 @@ private fun ReferralCodeCard(
                     fontSize = 32.sp,
                     fontWeight = FontWeight.ExtraBold,
                     fontFamily = FontFamily.Monospace,
-                    color = Color.White
+                    color = AppTheme.colors.textPrimary
                 )
 
                 Box(
@@ -276,7 +277,7 @@ private fun ReferralCodeCard(
                 Text(
                     "Friends enter this code when signing up",
                     fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    color = Color.Gray, textAlign = TextAlign.Center
+                    color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center
                 )
             }
         }
@@ -325,14 +326,14 @@ private fun ReferralStatCard(
 ) {
     Column(
         modifier = modifier
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .padding(vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color.Gray, textAlign = TextAlign.Center)
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
     }
 }
 
@@ -343,12 +344,12 @@ private fun RewardsProgressCard(stats: ReferralStats?) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Reward Progress", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Reward Progress", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
             if (stats?.rewardsMaxed == true) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Verified, contentDescription = null, tint = Color.Green, modifier = Modifier.size(14.dp))
@@ -393,7 +394,7 @@ private fun RewardProgressRow(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(12.dp))
-                Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+                Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f))
             }
             val isMaxed = current >= total
             Text(
@@ -406,7 +407,7 @@ private fun RewardProgressRow(
 
         val fraction = if (total > 0) (current.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
         Box(
-            modifier = Modifier.fillMaxWidth().height(6.dp).background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+            modifier = Modifier.fillMaxWidth().height(6.dp).background(AppTheme.colors.surfaceStrong, RoundedCornerShape(4.dp))
         ) {
             Box(
                 modifier = Modifier
@@ -425,11 +426,11 @@ private fun HowItWorksCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("How It Works", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("How It Works", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
 
         HowItWorksStep("1", "Share your code with friends")
         HowItWorksStep("2", "They enter it when signing up")
@@ -446,7 +447,7 @@ private fun HowItWorksStep(number: String, text: String) {
         ) {
             Text(number, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF9C27B0))
         }
-        Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+        Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f))
     }
 }
 
@@ -457,13 +458,13 @@ private fun RecentReferralsCard(referrals: List<ReferralInfo>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Recent Referrals", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("${referrals.size}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+            Text("Recent Referrals", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+            Text("${referrals.size}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textSecondary)
         }
 
         referrals.take(5).forEach { referral ->
@@ -498,11 +499,11 @@ private fun ReferralRow(referral: ReferralInfo) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = referral.refereeUsername ?: referral.refereeID?.take(8) ?: "User",
-                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary
                 )
                 Text(
                     text = timeAgo(referral.createdAt),
-                    fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color.Gray
+                    fontSize = 11.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textSecondary
                 )
             }
         }
@@ -557,13 +558,13 @@ private fun ShareCTAButton(isGenerating: Boolean, onShare: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (isGenerating) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(color = AppTheme.colors.textPrimary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Share, contentDescription = null, tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
                 }
                 Text(
                     "Share Your Invite Code",
-                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
                 )
             }
         }

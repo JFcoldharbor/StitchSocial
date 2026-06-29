@@ -14,6 +14,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -73,7 +74,7 @@ fun AccountSwitcherView(onDismiss: () -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Column(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
         // Header
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(top = 50.dp, bottom = 8.dp),
@@ -84,7 +85,7 @@ fun AccountSwitcherView(onDismiss: () -> Unit) {
             }
             Text(
                 "Accounts", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                color = Color.White, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
+                color = AppTheme.colors.textPrimary, modifier = Modifier.weight(1f), textAlign = TextAlign.Center
             )
             Spacer(Modifier.size(48.dp))
         }
@@ -139,11 +140,11 @@ fun AccountSwitcherView(onDismiss: () -> Unit) {
     pendingRemove?.let { acc ->
         AlertDialog(
             onDismissRequest = { pendingRemove = null },
-            title = { Text("Remove linked account?", color = Color.White) },
+            title = { Text("Remove linked account?", color = AppTheme.colors.textPrimary) },
             text = {
                 Text(
                     "${acc.displayName} will no longer appear here. The account itself isn't deleted.",
-                    color = Color.Gray
+                    color = AppTheme.colors.textSecondary
                 )
             },
             confirmButton = {
@@ -153,9 +154,9 @@ fun AccountSwitcherView(onDismiss: () -> Unit) {
                 }) { Text("Remove", color = Color(0xFFFF453A)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingRemove = null }) { Text("Cancel", color = Color.Gray) }
+                TextButton(onClick = { pendingRemove = null }) { Text("Cancel", color = AppTheme.colors.textSecondary) }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = AppTheme.colors.surface
         )
     }
 
@@ -180,17 +181,17 @@ fun AccountSwitcherView(onDismiss: () -> Unit) {
 private fun EmptyHint() {
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(14.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(14.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             "Your current account isn't linked yet.",
-            fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.7f)
+            fontSize = 14.sp, fontWeight = FontWeight.Medium, color = AppTheme.colors.textPrimary.copy(alpha = 0.7f)
         )
         Text(
             "Linking lets you toggle between this account and another type without signing in each time.",
-            fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f)
+            fontSize = 12.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.5f)
         )
     }
 }
@@ -206,7 +207,7 @@ private fun AccountRow(
     var menuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(14.dp))
+            .background(AppTheme.colors.surface, RoundedCornerShape(14.dp))
             .border(
                 1.dp,
                 if (isActive) Color.Cyan.copy(alpha = 0.4f) else Color.Transparent,
@@ -219,10 +220,10 @@ private fun AccountRow(
         Avatar(account)
 
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(account.displayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
+            Text(account.displayName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary, maxLines = 1)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 AccountTypePill(type = account.accountType)
-                Text(account.email, fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f), maxLines = 1)
+                Text(account.email, fontSize = 11.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.4f), maxLines = 1)
             }
         }
 
@@ -242,7 +243,7 @@ private fun AccountRow(
 
         Box {
             IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.Default.MoreVert, "More", tint = Color.White.copy(alpha = 0.5f))
+                Icon(Icons.Default.MoreVert, "More", tint = AppTheme.colors.textPrimary.copy(alpha = 0.5f))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
@@ -263,16 +264,16 @@ private fun Avatar(account: LinkedAccount) {
         AsyncImage(
             model = account.profileImageURL,
             contentDescription = null,
-            modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f))
+            modifier = Modifier.size(44.dp).clip(CircleShape).background(AppTheme.colors.hairline)
         )
     } else {
         Box(
-            modifier = Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)),
+            modifier = Modifier.size(44.dp).clip(CircleShape).background(AppTheme.colors.hairline),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 account.displayName.take(1).uppercase(),
-                fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White
+                fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
             )
         }
     }
@@ -311,9 +312,9 @@ private fun AddAccountCTA(type: AccountType, onClick: () -> Unit) {
         Text(
             "Add ${type.displayName} Account",
             modifier = Modifier.weight(1f),
-            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary
         )
-        Icon(Icons.Default.ChevronRight, null, tint = Color.White.copy(alpha = 0.4f))
+        Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textPrimary.copy(alpha = 0.4f))
     }
 }
 
@@ -358,14 +359,14 @@ private fun AddLinkedAccountSheet(
         ) {
             Text(
                 "Add ${targetType.displayName} Account",
-                fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White
+                fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
             )
             Text(
                 if (targetType == AccountType.BUSINESS)
                     "Business accounts post brand content and run ads. They can't hype, follow communities, or earn clout."
                 else
                     "Personal accounts post videos, follow others, and earn clout.",
-                fontSize = 12.sp, color = Color.White.copy(alpha = 0.55f)
+                fontSize = 12.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.55f)
             )
             Text(
                 "⚠️ Must use a different email than your current account.",
@@ -446,7 +447,7 @@ private fun ModeChip(label: String, active: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(if (active) Color.White else Color.White.copy(alpha = 0.08f))
+            .background(if (active) Color.White else AppTheme.colors.surfaceStrong)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
@@ -469,7 +470,7 @@ private fun FormField(
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        placeholder = { Text(label, color = Color.White.copy(alpha = 0.4f)) },
+        placeholder = { Text(label, color = AppTheme.colors.textPrimary.copy(alpha = 0.4f)) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,

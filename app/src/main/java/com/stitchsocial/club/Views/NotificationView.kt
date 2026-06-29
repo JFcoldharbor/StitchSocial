@@ -18,6 +18,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.*
@@ -180,7 +181,7 @@ fun NotificationViewComplete(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(AppTheme.colors.bg)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize()
@@ -218,14 +219,14 @@ fun NotificationViewComplete(
                             "Just Joined",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = AppTheme.colors.textPrimary,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
                         if (recentUsers.isEmpty()) {
                             Text(
                                 "No new users in the last 24 hours",
                                 fontSize = 14.sp,
-                                color = Color.White.copy(alpha = 0.6f),
+                                color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
                             )
                         } else {
@@ -245,21 +246,21 @@ fun NotificationViewComplete(
                                                 modifier = Modifier
                                                     .size(60.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color.Gray.copy(alpha = 0.3f))
+                                                    .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f))
                                             )
                                         } else {
                                             Box(
                                                 modifier = Modifier
                                                     .size(60.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color.Gray.copy(alpha = 0.3f)),
+                                                    .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     user.username.take(1).uppercase(),
                                                     fontSize = 24.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color.White
+                                                    color = AppTheme.colors.textPrimary
                                                 )
                                             }
                                         }
@@ -285,7 +286,7 @@ fun NotificationViewComplete(
                             Text(
                                 "Tap to view all new users",
                                 fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.5f),
+                                color = AppTheme.colors.textPrimary.copy(alpha = 0.5f),
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
@@ -311,7 +312,7 @@ fun NotificationViewComplete(
                             "\uD83D\uDD25 Hype Leaderboard",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = AppTheme.colors.textPrimary
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -335,7 +336,7 @@ fun NotificationViewComplete(
                         Text(
                             "No videos with hype yet",
                             fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.6f),
+                            color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
                         )
                     } else {
@@ -347,14 +348,14 @@ fun NotificationViewComplete(
                                 val rank = index + 1
                                 val rankColor = when (rank) {
                                     1 -> Color.Yellow
-                                    2 -> Color.Gray
+                                    2 -> AppTheme.colors.textSecondary
                                     3 -> Color(0xFFCD7F32)
                                     else -> Color.White.copy(alpha = 0.3f)
                                 }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                        .background(AppTheme.colors.surfaceStrong, RoundedCornerShape(10.dp))
                                         .clickable {
                                             onShowThreadView(video.id, video.id)
                                         }
@@ -389,25 +390,25 @@ fun NotificationViewComplete(
                                             ) {
                                                 when (painter.state) {
                                                     is AsyncImagePainter.State.Loading -> CircularProgressIndicator(color = Color.Cyan, strokeWidth = 1.dp, modifier = Modifier.size(12.dp))
-                                                    is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                                    is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
                                                     is AsyncImagePainter.State.Success -> androidx.compose.foundation.Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                                    else -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                                    else -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
                                                 }
                                             }
                                         } else {
-                                            Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                                            Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
                                         }
                                     }
                                     Spacer(Modifier.width(8.dp))
                                     // Video info
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(video.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(video.creatorName, fontSize = 10.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(video.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(video.creatorName, fontSize = 10.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Spacer(Modifier.width(6.dp))
                                     // Hype count
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("${video.hypeCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        Text("${video.hypeCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
                                         Spacer(Modifier.width(2.dp))
                                         Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(11.dp))
                                     }
@@ -423,7 +424,7 @@ fun NotificationViewComplete(
                 Spacer(modifier = Modifier.height(32.dp))
                 Text(
                     text = "Activity",
-                    color = Color.White,
+                    color = AppTheme.colors.textPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
@@ -537,14 +538,14 @@ fun NotificationViewComplete(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
+                    .background(AppTheme.colors.bg)
                     .statusBarsPadding()
             ) {
                 // Top bar
                 Box(modifier = Modifier.fillMaxWidth().height(56.dp)) {
                     Text(
                         "\uD83D\uDD25 Top Videos",
-                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary,
                         modifier = Modifier.align(Alignment.Center)
                     )
                     TextButton(
@@ -554,7 +555,7 @@ fun NotificationViewComplete(
                 }
                 Text(
                     "Most hyped videos from the last 7 days",
-                    fontSize = 13.sp, color = Color.Gray,
+                    fontSize = 13.sp, color = AppTheme.colors.textSecondary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
@@ -567,7 +568,7 @@ fun NotificationViewComplete(
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 CircularProgressIndicator(color = Color(0xFF9C27B0))
-                                Text("Loading top videos...", fontSize = 14.sp, color = Color.Gray)
+                                Text("Loading top videos...", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
                             }
                         }
                         tvError != null -> {
@@ -577,7 +578,7 @@ fun NotificationViewComplete(
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 Icon(Icons.Default.Warning, null, tint = Color(0xFFFF9800), modifier = Modifier.size(50.dp))
-                                Text(tvError!!, fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                                Text(tvError!!, fontSize = 16.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
                                 TextButton(onClick = {
                                     tvScope.launch {
                                         tvLoading = true; tvError = null
@@ -603,8 +604,8 @@ fun NotificationViewComplete(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Icon(Icons.Default.Whatshot, null, tint = Color.Gray, modifier = Modifier.size(50.dp))
-                                Text("No trending videos yet", fontSize = 16.sp, color = Color.Gray)
+                                Icon(Icons.Default.Whatshot, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(50.dp))
+                                Text("No trending videos yet", fontSize = 16.sp, color = AppTheme.colors.textSecondary)
                             }
                         }
                         else -> {
@@ -618,13 +619,13 @@ fun NotificationViewComplete(
                                     val video = tvVideos[idx]
                                     val rank = idx + 1
                                     val rankColor = when (rank) {
-                                        1 -> Color.Yellow; 2 -> Color.Gray; 3 -> Color(0xFFFF9800)
+                                        1 -> Color.Yellow; 2 -> AppTheme.colors.textSecondary; 3 -> Color(0xFFFF9800)
                                         else -> Color(0xFF9C27B0)
                                     }
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+                                            .background(AppTheme.colors.surface, RoundedCornerShape(16.dp))
                                             .clickable {
                                                 showingTopVideosView = false
                                                 onShowThreadView(video.id, video.id)
@@ -650,19 +651,19 @@ fun NotificationViewComplete(
                                                     ) {
                                                         when (painter.state) {
                                                             is AsyncImagePainter.State.Loading -> CircularProgressIndicator(color = Color.Cyan, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
-                                                            is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                            is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
                                                             is AsyncImagePainter.State.Success -> androidx.compose.foundation.Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                                            else -> Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                            else -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
                                                         }
                                                     }
                                                 } else {
-                                                    Icon(Icons.Default.PlayCircleOutline, null, tint = Color.Gray.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
+                                                    Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(40.dp))
                                                 }
                                             }
-                                            Text(video.creatorName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
+                                            Text(video.creatorName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
                                                 Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(10.dp))
-                                                Text(formatCount(video.hypeCount), fontSize = 12.sp, color = Color.Gray)
+                                                Text(formatCount(video.hypeCount), fontSize = 12.sp, color = AppTheme.colors.textSecondary)
                                                 Spacer(Modifier.width(4.dp))
                                                 Text(video.temperatureEmoji, fontSize = 12.sp)
                                             }
@@ -671,7 +672,7 @@ fun NotificationViewComplete(
                                         Box(
                                             modifier = Modifier.padding(8.dp).size(32.dp).background(rankColor, CircleShape),
                                             contentAlignment = Alignment.Center
-                                        ) { Text("#$rank", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                                        ) { Text("#$rank", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary) }
                                     }
                                 }
                             }
@@ -716,7 +717,7 @@ private fun NotificationRow(
             .fillMaxWidth()
             .clickable(onClick = onTap),
         shape = RoundedCornerShape(12.dp),
-        color = if (notification.isRead) Color(0xFF1C1C1E) else Color(0xFF2C2C2E)
+        color = if (notification.isRead) AppTheme.colors.surface else Color(0xFF2C2C2E)
     ) {
         Row(
             modifier = Modifier
@@ -757,7 +758,7 @@ private fun NotificationRow(
                     ) {
                         Text(
                             text = (notification.title.firstOrNull()?.uppercase() ?: "?"),
-                            color = Color.White,
+                            color = AppTheme.colors.textPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -778,7 +779,7 @@ private fun NotificationRow(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = notification.title,
-                            color = Color.White,
+                            color = AppTheme.colors.textPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -787,7 +788,7 @@ private fun NotificationRow(
 
                         Text(
                             text = notification.message,
-                            color = Color.Gray,
+                            color = AppTheme.colors.textSecondary,
                             fontSize = 13.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -796,7 +797,7 @@ private fun NotificationRow(
 
                         Text(
                             text = notification.timeAgo,
-                            color = Color.Gray.copy(alpha = 0.7f),
+                            color = AppTheme.colors.textSecondary.copy(alpha = 0.7f),
                             fontSize = 11.sp,
                             modifier = Modifier.padding(top = 2.dp)
                         )
@@ -833,7 +834,7 @@ private fun NotificationRow(
                     ) {
                         if (isLoadingFollow) {
                             CircularProgressIndicator(
-                                color = Color.White,
+                                color = AppTheme.colors.textPrimary,
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp
                             )
@@ -894,7 +895,7 @@ private fun NotificationHeader(
         Column {
             Text(
                 text = "Notifications",
-                color = Color.White,
+                color = AppTheme.colors.textPrimary,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -985,7 +986,7 @@ private fun NotificationTabSelector(
                             ) {
                                 Text(
                                     text = unreadCount.toString(),
-                                    color = Color.White,
+                                    color = AppTheme.colors.textPrimary,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -998,7 +999,7 @@ private fun NotificationTabSelector(
                     selectedContainerColor = Color(0xFF8E44AD),
                     selectedLabelColor = Color.White,
                     containerColor = Color(0xFF1E1E1E),
-                    labelColor = Color.Gray
+                    labelColor = AppTheme.colors.textSecondary
                 )
             )
         }
@@ -1021,20 +1022,20 @@ private fun EmptyStateView(
         Icon(
             imageVector = getEmptyStateIcon(filter),
             contentDescription = null,
-            tint = Color.Gray.copy(alpha = 0.5f),
+            tint = AppTheme.colors.textSecondary.copy(alpha = 0.5f),
             modifier = Modifier.size(50.dp)
         )
 
         Text(
             text = "No notifications",
-            color = Color.White,
+            color = AppTheme.colors.textPrimary,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold
         )
 
         Text(
             text = getEmptyStateMessage(filter),
-            color = Color.Gray,
+            color = AppTheme.colors.textSecondary,
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 40.dp)

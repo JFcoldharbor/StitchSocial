@@ -15,6 +15,7 @@
 
 package com.stitchsocial.club.views
 
+import com.stitchsocial.club.ui.theme.AppTheme
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -180,11 +181,11 @@ fun EditProfileView(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Edit Profile", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Edit Profile", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold)
                 },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
-                        Icon(Icons.Default.Close, "Cancel", tint = Color.Gray)
+                        Icon(Icons.Default.Close, "Cancel", tint = AppTheme.colors.textSecondary)
                     }
                 },
                 actions = {
@@ -201,7 +202,7 @@ fun EditProfileView(
                         } else {
                             Text(
                                 "Save",
-                                color = if (hasChanges && isFormValid) Color.Cyan else Color.Gray,
+                                color = if (hasChanges && isFormValid) Color.Cyan else AppTheme.colors.textSecondary,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -226,7 +227,7 @@ fun EditProfileView(
                     Spacer(Modifier.height(16.dp))
                     Text(
                         if (uploadProgress != null) "Uploading photo..." else "Saving...",
-                        color = Color.White,
+                        color = AppTheme.colors.textPrimary,
                         fontSize = 16.sp
                     )
                     uploadProgress?.let { progress ->
@@ -235,7 +236,7 @@ fun EditProfileView(
                             progress = { progress },
                             modifier = Modifier.width(160.dp),
                             color = Color.Cyan,
-                            trackColor = Color.Gray.copy(alpha = 0.3f)
+                            trackColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
                         )
                     }
                 }
@@ -284,10 +285,10 @@ fun EditProfileView(
                         else -> Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Gray.copy(alpha = 0.3f)),
+                                .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Person, null, modifier = Modifier.size(60.dp), tint = Color.Gray)
+                            Icon(Icons.Default.Person, null, modifier = Modifier.size(60.dp), tint = AppTheme.colors.textSecondary)
                         }
                     }
                 }
@@ -303,12 +304,12 @@ fun EditProfileView(
                         .clickable { imageLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.PhotoCamera, "Change photo", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.PhotoCamera, "Change photo", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(16.dp))
                 }
             }
 
             Spacer(Modifier.height(8.dp))
-            Text("Tap to change photo", color = Color.Gray, fontSize = 14.sp)
+            Text("Tap to change photo", color = AppTheme.colors.textSecondary, fontSize = 14.sp)
 
             Spacer(Modifier.height(32.dp))
 
@@ -337,7 +338,7 @@ fun EditProfileView(
                 prefix = "@",
                 trailingIcon = {
                     when {
-                        isCheckingUsername -> CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Gray, strokeWidth = 2.dp)
+                        isCheckingUsername -> CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AppTheme.colors.textSecondary, strokeWidth = 2.dp)
                         username == currentUsername -> Icon(Icons.Default.Check, null, tint = Color.Cyan, modifier = Modifier.size(18.dp))
                         usernameAvailable == true -> Icon(Icons.Default.Check, null, tint = Color.Cyan, modifier = Modifier.size(18.dp))
                         usernameAvailable == false -> Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(18.dp))
@@ -350,7 +351,7 @@ fun EditProfileView(
 
             // Bio
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Bio", color = Color.Gray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text("Bio", color = AppTheme.colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
                     value = bio,
@@ -361,14 +362,14 @@ fun EditProfileView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(100.dp),
-                    placeholder = { Text("Tell people about yourself...", color = Color.Gray) },
+                    placeholder = { Text("Tell people about yourself...", color = AppTheme.colors.textSecondary) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
                         focusedBorderColor = Color.Cyan,
-                        unfocusedBorderColor = Color.Gray.copy(alpha = 0.4f),
-                        focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                        unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                        unfocusedBorderColor = AppTheme.colors.textSecondary.copy(alpha = 0.4f),
+                        focusedContainerColor = AppTheme.colors.surface,
+                        unfocusedContainerColor = AppTheme.colors.surface,
                         cursorColor = Color.Cyan
                     ),
                     shape = RoundedCornerShape(12.dp),
@@ -379,7 +380,7 @@ fun EditProfileView(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     bioError?.let { Text(it, color = Color.Red, fontSize = 12.sp) } ?: Spacer(Modifier.width(1.dp))
-                    Text("${bio.length}/150", color = Color.Gray, fontSize = 12.sp)
+                    Text("${bio.length}/150", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
                 }
             }
 
@@ -389,23 +390,23 @@ fun EditProfileView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                    .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     if (isPrivate) Icons.Default.Lock else Icons.Default.LockOpen,
                     contentDescription = null,
-                    tint = if (isPrivate) Color.Cyan else Color.Gray,
+                    tint = if (isPrivate) Color.Cyan else AppTheme.colors.textSecondary,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Private Account", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("Private Account", color = AppTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     Text(
                         if (isPrivate) "Only approved followers see your content"
                         else "Anyone can see your content",
-                        color = Color.Gray, fontSize = 13.sp
+                        color = AppTheme.colors.textSecondary, fontSize = 13.sp
                     )
                 }
                 Switch(
@@ -414,8 +415,8 @@ fun EditProfileView(
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = Color.Cyan,
-                        uncheckedThumbColor = Color.Gray,
-                        uncheckedTrackColor = Color.Gray.copy(alpha = 0.3f)
+                        uncheckedThumbColor = AppTheme.colors.textSecondary,
+                        uncheckedTrackColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
                     )
                 )
             }
@@ -444,14 +445,14 @@ private fun ProfileField(
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(label, color = Color.Gray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = AppTheme.colors.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(placeholder, color = Color.Gray) },
-            prefix = prefix?.let { { Text(it, color = Color.Gray) } },
+            placeholder = { Text(placeholder, color = AppTheme.colors.textSecondary) },
+            prefix = prefix?.let { { Text(it, color = AppTheme.colors.textSecondary) } },
             trailingIcon = trailingIcon,
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -459,9 +460,9 @@ private fun ProfileField(
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White,
                 focusedBorderColor = Color.Cyan,
-                unfocusedBorderColor = Color.Gray.copy(alpha = 0.4f),
-                focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                unfocusedBorderColor = AppTheme.colors.textSecondary.copy(alpha = 0.4f),
+                focusedContainerColor = AppTheme.colors.surface,
+                unfocusedContainerColor = AppTheme.colors.surface,
                 cursorColor = Color.Cyan
             ),
             shape = RoundedCornerShape(12.dp),
