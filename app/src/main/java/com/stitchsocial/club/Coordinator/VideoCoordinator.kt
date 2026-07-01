@@ -30,6 +30,9 @@ import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AIVideoAnalyzer
 import com.stitchsocial.club.services.VideoAnalysisResult
+import com.stitchsocial.club.services.CdnUploadService
+import com.stitchsocial.club.services.HlsReadinessPoller
+import com.stitchsocial.club.services.LocalVideoCache
 import com.stitchsocial.club.AppConfig
 
 // Firebase imports
@@ -67,6 +70,10 @@ class VideoCoordinator(
     private val auth by lazy {
         FirebaseAuth.getInstance()
     }
+
+    // Fire-and-forget scope for the background HLS readiness poll (survives the
+    // completeVideoCreation coroutine returning). Mirrors iOS Task.detached.
+    private val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // MARK: - Progress Tracking StateFlows
 
@@ -313,8 +320,10 @@ class VideoCoordinator(
         try {
             updateProgress(0.0, "Starting final upload...")
 
-            // Upload video to Firebase Storage
-            val videoURL = uploadVideoToFirebase(videoPath)
+            // Upload video source to the CDN pipeline (S3 -> HLS/ABR + MP4). Replaces
+            // the old Firebase Storage path. Playback URLs are public CloudFront.
+            // See project_stitch_cdn_integration.
+            val cdn = uploadVideoToCDN(videoPath)
             updateProgress(0.3, "Video uploaded, generating thumbnail...")
 
             // Generate and upload thumbnail (matches iOS Step 3 + Step 5)
@@ -344,17 +353,30 @@ class VideoCoordinator(
             val finalMetadata = metadata.copy(
                 title = userTitle.takeIf { it.isNotBlank() } ?: metadata.title,
                 description = userDescription,
-                videoURL = videoURL,
+                videoURL = cdn.mp4URL,   // back-compat: legacy readers get the faststart MP4
                 thumbnailURL = thumbnailURL,
                 threadID = hierarchyData.threadID,
                 replyToVideoID = hierarchyData.replyToVideoID,
                 conversationDepth = hierarchyData.conversationDepth,
                 contentType = hierarchyData.contentType,
-                taggedUserIDs = taggedUserIDs // NEW: Include tagged users
+                taggedUserIDs = taggedUserIDs, // NEW: Include tagged users
+                hlsURL = cdn.hlsURL,
+                mp4URL = cdn.mp4URL,
+                status = "processing"
             )
 
-            // Save to database (now includes taggedUserIDs)
-            val finalVideo = createVideoDocument(finalMetadata, userHashtags, taggedUserIDs)
+            // Save to database (now includes taggedUserIDs + CDN fields)
+            val finalVideo = createVideoDocument(finalMetadata, userHashtags, taggedUserIDs, cdn.videoId)
+
+            // Optimistic playback: persist the local source keyed by the doc id so the
+            // poster's feed cell plays instantly while transcode runs, then swaps to HLS
+            // when HlsReadinessPoller flips status->published.
+            LocalVideoCache.register(context, finalVideo.id, File(videoPath))
+            if (cdn.hlsURL.isNotEmpty()) {
+                pollScope.launch {
+                    HlsReadinessPoller.pollUntilReady(finalVideo.id, cdn.hlsURL)
+                }
+            }
 
             updateProgress(1.0, "Video creation complete!")
 
@@ -785,6 +807,21 @@ class VideoCoordinator(
 
     // MARK: - Firebase Operations
 
+    /**
+     * Uploads the raw source to the CDN pipeline and returns the ticket (public
+     * CloudFront HLS + MP4 URLs + the videoId). Transcode runs server-side after the
+     * PUT; the URLs go live once it completes (HlsReadinessPoller flips the doc status).
+     */
+    private suspend fun uploadVideoToCDN(videoPath: String): CdnUploadService.Ticket {
+        val videoFile = File(videoPath)
+        if (!videoFile.exists()) throw IllegalArgumentException("Video file not found: $videoPath")
+        val cdnVideoId = UUID.randomUUID().toString()
+        val ticket = CdnUploadService.requestTicket(cdnVideoId)
+        CdnUploadService.uploadSource(videoFile, ticket.uploadURL)
+        if (BuildConfig.DEBUG) { println("✅ CDN: Pushed source for $cdnVideoId") }
+        return ticket
+    }
+
     private suspend fun uploadVideoToFirebase(videoPath: String): String {
         val videoFile = File(videoPath)
         if (!videoFile.exists()) {
@@ -816,7 +853,8 @@ class VideoCoordinator(
     private suspend fun createVideoDocument(
         metadata: CoreVideoMetadata,
         hashtags: List<String>,
-        taggedUserIDs: List<String> = emptyList() // NEW: Tagged users parameter
+        taggedUserIDs: List<String> = emptyList(), // NEW: Tagged users parameter
+        cdnVideoId: String? = null                  // CDN/upload videoId for server-side status flip
     ): CoreVideoMetadata {
 
         val now = Timestamp.now()
@@ -881,7 +919,14 @@ class VideoCoordinator(
             "discoverabilityScore" to 0.5,
             "isPromoted" to false,
             "isProcessing" to false,
-            "isDeleted" to false
+            "isDeleted" to false,
+            // CDN/HLS pipeline. videoURL is kept = mp4URL for back-compat; hlsURL is
+            // the ABR master; status gates processing->published; cdnVideoId lets the
+            // server-side transcode handler find this doc to flip. See CDN_STATUS_FLIP_SPEC.
+            "hlsURL" to (metadata.hlsURL ?: ""),
+            "mp4URL" to (metadata.mp4URL ?: ""),
+            "status" to (metadata.status ?: "processing"),
+            "cdnVideoId" to (cdnVideoId ?: "")
         )
 
         return try {

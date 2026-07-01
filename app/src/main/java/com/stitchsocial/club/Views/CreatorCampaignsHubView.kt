@@ -264,6 +264,7 @@ private fun StatusPill(text: String, color: Color) {
     )
 }
 
+@Composable
 private fun statusColor(status: String): Color = when (status) {
     "open" -> Color(0xFF1E8E3E)
     "reviewing" -> Color(0xFFFFA000)

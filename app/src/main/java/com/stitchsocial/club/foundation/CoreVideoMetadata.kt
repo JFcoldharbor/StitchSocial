@@ -77,9 +77,36 @@ data class CoreVideoMetadata(
     val segmentNumber: Int? = null,           // Order within collection (1-based)
     val segmentTitle: String? = null,         // Optional title for this segment
     val isCollectionSegment: Boolean = false,  // True if this video is a collection segment
-    val replyTimestamp: Double? = null         // Timestamp in parent video this reply references
+    val replyTimestamp: Double? = null,        // Timestamp in parent video this reply references
+
+    // CDN / HLS playback (Stephen pipeline — iOS parity, see project_stitch_cdn_integration)
+    val hlsURL: String? = null,                // ABR master (.m3u8) on public CloudFront — cellular win
+    val mp4URL: String? = null,                // faststart MP4 fallback on public CloudFront
+    val status: String? = null                 // "processing" -> "published"; null on legacy docs
 ) {
     // Computed properties
+
+    /**
+     * Single source of truth for which URL to hand a player. Precedence:
+     * live HLS (ABR) -> faststart MP4 fallback -> legacy videoURL.
+     * Prefer HLS whenever it exists and is live — don't trust the client-flipped
+     * `status` alone (the poller that sets it is unreliable on bad signal); also
+     * treat HLS as live once the doc is old enough that transcode has certainly
+     * finished (~15s measured; 45s safe margin). Self-heals docs stuck at
+     * "processing". Returns a URL string for MediaItem.fromUri.
+     */
+    val playbackURL: String
+        get() {
+            val hls = hlsURL
+            if (!hls.isNullOrEmpty()) {
+                val transcodeLikelyDone = (Date().time - createdAt.time) > 45_000L
+                if (status == "published" || transcodeLikelyDone) return hls
+            }
+            val mp4 = mp4URL
+            if (!mp4.isNullOrEmpty()) return mp4
+            return videoURL
+        }
+
     val netEngagement: Int get() = hypeCount - coolCount
     val totalInteractions: Int get() = hypeCount + coolCount + replyCount + shareCount
     val isThread: Boolean get() = conversationDepth == 0

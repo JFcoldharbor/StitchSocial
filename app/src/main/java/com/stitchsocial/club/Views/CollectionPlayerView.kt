@@ -133,9 +133,10 @@ fun CollectionPlayerView(
     // Update player when segment changes — in-place, no teardown
     LaunchedEffect(currentIndex, segments.size) {
         val seg = segments.getOrNull(currentIndex) ?: return@LaunchedEffect
-        if (seg.videoURL.isEmpty()) return@LaunchedEffect
+        val playURL = seg.playbackURL
+        if (playURL.isEmpty()) return@LaunchedEffect
         exoPlayer.pause()
-        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(seg.videoURL)))
+        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(playURL)))
         exoPlayer.prepare()
         exoPlayer.seekTo(0)
         exoPlayer.play()

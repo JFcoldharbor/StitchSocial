@@ -61,11 +61,16 @@ android {
             isMinifyEnabled = false
             buildConfigField("String", "BUILD_TYPE", "\"debug\"")
             buildConfigField("boolean", "DEBUG", "true")
+            // OpenAI key for AI title/description/hashtags. Sourced from
+            // local.properties (OPENAI_API_KEY=sk-...). Empty -> AI disabled,
+            // composer falls back to manual entry. AppConfig reads this reflectively.
+            buildConfigField("String", "OPENAI_API_KEY", "\"${localProps["OPENAI_API_KEY"] ?: ""}\"")
         }
         release {
             isMinifyEnabled = false
             buildConfigField("String", "BUILD_TYPE", "\"release\"")
             buildConfigField("boolean", "DEBUG", "false")
+            buildConfigField("String", "OPENAI_API_KEY", "\"${localProps["OPENAI_API_KEY"] ?: ""}\"")
             if (canSign) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -142,6 +147,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
+    // Required for HLS (.m3u8) ABR playback from the CDN pipeline — without this
+    // ExoPlayer can't resolve the master playlist. See project_stitch_cdn_integration.
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
 

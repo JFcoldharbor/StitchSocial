@@ -1643,19 +1643,11 @@ private fun buildGridPreviewPlayer(context: Context, url: String): ExoPlayer {
     }
 }
 
-/** Allow autoplay UNLESS we can confidently see metered cellular. Defaults to
- *  allow when the network can't be classified (emulator / missing
- *  ACCESS_NETWORK_STATE), so video still plays in dev. */
+/** Always allow autoplay. HLS ABR now streams fine on cellular (the master
+ *  adapts bitrate to the link), so the old cellular suppression is gone —
+ *  grid previews autoplay on any transport. */
 private fun shouldAutoplay(context: Context): Boolean {
-    return try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return true
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return true
-        // Block only when confidently on cellular.
-        !caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-    } catch (_: Exception) {
-        true
-    }
+    return true
 }
 
 // MARK: - Loading/Error Views

@@ -72,13 +72,24 @@ fun VideoPlayerComposable(
     var showPlayButton by remember { mutableStateOf(false) }
     var isError by remember { mutableStateOf(false) }
 
-    // Extract video properties using reflection
-    val videoURL = getVideoProperty(video, "videoURL") ?: ""
+    // Extract video properties. Prefer the model's computed playbackURL
+    // (live HLS -> faststart MP4 -> legacy videoURL) — that's a computed getter
+    // reflection over declaredFields can't see, so cast to the model first and
+    // only fall back to reflection for non-CoreVideoMetadata callers.
+    val videoModel = video as? com.stitchsocial.club.foundation.CoreVideoMetadata
+    val remoteURL = videoModel?.playbackURL ?: getVideoProperty(video, "videoURL") ?: ""
     val videoTitle = getVideoProperty(video, "title") ?: "Unknown Video"
     val videoId = getVideoProperty(video, "id") ?: "unknown_id"
 
+    // Optimistic playback: if this doc was just uploaded and its local file is
+    // still cached, play it instantly, then swap to HLS once the readiness poller
+    // reports the master is live (iOS parity — project_stitch_cdn_integration).
+    val localPath = remember(videoId) { com.stitchsocial.club.services.LocalVideoCache.localPath(videoId) }
+    var currentURL by remember(videoId) { mutableStateOf(localPath ?: remoteURL) }
+    val hlsSwapURL = videoModel?.hlsURL
+
     // Create ExoPlayer instance
-    val exoPlayer = remember(videoURL) {
+    val exoPlayer = remember(currentURL) {
         // Use CacheDataSource if VideoDiskCache is initialised — falls back to default
         val playerBuilder = try {
             val cacheFactory = com.stitchsocial.club.services.VideoDiskCache.buildCacheDataSourceFactory()
@@ -96,11 +107,11 @@ fun VideoPlayerComposable(
             playWhenReady = false
 
             try {
-                if (videoURL.isNotEmpty()) {
-                    val mediaItem = MediaItem.fromUri(videoURL)
+                if (currentURL.isNotEmpty()) {
+                    val mediaItem = MediaItem.fromUri(currentURL)
                     setMediaItem(mediaItem)
                     prepare()
-                    Log.d("VIDEO_PLAYER", "📺 Loading video $videoId from $videoURL")
+                    Log.d("VIDEO_PLAYER", "📺 Loading video $videoId from $currentURL")
                 } else {
                     isError = true
                     Log.w("VIDEO_PLAYER", "⚠️ No video URL for $videoId")
@@ -187,6 +198,22 @@ fun VideoPlayerComposable(
         onDispose {
             LocalBroadcastManager.getInstance(context).unregisterReceiver(videoControlReceiver)
             Log.d("VIDEO_PLAYER", "📻 Unregistered video control receiver for $videoId")
+        }
+    }
+
+    // Swap optimistic local file -> HLS when the readiness poller publishes this
+    // doc. Only runs when we actually started from a local file AND the model
+    // carries an HLS master to upgrade to; otherwise this is a no-op.
+    LaunchedEffect(videoId) {
+        if (localPath != null && !hlsSwapURL.isNullOrEmpty()) {
+            val swapURL = hlsSwapURL
+            com.stitchsocial.club.services.HlsReadinessPoller.published.collect { publishedId ->
+                if (publishedId == videoId) {
+                    Log.i("VIDEO_PLAYER", "🔀 HLS live for $videoId — swapping optimistic local -> HLS")
+                    currentURL = swapURL
+                    com.stitchsocial.club.services.LocalVideoCache.clear(videoId)
+                }
+            }
         }
     }
 

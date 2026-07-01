@@ -795,7 +795,12 @@ class VideoServiceImpl {
                     spinOffFromVideoID = data["spinOffFromVideoID"] as? String,
                     spinOffFromThreadID = data["spinOffFromThreadID"] as? String,
                     spinOffCount = (data["spinOffCount"] as? Long)?.toInt() ?: 0,
-                    taggedUserIDs = (data["taggedUserIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    taggedUserIDs = (data["taggedUserIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                    // CDN/HLS fields (Stephen pipeline). Null on legacy Firebase-Storage
+                    // videos, which keep playing via videoURL. Drives playbackURL.
+                    hlsURL = data["hlsURL"] as? String,
+                    mp4URL = data["mp4URL"] as? String,
+                    status = data["status"] as? String
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
