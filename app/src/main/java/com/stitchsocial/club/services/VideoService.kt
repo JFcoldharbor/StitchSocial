@@ -800,13 +800,42 @@ class VideoServiceImpl {
                     // videos, which keep playing via videoURL. Drives playbackURL.
                     hlsURL = data["hlsURL"] as? String,
                     mp4URL = data["mp4URL"] as? String,
-                    status = data["status"] as? String
+                    status = data["status"] as? String,
+                    // Challenge / Giveaway. `challenge` map on the head; entry fields on children.
+                    challenge = parseChallenge(data["challenge"] as? Map<*, *>),
+                    challengeThreadID = data["challengeThreadID"] as? String,
+                    challengeStatus = com.stitchsocial.club.challenge.ChallengeEntryStatus.from(data["challengeStatus"] as? String)
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
                 null
             }
         }
+    }
+
+    /** Decode the nested `challenge` map (Firestore Timestamps -> Date). Null for
+     *  non-challenge videos. See project_stitch_challenge. */
+    private fun parseChallenge(map: Map<*, *>?): com.stitchsocial.club.challenge.Challenge? {
+        if (map == null) return null
+        val prize = map["prize"] as? String ?: return null
+        val hashtag = map["hashtag"] as? String ?: return null
+        fun i(k: String, d: Int) = (map[k] as? Long)?.toInt() ?: (map[k] as? Int) ?: d
+        fun date(k: String) = (map[k] as? com.google.firebase.Timestamp)?.toDate() ?: java.util.Date()
+        return com.stitchsocial.club.challenge.Challenge(
+            prize = prize,
+            hashtag = hashtag,
+            scope = com.stitchsocial.club.challenge.ChallengeScope.from(map["scope"] as? String),
+            communityID = map["communityID"] as? String,
+            metric = com.stitchsocial.club.challenge.ChallengeMetric.from(map["metric"] as? String),
+            threshold = i("threshold", 0),
+            winnerCount = i("winnerCount", 1),
+            deadline = date("deadline"),
+            createdAt = date("createdAt"),
+            state = com.stitchsocial.club.challenge.ChallengeState.from(map["state"] as? String),
+            entryCount = i("entryCount", 0),
+            qualifierCount = i("qualifierCount", 0),
+            drawSeed = map["drawSeed"] as? String
+        )
     }
 
     private fun parseContentType(str: String?): ContentType {

@@ -82,9 +82,21 @@ data class CoreVideoMetadata(
     // CDN / HLS playback (Stephen pipeline — iOS parity, see project_stitch_cdn_integration)
     val hlsURL: String? = null,                // ABR master (.m3u8) on public CloudFront — cellular win
     val mp4URL: String? = null,                // faststart MP4 fallback on public CloudFront
-    val status: String? = null                 // "processing" -> "published"; null on legacy docs
+    val status: String? = null,                // "processing" -> "published"; null on legacy docs
+
+    // Challenge / Giveaway (iOS parity — see project_stitch_challenge)
+    val challenge: com.stitchsocial.club.challenge.Challenge? = null,   // set on the thread HEAD
+    val challengeThreadID: String? = null,     // set on an ENTRY (child) — the challenge head id
+    val challengeStatus: com.stitchsocial.club.challenge.ChallengeEntryStatus? = null  // entered/qualified/won
 ) {
     // Computed properties
+
+    /** True if this video is a challenge head. */
+    val isChallenge: Boolean get() = challenge != null
+    /** True if this is a challenge head still open for entries. */
+    val isChallengeActive: Boolean get() = challenge?.isActive == true
+    /** True if this video is an entry in some challenge. */
+    val isChallengeEntry: Boolean get() = challengeThreadID != null
 
     /**
      * Single source of truth for which URL to hand a player. Precedence:
