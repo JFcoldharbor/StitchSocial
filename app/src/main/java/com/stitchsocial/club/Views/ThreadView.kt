@@ -80,6 +80,8 @@ import kotlinx.coroutines.delay
 // Foundation imports
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.challenge.Challenge
+import com.stitchsocial.club.challenge.ChallengeEntryStatus
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.ui.components.ThreadDepthBadge
@@ -1061,6 +1063,19 @@ private fun ThreadCard(
                 )
         )
 
+        // Contest HUD — head-of-thread challenge card overlay (top of card)
+        if (isOrigin && video.isChallenge) {
+            video.challenge?.let { ch ->
+                ContestHUD(
+                    challenge = ch,
+                    brandCyan = brandCyan,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                )
+            }
+        }
+
         // Bottom overlay: Title + Creator pill
         Column(
             modifier = Modifier
@@ -1073,6 +1088,11 @@ private fun ThreadCard(
                 depth = video.conversationDepth,
                 modifier = Modifier
             )
+
+            // Challenge entry badge (any video with a status)
+            video.challengeStatus?.let { status ->
+                ChallengeBadge(status = status)
+            }
 
             // Title
             Text(
@@ -1271,6 +1291,164 @@ private fun ErrorView(
             Spacer(modifier = Modifier.width(6.dp))
             Text(text = "Retry", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
+    }
+}
+
+// ===== CHALLENGE / GIVEAWAY =====
+
+/**
+ * Contest HUD — overlay card on the challenge thread HEAD. Shows the prize,
+ * rule summary, a live 1s countdown to the deadline, and entry/qualifier tallies.
+ */
+@Composable
+private fun ContestHUD(
+    challenge: Challenge,
+    brandCyan: Color,
+    modifier: Modifier = Modifier
+) {
+    val gold = Color(0xFFFFD700)
+
+    // Live countdown — re-reads timeRemainingMs every second.
+    var remainingMs by remember(challenge.deadline) { mutableStateOf(challenge.timeRemainingMs) }
+    LaunchedEffect(challenge.deadline) {
+        while (true) {
+            remainingMs = challenge.timeRemainingMs
+            delay(1000)
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.dp, brandCyan.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Header: trophy + "Contest"
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                Icons.Default.EmojiEvents,
+                contentDescription = null,
+                tint = gold,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                "Contest",
+                color = gold,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        // Prize
+        Text(
+            challenge.prize,
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        // Rule summary
+        Text(
+            challenge.ruleSummary,
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 11.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        // Countdown
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                Icons.Default.Timer,
+                contentDescription = null,
+                tint = brandCyan,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                if (remainingMs <= 0) "Ended" else formatCountdown(remainingMs),
+                color = brandCyan,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        // Entry / qualifier tallies
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ContestStat(count = challenge.entryCount, label = "entries")
+            ContestStat(count = challenge.qualifierCount, label = "qualified")
+        }
+    }
+}
+
+@Composable
+private fun ContestStat(count: Int, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(
+            "$count",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            label,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 11.sp
+        )
+    }
+}
+
+/**
+ * Reusable challenge entry badge — QUALIFIED (cyan), WON (gold), ENTERED (gray).
+ */
+@Composable
+fun ChallengeBadge(
+    status: ChallengeEntryStatus,
+    modifier: Modifier = Modifier
+) {
+    val (label, bg, fg) = when (status) {
+        ChallengeEntryStatus.QUALIFIED -> Triple("Qualified ✅", Color(0xFF00D9F2), Color.Black)
+        ChallengeEntryStatus.WON -> Triple("Winner 🏆", Color(0xFFFFD700), Color.Black)
+        ChallengeEntryStatus.ENTERED -> Triple("Entered", Color(0xFF6B7280), Color.White)
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(
+            label,
+            color = fg,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+/** Human countdown: "3d 4h 5m" / "4h 5m 6s" / "5m 6s". */
+private fun formatCountdown(ms: Long): String {
+    val totalSec = ms / 1000
+    val days = totalSec / 86400
+    val hours = (totalSec % 86400) / 3600
+    val mins = (totalSec % 3600) / 60
+    val secs = totalSec % 60
+    return when {
+        days > 0 -> "${days}d ${hours}h ${mins}m"
+        hours > 0 -> "${hours}h ${mins}m ${secs}s"
+        else -> "${mins}m ${secs}s"
     }
 }
 

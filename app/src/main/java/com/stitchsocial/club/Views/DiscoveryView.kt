@@ -1571,6 +1571,33 @@ private fun DiscoveryVideoCard(
                 )
         )
 
+        // Contest pill — active challenge head (matches the tile's badge style).
+        if (video.isChallengeActive) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(StitchColors.primary)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.EmojiEvents,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(11.dp)
+                )
+                Text(
+                    text = "Contest",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+
         // Content overlay — HYPE ONLY. Title, @creator, replies, views and the
         // temperature badge were removed per request; the grid shows just heat.
         if (video.hypeCount > 0) {
