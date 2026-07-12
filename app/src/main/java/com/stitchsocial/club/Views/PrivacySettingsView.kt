@@ -16,6 +16,8 @@ import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -98,6 +100,7 @@ fun PrivacySettingsView(
     var defaultStitchVisibility by remember { mutableStateOf(ContentVisibility.PUBLIC) }
     var ageGroup by remember { mutableStateOf(AgeGroup.ADULT) }
     var ageVerified by remember { mutableStateOf(false) }
+    var celebrateBirthday by remember { mutableStateOf(false) }
 
     var isLoaded by remember { mutableStateOf(false) }
     var pendingAge by remember { mutableStateOf<AgeGroup?>(null) }
@@ -114,8 +117,28 @@ fun PrivacySettingsView(
             defaultStitchVisibility = ContentVisibility.from(privacy["defaultStitchVisibility"] as? String)
             ageGroup = AgeGroup.from(privacy["ageGroup"] as? String)
             ageVerified = privacy["ageVerifiedAt"] != null
+
+            // celebrateBirthday lives in the privacySettings map (age-gate
+            // territory), not the legacy privacy map above.
+            @Suppress("UNCHECKED_CAST")
+            val privacySettings = doc.get("privacySettings") as? Map<String, Any> ?: emptyMap()
+            celebrateBirthday = privacySettings["celebrateBirthday"] as? Boolean ?: false
         } catch (_: Exception) { }
         isLoaded = true
+    }
+
+    fun saveCelebrateBirthday(enabled: Boolean) {
+        scope.launch {
+            try {
+                // Merge-write so birthdate / ageGroup siblings are preserved.
+                db.collection("users").document(userID).set(
+                    mapOf("privacySettings" to mapOf("celebrateBirthday" to enabled)),
+                    com.google.firebase.firestore.SetOptions.merge()
+                ).await()
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("PRIVACY VIEW: celebrateBirthday save failed: ${e.message}") }
+            }
+        }
     }
 
     fun save() {
@@ -166,6 +189,7 @@ fun PrivacySettingsView(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -243,6 +267,36 @@ fun PrivacySettingsView(
                                 Text("Age verified", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF30D158))
                             }
                         }
+                    }
+
+                    // Birthday celebrations
+                    PrivacySection(title = "BIRTHDAY", icon = Icons.Default.Cake, iconColor = Color(0xFFE91E63)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Celebrate my birthday",
+                                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                color = AppTheme.colors.textPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = celebrateBirthday,
+                                onCheckedChange = {
+                                    celebrateBirthday = it
+                                    saveCelebrateBirthday(it)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = Color(0xFFE91E63),
+                                    checkedThumbColor = Color.White
+                                )
+                            )
+                        }
+                        Text(
+                            "On your birthday, your followers get a note to send some hype. Only the day is shared — never your age or birth year.",
+                            fontSize = 11.sp, color = AppTheme.colors.textSecondary
+                        )
                     }
                 }
             }

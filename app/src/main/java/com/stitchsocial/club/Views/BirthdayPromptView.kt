@@ -6,12 +6,18 @@
  * to users/{id}.privacySettings.birthdate. A Cloud Function (onUserBirthdateSet)
  * recomputes the ageGroup server-side and sets the audienceLane custom claim.
  *
- * COPPA defensiveness: under-13 is hard-blocked.
+ * COPPA defensiveness:
+ * - The gate is NEUTRAL: no live computed-age readout, no mention of a minimum age.
+ * - Under-13 writes ONLY the block marker (ageGroup/blockedAt/blockReason) — the
+ *   child's birthdate is never persisted (retention would count as collection).
+ * - A device-level SharedPreferences flag ("stitch_age_gate_blocked") prevents
+ *   sign-out-and-retry with a new fake birthdate on the same device.
  */
 
 package com.stitchsocial.club.views
 
 import android.app.DatePickerDialog
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -38,6 +44,12 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Device-level age-gate rejection flag. Once set, this device never shows the
+ * birthday picker again — the gate resolves straight to Under13Blocked.
+ */
+const val AGE_GATE_BLOCKED_PREF = "stitch_age_gate_blocked"
+
 /** Result the prompt emits up to the parent so it can route the user. */
 sealed class AgeGateOutcome {
     data class Adult(val birthdate: Date) : AgeGateOutcome()
@@ -54,6 +66,21 @@ fun BirthdayPromptView(
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
     val dateFmt = remember { SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()) }
+    val prefs = remember { context.getSharedPreferences("stitch_prefs", Context.MODE_PRIVATE) }
+
+    // Device-level retry block: if this device already produced an under-13
+    // rejection, block immediately — never show the picker again.
+    val deviceBlocked = remember { prefs.getBoolean(AGE_GATE_BLOCKED_PREF, false) }
+    LaunchedEffect(deviceBlocked) {
+        if (deviceBlocked) {
+            try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) { }
+            onCompleted(AgeGateOutcome.Under13Blocked)
+        }
+    }
+    if (deviceBlocked) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+        return
+    }
 
     // Default selection to 18 years ago — same as iOS picker default.
     val initialCal = remember {
@@ -62,8 +89,6 @@ fun BirthdayPromptView(
     var selectedDate by remember { mutableStateOf(initialCal.time) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    val computedAge = remember(selectedDate) { ageFrom(selectedDate) }
 
     fun showPicker() {
         val cal = Calendar.getInstance().apply { time = selectedDate }
@@ -92,16 +117,25 @@ fun BirthdayPromptView(
         scope.launch {
             try {
                 if (age < 13) {
-                    db.collection("users").document(userID).set(
-                        mapOf("privacySettings" to mapOf(
-                            "birthdate" to Timestamp(selectedDate),
-                            "ageGroup" to "blocked",
-                            "blockedAt" to Timestamp(Date()),
-                            "blockReason" to "under_13_coppa"
-                        )),
-                        com.google.firebase.firestore.SetOptions.merge()
-                    ).await()
-                    FirebaseAuth.getInstance().signOut()
+                    // Device-level retry block — set BEFORE any network call so
+                    // the device stays blocked even if the write fails.
+                    prefs.edit().putBoolean(AGE_GATE_BLOCKED_PREF, true).apply()
+                    // COPPA: never persist the child's birthdate or age —
+                    // only the block marker.
+                    try {
+                        db.collection("users").document(userID).set(
+                            mapOf("privacySettings" to mapOf(
+                                "ageGroup" to "blocked",
+                                "blockedAt" to Timestamp(Date()),
+                                "blockReason" to "age_policy"
+                            )),
+                            com.google.firebase.firestore.SetOptions.merge()
+                        ).await()
+                    } catch (_: Exception) {
+                        // Still block locally — do not let a network error
+                        // leave a rejected child signed in.
+                    }
+                    try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) { }
                     onCompleted(AgeGateOutcome.Under13Blocked)
                     return@launch
                 }
@@ -177,10 +211,8 @@ fun BirthdayPromptView(
                 Text("Edit", fontSize = 13.sp, color = Color.Cyan, fontWeight = FontWeight.SemiBold)
             }
 
-            Text(
-                "Age: $computedAge",
-                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.Cyan.copy(alpha = 0.8f)
-            )
+            // NOTE: deliberately no computed-age readout here and no mention of
+            // a minimum age — the gate must stay neutral (COPPA).
 
             errorMessage?.let {
                 Text(it, fontSize = 12.sp, color = Color.Red, textAlign = TextAlign.Center)

@@ -82,6 +82,8 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.challenge.Challenge
 import com.stitchsocial.club.challenge.ChallengeEntryStatus
+import com.stitchsocial.club.challenge.ChallengeState
+import com.stitchsocial.club.challenge.GiveawayResultsView
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.ui.components.ThreadDepthBadge
@@ -179,6 +181,8 @@ fun ThreadView(
     var laneParticipantIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var currentLaneAnchorID by remember { mutableStateOf<String?>(null) }
     var isPanelExpanded by remember { mutableStateOf(false) }
+    // Giveaway results sheet — opened by tapping the ContestHUD on the challenge head.
+    var showGiveawayResults by remember { mutableStateOf(false) }
 
     // Pagination (20 children per page)
     var currentPage by remember { mutableStateOf(0) }
@@ -481,7 +485,8 @@ fun ThreadView(
                                         isOrigin = video.id == parentVideo?.id,
                                         brandCyan = brandCyan,
                                         brandPurple = brandPurple,
-                                        onTap = { openVideo(video) }
+                                        onTap = { openVideo(video) },
+                                        onContestTap = { showGiveawayResults = true }
                                     )
                                 }
 
@@ -684,6 +689,19 @@ fun ThreadView(
                     )
                 }
             )
+        }
+
+        // Giveaway results sheet — ContestHUD tap on the challenge head.
+        if (showGiveawayResults) {
+            val head = parentVideo
+            val ch = head?.challenge
+            if (head != null && ch != null) {
+                GiveawayResultsView(
+                    headVideoID = head.id,
+                    challenge = ch,
+                    onDismiss = { showGiveawayResults = false }
+                )
+            }
         }
     }
 }
@@ -985,7 +1003,8 @@ private fun ThreadCard(
     isOrigin: Boolean,
     brandCyan: Color,
     brandPurple: Color,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    onContestTap: () -> Unit = {}
 ) {
     val brandPink = Color(0xFFF266B3)
     val scale by animateFloatAsState(
@@ -1063,16 +1082,29 @@ private fun ThreadCard(
                 )
         )
 
-        // Contest HUD — head-of-thread challenge card overlay (top of card)
-        if (isOrigin && video.isChallenge) {
-            video.challenge?.let { ch ->
-                ContestHUD(
-                    challenge = ch,
-                    brandCyan = brandCyan,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(12.dp)
-                )
+        // Contest + Event HUDs — head-of-thread overlays (top-start of card).
+        // Stacked in a Column so the Event HUD sits directly below the Contest
+        // HUD when a head is both a challenge and an event.
+        if (isOrigin && (video.isChallenge || video.isEvent)) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                video.challenge?.let { ch ->
+                    ContestHUD(
+                        challenge = ch,
+                        brandCyan = brandCyan,
+                        onTap = onContestTap
+                    )
+                }
+                video.event?.let { ev ->
+                    com.stitchsocial.club.events.EventHUD(
+                        videoId = video.id,
+                        event = ev
+                    )
+                }
             }
         }
 
@@ -1299,14 +1331,18 @@ private fun ErrorView(
 /**
  * Contest HUD — overlay card on the challenge thread HEAD. Shows the prize,
  * rule summary, a live 1s countdown to the deadline, and entry/qualifier tallies.
+ * Tappable: opens GiveawayResultsView (chevron affordance; gold trim + trophy
+ * emphasis once the draw has completed).
  */
 @Composable
 private fun ContestHUD(
     challenge: Challenge,
     brandCyan: Color,
+    onTap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val gold = Color(0xFFFFD700)
+    val isCompleted = challenge.state == ChallengeState.COMPLETED
 
     // Live countdown — re-reads timeRemainingMs every second.
     var remainingMs by remember(challenge.deadline) { mutableStateOf(challenge.timeRemainingMs) }
@@ -1321,11 +1357,16 @@ private fun ContestHUD(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black.copy(alpha = 0.55f))
-            .border(1.dp, brandCyan.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .border(
+                1.dp,
+                if (isCompleted) gold.copy(alpha = 0.7f) else brandCyan.copy(alpha = 0.6f),
+                RoundedCornerShape(16.dp)
+            )
+            .clickable(onClick = onTap)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Header: trophy + "Contest"
+        // Header: trophy + label + chevron (tap affordance)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1334,13 +1375,19 @@ private fun ContestHUD(
                 Icons.Default.EmojiEvents,
                 contentDescription = null,
                 tint = gold,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(if (isCompleted) 18.dp else 16.dp)
             )
             Text(
-                "Contest",
+                if (isCompleted) "Results" else "Contest",
                 color = gold,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
+            )
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = "View giveaway details",
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(16.dp)
             )
         }
 
@@ -1363,20 +1410,24 @@ private fun ContestHUD(
             overflow = TextOverflow.Ellipsis
         )
 
-        // Countdown
+        // Countdown (active) / results hint (completed)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Icon(
-                Icons.Default.Timer,
+                if (isCompleted) Icons.Default.EmojiEvents else Icons.Default.Timer,
                 contentDescription = null,
-                tint = brandCyan,
+                tint = if (isCompleted) gold else brandCyan,
                 modifier = Modifier.size(13.dp)
             )
             Text(
-                if (remainingMs <= 0) "Ended" else formatCountdown(remainingMs),
-                color = brandCyan,
+                when {
+                    isCompleted -> "Winners drawn — tap to view"
+                    remainingMs <= 0 -> "Ended"
+                    else -> formatCountdown(remainingMs)
+                },
+                color = if (isCompleted) gold else brandCyan,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
             )

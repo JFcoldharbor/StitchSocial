@@ -789,7 +789,8 @@ class VideoServiceImpl {
 
     // ===== FIREBASE CONVERSION =====
 
-    private fun convertFirebaseToVideoMetadata(documents: List<DocumentSnapshot>): List<CoreVideoMetadata> {
+    // Internal visibility so EventService can reuse the central decoder (event map included).
+    internal fun convertFirebaseToVideoMetadata(documents: List<DocumentSnapshot>): List<CoreVideoMetadata> {
         return documents.mapNotNull { doc ->
             try {
                 val data = doc.data ?: return@mapNotNull null
@@ -847,7 +848,9 @@ class VideoServiceImpl {
                     // Challenge / Giveaway. `challenge` map on the head; entry fields on children.
                     challenge = parseChallenge(data["challenge"] as? Map<*, *>),
                     challengeThreadID = data["challengeThreadID"] as? String,
-                    challengeStatus = com.stitchsocial.club.challenge.ChallengeEntryStatus.from(data["challengeStatus"] as? String)
+                    challengeStatus = com.stitchsocial.club.challenge.ChallengeEntryStatus.from(data["challengeStatus"] as? String),
+                    // Event posts — nested `event` map on the thread HEAD (null otherwise)
+                    event = com.stitchsocial.club.events.StitchEvent.fromMap(data["event"] as? Map<*, *>)
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
@@ -877,7 +880,9 @@ class VideoServiceImpl {
             state = com.stitchsocial.club.challenge.ChallengeState.from(map["state"] as? String),
             entryCount = i("entryCount", 0),
             qualifierCount = i("qualifierCount", 0),
-            drawSeed = map["drawSeed"] as? String
+            drawSeed = map["drawSeed"] as? String,
+            winnerVideoIDs = (map["winnerVideoIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+            winnerUserIDs = (map["winnerUserIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         )
     }
 

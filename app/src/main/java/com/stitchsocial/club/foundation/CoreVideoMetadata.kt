@@ -93,7 +93,10 @@ data class CoreVideoMetadata(
     // Challenge / Giveaway (iOS parity — see project_stitch_challenge)
     val challenge: com.stitchsocial.club.challenge.Challenge? = null,   // set on the thread HEAD
     val challengeThreadID: String? = null,     // set on an ENTRY (child) — the challenge head id
-    val challengeStatus: com.stitchsocial.club.challenge.ChallengeEntryStatus? = null  // entered/qualified/won
+    val challengeStatus: com.stitchsocial.club.challenge.ChallengeEntryStatus? = null,  // entered/qualified/won
+
+    // Event posts (iOS parity — see project_stitch_social; nested `event` map on the thread HEAD)
+    val event: com.stitchsocial.club.events.StitchEvent? = null
 ) {
     // Computed properties
 
@@ -103,6 +106,9 @@ data class CoreVideoMetadata(
     val isChallengeActive: Boolean get() = challenge?.isActive == true
     /** True if this video is an entry in some challenge. */
     val isChallengeEntry: Boolean get() = challengeThreadID != null
+
+    /** True if this thread head is an event post. */
+    val isEvent: Boolean get() = event != null
 
     /**
      * Single source of truth for which URL to hand a player. Precedence:

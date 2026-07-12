@@ -485,6 +485,20 @@ fun DiscoveryCard(
             )
         }
 
+        // Active challenge promo capsule — top-center (iOS parity):
+        // 🏆 WIN: {prize} · {countdown} left. Only while the giveaway is open.
+        if (video.isChallengeActive) {
+            video.challenge?.let { ch ->
+                ChallengePromoCapsule(
+                    prize = ch.prize,
+                    deadline = ch.deadline,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp, start = 52.dp, end = 52.dp)
+                )
+            }
+        }
+
         // Reply count badge — top-right (matches iOS)
         if (video.replyCount > 0 && shouldAutoPlay) {
             Box(
@@ -654,6 +668,77 @@ private fun CreatorAvatar(
                 modifier = Modifier.size(dim * 0.45f)
             )
         }
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - ChallengePromoCapsule
+// ─────────────────────────────────────────────
+
+/** Gold trophy accent for challenge promotion. */
+private val ChallengeGold = Color(0xFFFFD700)
+
+/**
+ * Active-challenge promo capsule for a swipe card (iOS parity):
+ * 🏆 WIN: {prize} · {countdown} left — gold-trimmed, black 55% fill.
+ * The countdown re-derives from the deadline once a minute.
+ */
+@Composable
+private fun ChallengePromoCapsule(
+    prize: String,
+    deadline: java.util.Date,
+    modifier: Modifier = Modifier
+) {
+    var remainingMs by remember(deadline) {
+        mutableStateOf((deadline.time - System.currentTimeMillis()).coerceAtLeast(0L))
+    }
+    LaunchedEffect(deadline) {
+        while (true) {
+            remainingMs = (deadline.time - System.currentTimeMillis()).coerceAtLeast(0L)
+            delay(60_000)
+        }
+    }
+    if (remainingMs <= 0) return
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.dp, ChallengeGold.copy(alpha = 0.8f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(text = "🏆", fontSize = 10.sp)
+        Text(
+            text = "WIN: $prize",
+            color = ChallengeGold,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            text = "· ${formatChallengeCountdown(remainingMs)} left",
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
+/** Short countdown for the promo capsule: "3d 4h" / "4h 5m" / "12m". */
+private fun formatChallengeCountdown(ms: Long): String {
+    val totalMin = ms / 60000
+    val days = totalMin / 1440
+    val hours = (totalMin % 1440) / 60
+    val mins = totalMin % 60
+    return when {
+        days > 0 -> "${days}d ${hours}h"
+        hours > 0 -> "${hours}h ${mins}m"
+        else -> "${mins.coerceAtLeast(1)}m"
     }
 }
 

@@ -1,30 +1,38 @@
 /*
- * NotificationView.kt - COMPLETE NOTIFICATION SCREEN WITH WORKING NAVIGATION
+ * NotificationView.kt - NOTIFICATIONS 2a REDESIGN
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 8: Views - Complete Notification Feed with Discovery & Navigation
- * ✅ Auto-scrolling discovery avatars
- * ✅ Side-by-side discovery layout (Just Joined | Top Videos)
- * ✅ Notification tabs with filtering
- * ✅ FIXED: Profile navigation with follow button & video grid
- * ✅ FIXED: Video navigation with actual video player
+ * Layer 8: Views - Notification Feed with Discovery & Navigation
+ * ✅ Header: bold title + compact Filter pill (progressive disclosure of filter chips)
+ * ✅ Amber "N unread" pill + quiet "Mark all read" text button
+ * ✅ "Just Joined" rail: NEW chip + "Top Videos" pill + auto-scrolling avatar marquee
+ * ✅ Feed grouped into time buckets: NEW / TODAY / THIS WEEK / EARLIER
+ * ✅ Profile navigation with follow button & video grid
+ * ✅ Video navigation with actual video player
  * ✅ Follow back buttons
- * ✅ Mark all as read
- * ✅ Pagination support
  * ✅ Timer cleanup
  *
- * EXACT PORT: NotificationView.swift with all features + working navigation
+ * PORT: iOS "Notifications 2a" redesign
  */
 
 package com.stitchsocial.club.views
 
 import com.stitchsocial.club.ui.theme.AppTheme
+import com.stitchsocial.club.ui.theme.StitchColors
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -38,9 +46,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,11 +67,11 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.Calendar
 
 // Foundation
 import com.stitchsocial.club.foundation.RecentUser
 import com.stitchsocial.club.foundation.LeaderboardVideo
-import com.stitchsocial.club.foundation.CoreVideoMetadata
 
 // Services
 import com.stitchsocial.club.services.UserService
@@ -82,6 +95,13 @@ import com.stitchsocial.club.FollowManager
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.stitchsocial.club.BuildConfig
+
+// MARK: - Accent Colors (purple stays the accent)
+
+private val PurpleAccent = Color(0xFF8E44AD)
+private val PurpleLabel = Color(0xFFBB86FC)
+private val AmberAccent = Color(0xFFFF9500)
+private val GreenNew = Color(0xFF34C759)
 
 /**
  * Complete notification screen with discovery and filtering
@@ -123,14 +143,18 @@ fun NotificationViewComplete(
     val selectedFilter by viewModel.selectedFilter.collectAsState()
     val profileImages by viewModel.profileImages.collectAsState()
 
+    // Filter chips are hidden until the Filter pill is tapped (progressive disclosure)
+    var filtersExpanded by remember { mutableStateOf(false) }
+
     // Discovery state
     var recentUsers by remember { mutableStateOf<List<RecentUser>>(emptyList()) }
-    var leaderboardVideos by remember { mutableStateOf<List<LeaderboardVideo>>(emptyList()) }
-    var isLoadingDiscovery by remember { mutableStateOf(false) }
 
     // Navigation state (JustJoined and TopVideos dialogs only)
     var showingJustJoinedView by remember { mutableStateOf(false) }
     var showingTopVideosView by remember { mutableStateOf(false) }
+
+    // Time-bucketed feed sections
+    val sections = remember(notifications) { groupNotifications(notifications) }
 
     // Observe navigation events from ViewModel
     LaunchedEffect(viewModel) {
@@ -157,16 +181,14 @@ fun NotificationViewComplete(
 
     // Load initial data
     LaunchedEffect(Unit) {
-        // Load discovery data
-        isLoadingDiscovery = true
+        // Load discovery data (only recent users are shown in the rail;
+        // top videos load on demand inside the Top Videos screen)
         try {
-            val (users, videos) = discoveryService.refreshDiscoveryData(userLimit = 20, leaderboardLimit = 10)
+            val (users, _) = discoveryService.refreshDiscoveryData(userLimit = 20, leaderboardLimit = 10)
             recentUsers = users
-            leaderboardVideos = videos
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) { println("❌ NOTIFICATION VIEW: Failed to load discovery data: ${e.message}") }
         }
-        isLoadingDiscovery = false
 
         // Load follow states for notifications
         val senderIDs = notifications.mapNotNull { notification ->
@@ -186,255 +208,45 @@ fun NotificationViewComplete(
         LazyColumn(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Header
+            // Header: title + Filter pill, unread pill + mark-all-read
             item {
                 NotificationHeader(
                     unreadCount = unreadCount,
-                    onMarkAllRead = {
-                        viewModel.markAllAsRead()
-                    }
+                    filterActive = selectedFilter != NotificationFilter.ALL,
+                    filtersExpanded = filtersExpanded,
+                    onToggleFilters = { filtersExpanded = !filtersExpanded },
+                    onMarkAllRead = { viewModel.markAllAsRead() }
                 )
             }
 
-            // Tab selector
+            // Filter chips: progressive disclosure, hidden until Filter pill is tapped
             item {
-                NotificationTabSelector(
-                    selectedFilter = selectedFilter,
-                    unreadCount = unreadCount,
-                    onFilterSelected = { filter ->
-                        viewModel.setFilter(filter)
-                    }
-                )
-            }
-
-            // Discovery: Just Joined avatars (tap opens full view)
-            item {
-                Box(modifier = Modifier.clickable { showingJustJoinedView = true }) {
-                    // Inline JustJoinedSection
-                    Column(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            "Just Joined",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AppTheme.colors.textPrimary,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        if (recentUsers.isEmpty()) {
-                            Text(
-                                "No new users in the last 24 hours",
-                                fontSize = 14.sp,
-                                color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
-                            )
-                        } else {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                items(recentUsers, key = { it.id }) { user ->
-                                    // Avatar with verified badge
-                                    Box(contentAlignment = Alignment.BottomEnd) {
-                                        val imageUrl = user.profileImageURL
-                                        if (!imageUrl.isNullOrEmpty()) {
-                                            AsyncImage(
-                                                model = imageUrl,
-                                                contentDescription = user.username,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .size(60.dp)
-                                                    .clip(CircleShape)
-                                                    .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f))
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(60.dp)
-                                                    .clip(CircleShape)
-                                                    .background(AppTheme.colors.textSecondary.copy(alpha = 0.3f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    user.username.take(1).uppercase(),
-                                                    fontSize = 24.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = AppTheme.colors.textPrimary
-                                                )
-                                            }
-                                        }
-                                        if (user.isVerified) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .offset(x = 2.dp, y = 2.dp)
-                                                    .size(16.dp)
-                                                    .background(Color.Black, CircleShape)
-                                                    .padding(1.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Verified,
-                                                    contentDescription = "Verified",
-                                                    tint = Color.Blue,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Text(
-                                "Tap to view all new users",
-                                fontSize = 11.sp,
-                                color = AppTheme.colors.textPrimary.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Discovery: Hype Leaderboard (ranked cards)
-            item {
-                Column(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                AnimatedVisibility(
+                    visible = filtersExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .clickable { showingTopVideosView = true },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "\uD83D\uDD25 Hype Leaderboard",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AppTheme.colors.textPrimary
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                "See All",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Cyan
-                            )
-                            Icon(
-                                Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = Color.Cyan,
-                                modifier = Modifier.size(14.dp)
-                            )
+                    NotificationTabSelector(
+                        selectedFilter = selectedFilter,
+                        unreadCount = unreadCount,
+                        onFilterSelected = { filter ->
+                            viewModel.setFilter(filter)
                         }
-                    }
-                    if (leaderboardVideos.isEmpty()) {
-                        Text(
-                            "No videos with hype yet",
-                            fontSize = 14.sp,
-                            color = AppTheme.colors.textPrimary.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp)
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            leaderboardVideos.take(5).forEachIndexed { index, video ->
-                                val rank = index + 1
-                                val rankColor = when (rank) {
-                                    1 -> Color.Yellow
-                                    2 -> AppTheme.colors.textSecondary
-                                    3 -> Color(0xFFCD7F32)
-                                    else -> Color.White.copy(alpha = 0.3f)
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(AppTheme.colors.surfaceStrong, RoundedCornerShape(10.dp))
-                                        .clickable {
-                                            onShowThreadView(video.id, video.id)
-                                        }
-                                        .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Rank badge
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .background(rankColor, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("$rank", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    // Thumbnail
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF2C2C2E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        val imgUrl = video.thumbnailURL
-                                        if (!imgUrl.isNullOrEmpty()) {
-                                            SubcomposeAsyncImage(
-                                                model = ImageRequest.Builder(context).data(imgUrl).crossfade(true).build(),
-                                                contentDescription = null,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            ) {
-                                                when (painter.state) {
-                                                    is AsyncImagePainter.State.Loading -> CircularProgressIndicator(color = Color.Cyan, strokeWidth = 1.dp, modifier = Modifier.size(12.dp))
-                                                    is AsyncImagePainter.State.Error -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
-                                                    is AsyncImagePainter.State.Success -> androidx.compose.foundation.Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                                    else -> Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
-                                                }
-                                            }
-                                        } else {
-                                            Icon(Icons.Default.PlayCircleOutline, null, tint = AppTheme.colors.textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
-                                        }
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    // Video info
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(video.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(video.creatorName, fontSize = 10.sp, color = AppTheme.colors.textPrimary.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    Spacer(Modifier.width(6.dp))
-                                    // Hype count
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("${video.hypeCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
-                                        Spacer(Modifier.width(2.dp))
-                                        Icon(Icons.Default.Whatshot, null, tint = Color(0xFFFF9800), modifier = Modifier.size(11.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    )
                 }
             }
 
-            // Activity header
+            // Just Joined rail: header row + auto-scrolling avatar marquee
             item {
-                Spacer(modifier = Modifier.height(32.dp))
-                Text(
-                    text = "Activity",
-                    color = AppTheme.colors.textPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 12.dp)
+                JustJoinedRail(
+                    recentUsers = recentUsers,
+                    onOpenJustJoined = { showingJustJoinedView = true },
+                    onOpenTopVideos = { showingTopVideosView = true },
+                    onUserTap = { userId -> onNavigateToProfile(userId) }
                 )
             }
 
-            // Notifications list
+            // Notifications feed grouped into time buckets
             if (isLoading) {
                 item {
                     Box(
@@ -443,7 +255,7 @@ fun NotificationViewComplete(
                             .padding(vertical = 32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFF00BCD4))
+                        CircularProgressIndicator(color = PurpleAccent)
                     }
                 }
             } else if (notifications.isEmpty()) {
@@ -456,29 +268,42 @@ fun NotificationViewComplete(
                     )
                 }
             } else {
-                items(
-                    items = notifications,
-                    key = { it.id }
-                ) { notification ->
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp, vertical = 6.dp)
-                            .animateItem()
-                    ) {
-                        NotificationRow(
-                            notification = notification,
-                            followManager = followManager,
-                            profileImages = profileImages,
-                            onTap = {
-                                Log.d("NOTIF_NAV", "ROW TAPPED: ${notification.type} | id=${notification.id}")
-                                viewModel.onNotificationTapped(notification)
-                            },
-                            onProfileTap = { senderID ->
-                                onNavigateToProfile(senderID)
-                            }
-                        )
-                    }
-                }
+                notificationSection(
+                    label = "NEW",
+                    labelColor = PurpleLabel,
+                    sectionItems = sections.newItems,
+                    followManager = followManager,
+                    profileImages = profileImages,
+                    onTap = { viewModel.onNotificationTapped(it) },
+                    onProfileTap = onNavigateToProfile
+                )
+                notificationSection(
+                    label = "TODAY",
+                    labelColor = null,
+                    sectionItems = sections.today,
+                    followManager = followManager,
+                    profileImages = profileImages,
+                    onTap = { viewModel.onNotificationTapped(it) },
+                    onProfileTap = onNavigateToProfile
+                )
+                notificationSection(
+                    label = "THIS WEEK",
+                    labelColor = null,
+                    sectionItems = sections.thisWeek,
+                    followManager = followManager,
+                    profileImages = profileImages,
+                    onTap = { viewModel.onNotificationTapped(it) },
+                    onProfileTap = onNavigateToProfile
+                )
+                notificationSection(
+                    label = "EARLIER",
+                    labelColor = null,
+                    sectionItems = sections.earlier,
+                    followManager = followManager,
+                    profileImages = profileImages,
+                    onTap = { viewModel.onNotificationTapped(it) },
+                    onProfileTap = onNavigateToProfile
+                )
             }
 
             // Bottom spacing
@@ -544,7 +369,7 @@ fun NotificationViewComplete(
                 // Top bar
                 Box(modifier = Modifier.fillMaxWidth().height(56.dp)) {
                     Text(
-                        "\uD83D\uDD25 Top Videos",
+                        "🔥 Top Videos",
                         fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary,
                         modifier = Modifier.align(Alignment.Center)
                     )
@@ -685,8 +510,308 @@ fun NotificationViewComplete(
 }
 
 // ============================================================================
-// MARK: - NOTIFICATION COMPONENTS
+// MARK: - TIME BUCKETS
 // ============================================================================
+
+private data class NotificationSections(
+    val newItems: List<NotificationItem>,
+    val today: List<NotificationItem>,
+    val thisWeek: List<NotificationItem>,
+    val earlier: List<NotificationItem>
+)
+
+/**
+ * Group notifications into feed buckets:
+ * NEW = all unread; read items split into TODAY / THIS WEEK / EARLIER by createdAt.
+ */
+private fun groupNotifications(notifications: List<NotificationItem>): NotificationSections {
+    val newItems = notifications.filter { !it.isRead }
+    val read = notifications.filter { it.isRead }
+
+    val cal = Calendar.getInstance()
+    cal.set(Calendar.HOUR_OF_DAY, 0)
+    cal.set(Calendar.MINUTE, 0)
+    cal.set(Calendar.SECOND, 0)
+    cal.set(Calendar.MILLISECOND, 0)
+    val startOfToday = cal.timeInMillis
+    val startOfWeek = startOfToday - 6L * 24 * 60 * 60 * 1000
+
+    return NotificationSections(
+        newItems = newItems,
+        today = read.filter { it.timestamp.time >= startOfToday },
+        thisWeek = read.filter { it.timestamp.time in startOfWeek until startOfToday },
+        earlier = read.filter { it.timestamp.time < startOfWeek }
+    )
+}
+
+/**
+ * One labeled time-bucket section in the feed (skipped when empty)
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun LazyListScope.notificationSection(
+    label: String,
+    labelColor: Color?,
+    sectionItems: List<NotificationItem>,
+    followManager: FollowManager,
+    profileImages: Map<String, String>,
+    onTap: (NotificationItem) -> Unit,
+    onProfileTap: (String) -> Unit
+) {
+    if (sectionItems.isEmpty()) return
+
+    item(key = "section_$label") {
+        Text(
+            text = label,
+            color = labelColor ?: AppTheme.colors.textSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 6.dp)
+        )
+    }
+
+    items(
+        items = sectionItems,
+        key = { it.id }
+    ) { notification ->
+        Box(
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+                .animateItem()
+        ) {
+            NotificationRow(
+                notification = notification,
+                followManager = followManager,
+                profileImages = profileImages,
+                onTap = {
+                    Log.d("NOTIF_NAV", "ROW TAPPED: ${notification.type} | id=${notification.id}")
+                    onTap(notification)
+                },
+                onProfileTap = onProfileTap
+            )
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - JUST JOINED RAIL
+// ============================================================================
+
+/**
+ * Compact discovery rail: "Just Joined" header + NEW chip, "Top Videos" pill,
+ * and a continuously auto-scrolling marquee of new-user avatars.
+ */
+@Composable
+private fun JustJoinedRail(
+    recentUsers: List<RecentUser>,
+    onOpenJustJoined: () -> Unit,
+    onOpenTopVideos: () -> Unit,
+    onUserTap: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Header row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.clickable(onClick = onOpenJustJoined)
+            ) {
+                Text(
+                    text = "Just Joined",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AppTheme.colors.textPrimary
+                )
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = GreenNew.copy(alpha = 0.18f)
+                ) {
+                    Text(
+                        text = "NEW",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        color = GreenNew,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = AmberAccent.copy(alpha = 0.15f),
+                modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onOpenTopVideos)
+            ) {
+                Text(
+                    text = "Top Videos ›",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AmberAccent,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+            }
+        }
+
+        // Avatar marquee
+        if (recentUsers.isEmpty()) {
+            Text(
+                text = "No new users in the last 24 hours",
+                fontSize = 13.sp,
+                color = AppTheme.colors.textSecondary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            )
+        } else {
+            JustJoinedMarquee(
+                users = recentUsers,
+                onUserTap = onUserTap
+            )
+        }
+
+        // Hairline divider below the rail
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+                .height(1.dp)
+                .background(AppTheme.colors.hairline)
+        )
+    }
+}
+
+/**
+ * Continuously auto-scrolling horizontal marquee of new-user avatars.
+ * Content is duplicated x2 and translated with an infinite linear animation.
+ */
+@Composable
+private fun JustJoinedMarquee(
+    users: List<RecentUser>,
+    onUserTap: (String) -> Unit
+) {
+    val density = LocalDensity.current
+    var contentWidth by remember { mutableStateOf(0) }
+    val offset = remember { Animatable(0f) }
+
+    LaunchedEffect(contentWidth, users.size) {
+        offset.snapTo(0f)
+        if (contentWidth > 0) {
+            // Constant linear speed of ~36dp/sec regardless of content length
+            val speedPxPerSec = with(density) { 36.dp.toPx() }
+            val durationMs = ((contentWidth / speedPxPerSec) * 1000f).toInt().coerceAtLeast(1000)
+            while (true) {
+                offset.animateTo(
+                    targetValue = contentWidth.toFloat(),
+                    animationSpec = tween(durationMillis = durationMs, easing = LinearEasing)
+                )
+                offset.snapTo(0f)
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clipToBounds()
+    ) {
+        Row(
+            modifier = Modifier.graphicsLayer { translationX = -offset.value }
+        ) {
+            repeat(2) { copyIndex ->
+                Row(
+                    modifier = if (copyIndex == 0) {
+                        Modifier
+                            .padding(start = 20.dp)
+                            .onSizeChanged { contentWidth = it.width }
+                    } else {
+                        Modifier
+                    }
+                ) {
+                    users.forEach { user ->
+                        JustJoinedAvatar(
+                            user = user,
+                            onTap = { onUserTap(user.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 52dp gradient-ring avatar with @handle beneath
+ */
+@Composable
+private fun JustJoinedAvatar(
+    user: RecentUser,
+    onTap: () -> Unit
+) {
+    val ringBrush = Brush.linearGradient(
+        colors = listOf(StitchColors.secondary, StitchColors.primary)
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .padding(end = 14.dp)
+            .width(60.dp)
+            .clickable(onClick = onTap)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .border(width = 2.dp, brush = ringBrush, shape = CircleShape)
+                .padding(4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val imageUrl = user.profileImageURL
+            if (!imageUrl.isNullOrEmpty()) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = user.username,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(AppTheme.colors.surfaceStrong)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(AppTheme.colors.surfaceStrong),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = user.username.take(1).uppercase(),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppTheme.colors.textPrimary
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "@${user.username}",
+            fontSize = 10.sp,
+            color = AppTheme.colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
 
 // ============================================================================
 // MARK: - NOTIFICATION COMPONENTS
@@ -717,7 +842,8 @@ private fun NotificationRow(
             .fillMaxWidth()
             .clickable(onClick = onTap),
         shape = RoundedCornerShape(12.dp),
-        color = if (notification.isRead) AppTheme.colors.surface else Color(0xFF2C2C2E)
+        // Unread ("NEW" bucket) rows get a purple tint
+        color = if (notification.isRead) AppTheme.colors.surface else PurpleAccent.copy(alpha = 0.14f)
     ) {
         Row(
             modifier = Modifier
@@ -868,7 +994,7 @@ private fun NotificationRow(
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(Color(0xFF8E44AD), CircleShape)
+                                .background(PurpleAccent, CircleShape)
                         )
                     }
                 }
@@ -878,21 +1004,28 @@ private fun NotificationRow(
 }
 
 /**
- * Header with title and mark all read button
+ * Header: bold title + compact Filter pill on the right.
+ * Beneath: amber unread pill + quiet "Mark all read" text button
+ * ("You're all caught up" when there is nothing unread).
  */
 @Composable
 private fun NotificationHeader(
     unreadCount: Int,
+    filterActive: Boolean,
+    filtersExpanded: Boolean,
+    onToggleFilters: () -> Unit,
     onMarkAllRead: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 48.dp, start = 20.dp, end = 20.dp, bottom = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(top = 48.dp, start = 20.dp, end = 20.dp, bottom = 12.dp)
     ) {
-        Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
                 text = "Notifications",
                 color = AppTheme.colors.textPrimary,
@@ -900,47 +1033,81 @@ private fun NotificationHeader(
                 fontWeight = FontWeight.Bold
             )
 
-            if (unreadCount > 0) {
-                Text(
-                    text = "$unreadCount unread",
-                    color = Color(0xFFFF9500),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+            // Compact Filter pill - highlighted when a non-All filter is active
+            val pillHighlighted = filterActive || filtersExpanded
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = if (filterActive) PurpleAccent else AppTheme.colors.surfaceStrong,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .clickable(onClick = onToggleFilters)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = "Filter notifications",
+                        tint = if (filterActive) Color.White else AppTheme.colors.textPrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "Filter",
+                        fontSize = 13.sp,
+                        fontWeight = if (pillHighlighted) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (filterActive) Color.White else AppTheme.colors.textPrimary
+                    )
+                }
             }
         }
 
-        Button(
-            onClick = onMarkAllRead,
-            enabled = unreadCount > 0,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF8E44AD).copy(alpha = 0.8f),
-                disabledContainerColor = Color(0xFF8E44AD).copy(alpha = 0.3f)
-            ),
-            shape = RoundedCornerShape(20.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-        ) {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Unread status row
+        if (unreadCount > 0) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Done,
-                    contentDescription = "Mark all read",
-                    modifier = Modifier.size(16.dp)
-                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = AmberAccent.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "$unreadCount unread",
+                        color = AmberAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
                 Text(
-                    text = "Mark All Read",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = "Mark all read",
+                    color = PurpleLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onMarkAllRead)
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
             }
+        } else {
+            Text(
+                text = "You're all caught up",
+                color = AppTheme.colors.textSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
         }
     }
 }
 
 /**
- * Notification filter tabs
+ * Notification filter chips (shown via the Filter pill's progressive disclosure)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -957,10 +1124,10 @@ private fun NotificationTabSelector(
         NotificationFilter.SYSTEM
     )
 
-    LazyRow(
+    androidx.compose.foundation.lazy.LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 24.dp),
+            .padding(bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 20.dp)
     ) {
@@ -982,11 +1149,11 @@ private fun NotificationTabSelector(
                         if (filter == NotificationFilter.UNREAD && unreadCount > 0) {
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFFFF9500)
+                                color = AmberAccent
                             ) {
                                 Text(
                                     text = unreadCount.toString(),
-                                    color = AppTheme.colors.textPrimary,
+                                    color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -996,7 +1163,7 @@ private fun NotificationTabSelector(
                     }
                 },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Color(0xFF8E44AD),
+                    selectedContainerColor = PurpleAccent,
                     selectedLabelColor = Color.White,
                     containerColor = Color(0xFF1E1E1E),
                     labelColor = AppTheme.colors.textSecondary

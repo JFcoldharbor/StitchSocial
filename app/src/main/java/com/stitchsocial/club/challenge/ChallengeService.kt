@@ -34,6 +34,13 @@ object ChallengeService {
         if (draft.scope == ChallengeScope.COMMUNITY && !draft.communityID.isNullOrEmpty()) {
             map["communityID"] = draft.communityID!!
         }
+        // Anti-farm gates — enforced by the server-side entry/qualification
+        // functions (already live); the client just records the creator's config.
+        map["eligibility"] = mapOf(
+            "verifiedOnly" to draft.verifiedOnly,
+            "uniqueHypers" to draft.uniqueHypers,
+            "minAccountAgeDays" to draft.minAccountAgeDays
+        )
 
         db.collection("videos").document(headVideoID)
             .update(mapOf("isChallenge" to true, "challenge" to map))
@@ -43,4 +50,34 @@ object ChallengeService {
             println("🎯 CHALLENGE: attached to $headVideoID (#${draft.normalizedHashtag}, ${draft.winnerCount} winner(s), scope ${draft.scope.raw})")
         }
     }
+
+    /** Winning entries of a completed challenge — videos on the challenge thread the
+     *  server draw marked "won". Read-only; drives GiveawayResultsView winner cards. */
+    suspend fun fetchWinners(headVideoID: String): List<ChallengeWinner> {
+        return try {
+            db.collection("videos")
+                .whereEqualTo("challengeThreadID", headVideoID)
+                .whereEqualTo("challengeStatus", ChallengeEntryStatus.WON.raw)
+                .get().await().documents.mapNotNull { doc ->
+                    val data = doc.data ?: return@mapNotNull null
+                    ChallengeWinner(
+                        videoID = doc.id,
+                        creatorID = data["creatorID"] as? String ?: "",
+                        creatorName = data["creatorName"] as? String ?: "someone",
+                        thumbnailURL = data["thumbnailURL"] as? String ?: ""
+                    )
+                }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("🎯 CHALLENGE: winners fetch failed: ${e.message}") }
+            emptyList()
+        }
+    }
 }
+
+/** Lightweight winner-card model for GiveawayResultsView. */
+data class ChallengeWinner(
+    val videoID: String,
+    val creatorID: String,
+    val creatorName: String,
+    val thumbnailURL: String
+)

@@ -1173,6 +1173,10 @@ private fun ProfileHeader(
     onFollowToggle: () -> Unit = {},
     onShowBadgePage: () -> Unit = {}
 ) {
+    // Creator Rank sheet — opened by tapping the tier-colored verification
+    // check (tier-as-verification; deliberately no separate rank pill).
+    var showRankSheet by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1217,7 +1221,14 @@ private fun ProfileHeader(
                     if (user.isBusiness) {
                         Icon(Icons.Default.Verified, "Business", tint = StitchColors.tierBusiness, modifier = Modifier.size(16.dp))
                     } else if (user.tier != UserTier.ROOKIE || user.isVerified) {
-                        Icon(Icons.Default.Verified, "Verified", tint = user.tier.color, modifier = Modifier.size(16.dp))
+                        // Tapping the check opens the Creator Rank sheet (iOS parity).
+                        Icon(
+                            Icons.Default.Verified, "Verified",
+                            tint = user.tier.color,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { showRankSheet = true }
+                        )
                     }
                 }
 
@@ -1252,6 +1263,15 @@ private fun ProfileHeader(
             targetUsername = user.username
         )
 
+    }
+
+    if (showRankSheet) {
+        RankSheetView(
+            user = user,
+            followerCount = user.followerCount,
+            isOwnProfile = isOwnProfile,
+            onDismiss = { showRankSheet = false }
+        )
     }
 }
 

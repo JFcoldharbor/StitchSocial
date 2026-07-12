@@ -129,6 +129,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
 
+    // WorkManager — one-shot local event reminders (EventReminderWorker); no manifest receiver needed
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-auth")

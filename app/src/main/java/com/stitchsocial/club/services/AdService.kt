@@ -27,15 +27,21 @@ import com.stitchsocial.club.BuildConfig
 // ============================================================================
 
 object AdRevenueShare {
+    // Canonical split — mirrors iOS Ads/AdRevenueShare.swift. ALL personal
+    // tiers earn ad revenue; share scales with tier. Business accounts pay
+    // into the pool and earn nothing.
     fun creatorShare(tier: UserTier): Double = when (tier) {
-        UserTier.INFLUENCER -> 0.25
-        UserTier.AMBASSADOR -> 0.28
-        UserTier.ELITE -> 0.32
-        UserTier.PARTNER -> 0.35
-        UserTier.LEGENDARY -> 0.38
-        UserTier.TOP_CREATOR -> 0.40
-        UserTier.FOUNDER, UserTier.CO_FOUNDER -> 0.50
-        else -> 0.0 // Below influencer = no ads
+        UserTier.ROOKIE -> 0.10
+        UserTier.RISING -> 0.12
+        UserTier.VETERAN -> 0.15
+        UserTier.INFLUENCER -> 0.20
+        UserTier.AMBASSADOR -> 0.35
+        UserTier.ELITE -> 0.45
+        UserTier.PARTNER -> 0.50
+        UserTier.LEGENDARY -> 0.55
+        UserTier.TOP_CREATOR -> 0.65
+        UserTier.FOUNDER, UserTier.CO_FOUNDER -> 0.65
+        else -> 0.0 // business accounts advertise, they don't earn
     }
 
     fun platformShare(tier: UserTier): Double = 1.0 - creatorShare(tier)

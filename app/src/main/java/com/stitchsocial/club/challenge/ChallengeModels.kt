@@ -46,7 +46,10 @@ data class Challenge(
     val state: ChallengeState,
     val entryCount: Int,
     val qualifierCount: Int,
-    val drawSeed: String?
+    val drawSeed: String?,
+    // Written by the server draw when state flips to completed (iOS parity).
+    val winnerVideoIDs: List<String> = emptyList(),
+    val winnerUserIDs: List<String> = emptyList()
 ) {
     val isActive: Boolean get() = state == ChallengeState.ACTIVE && deadline.after(Date())
     val timeRemainingMs: Long get() = (deadline.time - System.currentTimeMillis()).coerceAtLeast(0L)
@@ -65,7 +68,12 @@ data class ChallengeDraft(
     val metric: ChallengeMetric = ChallengeMetric.HYPES,
     val threshold: Int = 100,
     val winnerCount: Int = 1,
-    val deadline: Date = Date(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
+    val deadline: Date = Date(System.currentTimeMillis() + 7L * 24 * 3600 * 1000),
+    // Anti-farm eligibility (enforced server-side at entry/qualification time;
+    // the client only writes the creator's chosen gates). iOS parity.
+    val verifiedOnly: Boolean = false,
+    val uniqueHypers: Boolean = false,
+    val minAccountAgeDays: Int = 0    // 0 = off
 ) {
     val normalizedHashtag: String get() {
         var h = hashtag.trim()

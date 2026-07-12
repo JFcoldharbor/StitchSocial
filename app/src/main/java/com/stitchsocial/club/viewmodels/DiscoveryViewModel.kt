@@ -132,11 +132,14 @@ class DiscoveryViewModel(
 
     /** discoverabilityScore + active boost magnitude, times affinity multiplier.
      *  Affinity is 0 until a WatchTelemetry service lands (new-user behavior),
-     *  so the feed stays wide-open and the boost loads the dice. */
+     *  so the feed stays wide-open and the boost loads the dice.
+     *  Active challenge/giveaway heads get a flat +0.15 (iOS parity) so open
+     *  contests surface more while entries are still possible. */
     private fun discoveryWeight(v: CoreVideoMetadata): Double {
         val boost = BoostCalculator.activeMagnitude(v.boostCoins, v.boostExpiresAt, v.freeBoostExpiresAt)
+        val challengeBoost = if (v.isChallengeActive) 0.15 else 0.0
         val affinity = 0.0
-        return (v.discoverabilityScore + boost) * (1.0 + affinity * 0.5)
+        return (v.discoverabilityScore + boost + challengeBoost) * (1.0 + affinity * 0.5)
     }
 
     /**

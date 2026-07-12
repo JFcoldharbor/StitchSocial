@@ -120,6 +120,7 @@ enum class DiscoveryCategory(
     val icon: ImageVector
 ) {
     ALL("All", Icons.Default.Apps),
+    EVENTS("Events", Icons.Default.CalendarMonth),
     COMMUNITIES("Communities", Icons.Default.Groups),
     COLLECTIONS("Collections", Icons.Default.VideoLibrary),
     TRENDING("Trending", Icons.Default.LocalFireDepartment),
@@ -409,10 +410,18 @@ class DiscoveryViewModel(
     fun filterBy(category: DiscoveryCategory) {
         _currentCategory.value = category
 
+        // EVENTS is a server-backed feed (single-field eventStartAt query), not a
+        // slice of the loaded catalog — load it async and set the list directly.
+        if (category == DiscoveryCategory.EVENTS) {
+            loadUpcomingEvents()
+            return
+        }
+
         val allVideos = _videos.value
 
         val filtered = when (category) {
             DiscoveryCategory.ALL -> allVideos
+            DiscoveryCategory.EVENTS -> allVideos // unreachable — handled above
             DiscoveryCategory.COMMUNITIES -> emptyList() // Handled by CommunityListView
             DiscoveryCategory.TRENDING -> allVideos.filter {
                 it.temperature == Temperature.HOT || it.temperature == Temperature.BLAZING
@@ -426,6 +435,24 @@ class DiscoveryViewModel(
         _filteredVideos.value = injectSponsoredCards(diversifyShuffle(filtered))
 
         if (BuildConfig.DEBUG) { println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos") }
+    }
+
+    /** Load upcoming + live event heads into the feed (soonest first, no shuffle,
+     *  no sponsored injection — events stay chronological). */
+    private fun loadUpcomingEvents() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val events = com.stitchsocial.club.events.EventService.getUpcomingEvents(40)
+                _filteredVideos.value = events
+                if (BuildConfig.DEBUG) { println("EVENT: Discovery Events tab — ${events.size} upcoming/live") }
+            } catch (e: Exception) {
+                _filteredVideos.value = emptyList()
+                if (BuildConfig.DEBUG) { println("EVENT: Discovery Events load failed — ${e.message}") }
+            } finally {
+                _isLoading.value = false
+            }
+        }
     }
 
     // MARK: - Filtering and Shuffling

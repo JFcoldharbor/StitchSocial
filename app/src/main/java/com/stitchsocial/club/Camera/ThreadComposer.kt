@@ -74,6 +74,14 @@ import com.stitchsocial.club.challenge.ChallengeDraft
 import com.stitchsocial.club.challenge.ChallengeScope
 import com.stitchsocial.club.challenge.ChallengeMetric
 import com.stitchsocial.club.challenge.ChallengeService
+import com.stitchsocial.club.models.AnnouncementPriority
+import com.stitchsocial.club.models.AnnouncementType
+import com.stitchsocial.club.models.AnnouncementRepeatMode
+import com.stitchsocial.club.events.EventDraft
+import com.stitchsocial.club.events.EventService
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import java.util.Date
 
 // Constants
 private const val MAX_TAGGED_USERS = 5
@@ -109,18 +117,43 @@ fun ThreadComposer(
     var taggedUserIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     var hashtagInput by remember { mutableStateOf("") }
-    var isPosting by remember { mutableStateOf(false) }
     var showTagSheet by remember { mutableStateOf(false) }
     var showDiscardAlert by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
+
+    // MODEL C composer: ONE base screen — a plain post is as fast as today.
+    // Giveaway / Announcement launch focused bottom sheets from the "Add to
+    // post" rows and attach back as editable cards, so the heavy config never
+    // bloats the base scroll (iOS ThreadComposer parity).
 
     // Challenge / Giveaway config — only meaningful for a brand-new thread head
     // (a challenge can't be a reply/stitch/continuation/spin-off).
     val isNewThread = recordingContext is RecordingContext.NewThread
     var isChallenge by remember { mutableStateOf(false) }
     var challengeDraft by remember { mutableStateOf(ChallengeDraft()) }
-    // Post is blocked while a challenge is toggled on but not fully configured.
-    val canPost = title.isNotBlank() && !(isChallenge && !challengeDraft.isValid)
+    var showGiveawaySheet by remember { mutableStateOf(false) }
+
+    // Event add-on — only meaningful for a brand-new thread head (an event
+    // lives on the thread-HEAD video, never a reply/stitch/continuation).
+    var isEvent by remember { mutableStateOf(false) }
+    var eventDraft by remember { mutableStateOf(EventDraft()) }
+    var showEventSheet by remember { mutableStateOf(false) }
+
+    // Announcement add-on — admin-gated (same allowlist as AnnouncementService).
+    val capturedUserEmail = remember {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email ?: ""
+    }
+    val canCreateAnnouncement = remember(capturedUserEmail) {
+        com.stitchsocial.club.services.AnnouncementVideoHelper.canCreateAnnouncement(capturedUserEmail)
+    }
+    var isAnnouncement by remember { mutableStateOf(false) }
+    var announcementDraft by remember { mutableStateOf(AnnouncementDraft()) }
+    var showAnnouncementSheet by remember { mutableStateOf(false) }
+
+    // Post is blocked while a challenge or event is attached but not fully configured.
+    val canPost = title.isNotBlank() &&
+        !(isChallenge && !challengeDraft.isValid) &&
+        !(isEvent && !eventDraft.isValid)
 
     // Video player
     val exoPlayer = remember {
@@ -165,13 +198,20 @@ fun ThreadComposer(
                     }
                 },
                 actions = {
-                    TextButton(
+                    Button(
                         onClick = {
-                            // Snapshot the challenge config before dismissal so
+                            // Snapshot the add-on configs before dismissal so
                             // the background completion callback attaches the
-                            // right draft even after this composable is gone.
+                            // right drafts even after this composable is gone.
                             val attachChallengeConfig = isChallenge && isNewThread
                             val draftToAttach = challengeDraft
+                            val attachAnnouncementConfig = isAnnouncement && canCreateAnnouncement
+                            val announcementToAttach = announcementDraft
+                            val attachEventConfig = isEvent && isNewThread && eventDraft.isValid
+                            val eventToAttach = eventDraft
+                            val announcementTitle = title.trim()
+                            val announcementMessage = description.trim()
+                            val creatorEmailSnapshot = capturedUserEmail
                             // Hand off to BackgroundPostManager (app-scoped
                             // coroutine) so the upload survives this composable
                             // being dismissed. Mirror's iOS ThreadComposer:
@@ -195,6 +235,48 @@ fun ThreadComposer(
                                             }.onFailure { e ->
                                                 if (BuildConfig.DEBUG) {
                                                     println("COMPOSER: attachChallenge failed: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Attach the Event config onto the real
+                                    // head-video id once the post lands. Only for
+                                    // a new thread head — guard on isThread too.
+                                    if (attachEventConfig && createdVideo.isThread) {
+                                        kotlinx.coroutines.GlobalScope.launch {
+                                            runCatching {
+                                                EventService.attachEvent(createdVideo.id, eventToAttach)
+                                            }.onFailure { e ->
+                                                if (BuildConfig.DEBUG) {
+                                                    println("COMPOSER: attachEvent failed: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Attach the Announcement config (admin-gated)
+                                    // onto the real video id once the post lands.
+                                    if (attachAnnouncementConfig) {
+                                        kotlinx.coroutines.GlobalScope.launch {
+                                            runCatching {
+                                                com.stitchsocial.club.services.AnnouncementService.shared.createAnnouncement(
+                                                    videoId = createdVideo.id,
+                                                    creatorEmail = creatorEmailSnapshot,
+                                                    creatorId = createdVideo.creatorID,
+                                                    title = announcementTitle,
+                                                    message = announcementMessage.ifBlank { null },
+                                                    priority = announcementToAttach.priority,
+                                                    type = announcementToAttach.type,
+                                                    startDate = announcementToAttach.startDate,
+                                                    endDate = if (announcementToAttach.hasEndDate) announcementToAttach.endDate else null,
+                                                    minimumWatchSeconds = announcementToAttach.minimumWatchSeconds,
+                                                    repeatMode = announcementToAttach.repeatMode,
+                                                    maxDailyShows = announcementToAttach.maxDailyShows,
+                                                    minHoursBetweenShows = announcementToAttach.minHoursBetweenShows,
+                                                    maxTotalShows = if (announcementToAttach.hasMaxTotalShows) announcementToAttach.maxTotalShows else null
+                                                )
+                                            }.onFailure { e ->
+                                                if (BuildConfig.DEBUG) {
+                                                    println("COMPOSER: createAnnouncement failed: ${e.message}")
                                                 }
                                             }
                                         }
@@ -226,21 +308,18 @@ fun ThreadComposer(
                             // back on the feed while the upload runs.
                             onVideoCreated()
                         },
-                        enabled = canPost
+                        enabled = canPost,
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFE91E63),          // brand magenta capsule
+                            contentColor = Color.White,
+                            disabledContainerColor = Color.Gray.copy(alpha = 0.4f),
+                            disabledContentColor = Color.White.copy(alpha = 0.7f)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        if (false) {  // isPosting spinner removed — progress lives on tab-bar create button now
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color(0xFF00BCD4),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Text(
-                                "Post",
-                                color = if (canPost) Color(0xFF00BCD4) else Color.Gray,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text("Post", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
@@ -331,15 +410,42 @@ fun ThreadComposer(
                     }
                 )
 
-                // Challenge / Giveaway — only for a brand-new thread head.
-                if (isNewThread) {
-                    ChallengeComposerSection(
-                        isChallenge = isChallenge,
-                        draft = challengeDraft,
-                        onToggle = { isChallenge = it },
-                        onDraftChange = { challengeDraft = it }
-                    )
-                }
+                // "Add to post" — compact launcher rows; each opens a focused
+                // config sheet. A row disappears once its add-on is attached.
+                AddToPostSection(
+                    showGiveawayRow = isNewThread && !isChallenge,
+                    showEventRow = isNewThread && !isEvent,
+                    showAnnouncementRow = canCreateAnnouncement && !isAnnouncement,
+                    onAddGiveaway = {
+                        isChallenge = true
+                        showGiveawaySheet = true
+                    },
+                    onAddEvent = {
+                        isEvent = true
+                        showEventSheet = true
+                    },
+                    onAddAnnouncement = {
+                        isAnnouncement = true
+                        showAnnouncementSheet = true
+                    }
+                )
+
+                // "Added" — attached add-ons as editable/removable cards with
+                // inline finish-setup warnings (replaces bottom-of-scroll hints).
+                AddedSection(
+                    isChallenge = isChallenge,
+                    challengeDraft = challengeDraft,
+                    onEditGiveaway = { showGiveawaySheet = true },
+                    onRemoveGiveaway = { isChallenge = false },
+                    isEvent = isEvent,
+                    eventDraft = eventDraft,
+                    onEditEvent = { showEventSheet = true },
+                    onRemoveEvent = { isEvent = false },
+                    isAnnouncement = isAnnouncement,
+                    announcementDraft = announcementDraft,
+                    onEditAnnouncement = { showAnnouncementSheet = true },
+                    onRemoveAnnouncement = { isAnnouncement = false }
+                )
 
                 // AI Analysis Badge
                 if (aiResult != null) {
@@ -390,6 +496,51 @@ fun ThreadComposer(
                     onDismiss = { showTagSheet = false },
                     alreadyTaggedIDs = emptyList(),
                     initiallySelectedIDs = taggedUserIds
+                )
+            }
+        }
+
+        // Giveaway config sheet (Model C: config lives here, not in the base scroll)
+        if (showGiveawaySheet) {
+            AddOnSheet(
+                title = "Giveaway",
+                icon = Icons.Filled.EmojiEvents,
+                tint = GIVEAWAY_TINT,
+                onDone = { showGiveawaySheet = false }
+            ) {
+                ChallengeConfigSection(
+                    draft = challengeDraft,
+                    onDraftChange = { challengeDraft = it }
+                )
+            }
+        }
+
+        // Event config sheet (Model C: config lives here, not in the base scroll)
+        if (showEventSheet) {
+            AddOnSheet(
+                title = "Event",
+                icon = Icons.Filled.Event,
+                tint = EVENT_TINT,
+                onDone = { showEventSheet = false }
+            ) {
+                EventConfigSection(
+                    draft = eventDraft,
+                    onDraftChange = { eventDraft = it }
+                )
+            }
+        }
+
+        // Announcement config sheet (admin-gated)
+        if (showAnnouncementSheet) {
+            AddOnSheet(
+                title = "Announcement",
+                icon = Icons.Filled.Campaign,
+                tint = ANNOUNCEMENT_TINT,
+                onDone = { showAnnouncementSheet = false }
+            ) {
+                AnnouncementConfigSection(
+                    draft = announcementDraft,
+                    onDraftChange = { announcementDraft = it }
                 )
             }
         }
@@ -1127,217 +1278,924 @@ private fun AIAnalysisBadge() {
 }
 
 // ============================================================================
-// MARK: - Challenge / Giveaway Section
+// MARK: - Add to Post (Model C launcher rows)
+// ============================================================================
+
+/** Add-on accent tints (iOS Model C parity: giveaway = yellow, event = orange, announcement = purple). */
+private val GIVEAWAY_TINT = Color(0xFFFFC107)
+private val EVENT_TINT = Color(0xFFFF9800)
+private val ANNOUNCEMENT_TINT = Color(0xFFAB47BC)
+
+@Composable
+private fun AddToPostSection(
+    showGiveawayRow: Boolean,
+    showEventRow: Boolean,
+    showAnnouncementRow: Boolean,
+    onAddGiveaway: () -> Unit,
+    onAddEvent: () -> Unit,
+    onAddAnnouncement: () -> Unit
+) {
+    if (!showGiveawayRow && !showEventRow && !showAnnouncementRow) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Add to post",
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp
+        )
+
+        if (showGiveawayRow) {
+            AddOnLauncherRow(
+                icon = Icons.Filled.EmojiEvents,
+                tint = GIVEAWAY_TINT,
+                title = "Giveaway",
+                subtitle = "Run a prize draw",
+                onClick = onAddGiveaway
+            )
+        }
+
+        if (showEventRow) {
+            AddOnLauncherRow(
+                icon = Icons.Filled.Event,
+                tint = EVENT_TINT,
+                title = "Event",
+                subtitle = "Date, venue & RSVP",
+                onClick = onAddEvent
+            )
+        }
+
+        if (showAnnouncementRow) {
+            AddOnLauncherRow(
+                icon = Icons.Filled.Campaign,
+                tint = ANNOUNCEMENT_TINT,
+                title = "Announcement",
+                subtitle = "Pin & schedule",
+                onClick = onAddAnnouncement
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddOnLauncherRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1E1E1E))
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(subtitle, color = Color.Gray, fontSize = 12.sp)
+        }
+        Icon(
+            Icons.Filled.AddCircle,
+            contentDescription = "Add $title",
+            tint = Color.Gray,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+// ============================================================================
+// MARK: - Added (attached add-on cards + inline finish-setup warnings)
+// ============================================================================
+
+@Composable
+private fun AddedSection(
+    isChallenge: Boolean,
+    challengeDraft: ChallengeDraft,
+    onEditGiveaway: () -> Unit,
+    onRemoveGiveaway: () -> Unit,
+    isEvent: Boolean,
+    eventDraft: EventDraft,
+    onEditEvent: () -> Unit,
+    onRemoveEvent: () -> Unit,
+    isAnnouncement: Boolean,
+    announcementDraft: AnnouncementDraft,
+    onEditAnnouncement: () -> Unit,
+    onRemoveAnnouncement: () -> Unit
+) {
+    if (!isChallenge && !isEvent && !isAnnouncement) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Added",
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp
+        )
+
+        if (isChallenge) {
+            val winners = if (challengeDraft.winnerCount == 1) "1 winner"
+                          else "${challengeDraft.winnerCount} winners"
+            AddedAddOnCard(
+                icon = Icons.Filled.EmojiEvents,
+                tint = GIVEAWAY_TINT,
+                summary = if (challengeDraft.prize.isBlank()) "🏆 Giveaway"
+                          else "🏆 ${challengeDraft.prize} · $winners",
+                warning = if (challengeDraft.isValid) null
+                          else "Needs: ${challengeDraft.missingFields.joinToString(", ")}",
+                onEdit = onEditGiveaway,
+                onRemove = onRemoveGiveaway
+            )
+        }
+
+        if (isEvent) {
+            val eventParts = listOf(eventDraft.name, eventDraft.city).filter { it.isNotBlank() }
+            AddedAddOnCard(
+                icon = Icons.Filled.Event,
+                tint = EVENT_TINT,
+                summary = if (eventParts.isEmpty()) "📅 Event"
+                          else "📅 ${eventParts.joinToString(" · ")}",
+                warning = if (eventDraft.isValid) null
+                          else "Needs: ${eventDraft.missingFields.joinToString(", ")}",
+                onEdit = onEditEvent,
+                onRemove = onRemoveEvent
+            )
+        }
+
+        if (isAnnouncement) {
+            AddedAddOnCard(
+                icon = Icons.Filled.Campaign,
+                tint = ANNOUNCEMENT_TINT,
+                summary = "📣 ${announcementDraft.type.displayName} · ${announcementDraft.priority.displayName}",
+                warning = null,
+                onEdit = onEditAnnouncement,
+                onRemove = onRemoveAnnouncement
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddedAddOnCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    summary: String,
+    warning: String?,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(tint.copy(alpha = 0.08f))
+            .border(1.dp, tint.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+            Text(
+                summary,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "Edit",
+                color = Color(0xFF00BCD4),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable { onEdit() }
+            )
+            Icon(
+                Icons.Filled.Cancel,
+                contentDescription = "Remove",
+                tint = Color.Gray,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable { onRemove() }
+            )
+        }
+        if (warning != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFFF9800),
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(warning, color = Color(0xFFFF9800), fontSize = 12.sp, maxLines = 2)
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Add-on sheet chrome (hosts the config sections + Done button)
 // ============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChallengeComposerSection(
-    isChallenge: Boolean,
-    draft: ChallengeDraft,
-    onToggle: (Boolean) -> Unit,
-    onDraftChange: (ChallengeDraft) -> Unit
+private fun AddOnSheet(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    onDone: () -> Unit,
+    content: @Composable () -> Unit
 ) {
-    val accent = Color(0xFF00BCD4)
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    val deadlineFormat = remember {
-        java.text.SimpleDateFormat("MMM d, yyyy · h:mm a", java.util.Locale.getDefault())
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Toggle header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDone,
+        sheetState = sheetState,
+        containerColor = Color(0xFF121212)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                content()
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onDone,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = tint, contentColor = Color.White)
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Giveaway config (hosted in the add-on sheet)
+// ============================================================================
+
+@Composable
+private fun ChallengeConfigSection(
+    draft: ChallengeDraft,
+    onDraftChange: (ChallengeDraft) -> Unit
+) {
+    val accent = Color(0xFF00BCD4)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Prize
+        OutlinedTextField(
+            value = draft.prize,
+            onValueChange = { onDraftChange(draft.copy(prize = it)) },
+            label = { Text("Prize", color = Color.Gray) },
+            placeholder = { Text("e.g. \$100 gift card", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = accent,
+                unfocusedBorderColor = Color.Gray
+            ),
+            singleLine = true
+        )
+
+        // Entry hashtag (+ normalized preview)
+        OutlinedTextField(
+            value = draft.hashtag,
+            onValueChange = { onDraftChange(draft.copy(hashtag = it)) },
+            label = { Text("Entry hashtag", color = Color.Gray) },
+            placeholder = { Text("dancechallenge", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = accent,
+                unfocusedBorderColor = Color.Gray
+            ),
+            singleLine = true,
+            leadingIcon = { Text("#", color = accent, fontWeight = FontWeight.Bold) },
+            supportingText = {
+                if (draft.normalizedHashtag.isNotEmpty()) {
+                    Text(
+                        "Entries post with #${draft.normalizedHashtag}",
+                        color = accent,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        )
+
+        // Scope
+        Text("Who can enter", color = Color.Gray, fontSize = 13.sp)
+        ChallengeSegmented(
+            options = listOf(
+                "Anyone" to ChallengeScope.ANYONE,
+                "Followers" to ChallengeScope.FOLLOWERS,
+                "Community" to ChallengeScope.COMMUNITY
+            ),
+            selected = draft.scope,
+            accent = accent,
+            onSelect = { onDraftChange(draft.copy(scope = it)) }
+        )
+
+        // Metric
+        Text("Qualify by", color = Color.Gray, fontSize = 13.sp)
+        ChallengeSegmented(
+            options = listOf(
+                "Hypes" to ChallengeMetric.HYPES,
+                "Shares" to ChallengeMetric.SHARES
+            ),
+            selected = draft.metric,
+            accent = accent,
+            onSelect = { onDraftChange(draft.copy(metric = it)) }
+        )
+
+        // Threshold stepper
+        ChallengeStepper(
+            label = "Threshold to qualify",
+            value = "${draft.threshold} ${draft.metric.displayName}",
+            accent = accent,
+            onDecrement = {
+                onDraftChange(draft.copy(threshold = (draft.threshold - 10).coerceAtLeast(1)))
+            },
+            onIncrement = { onDraftChange(draft.copy(threshold = draft.threshold + 10)) }
+        )
+
+        // Winners stepper
+        ChallengeStepper(
+            label = "Winners",
+            value = if (draft.winnerCount == 1) "1 winner" else "${draft.winnerCount} winners",
+            accent = accent,
+            onDecrement = {
+                onDraftChange(draft.copy(winnerCount = (draft.winnerCount - 1).coerceAtLeast(1)))
+            },
+            onIncrement = { onDraftChange(draft.copy(winnerCount = draft.winnerCount + 1)) }
+        )
+
+        // Deadline (date + time)
+        DateTimeEditRow(
+            label = "Deadline",
+            value = draft.deadline,
+            accent = accent,
+            onChange = { onDraftChange(draft.copy(deadline = it)) }
+        )
+
+        // Anti-farm eligibility (enforced server-side at entry/qualification
+        // time — already live; the client just records the creator's gates)
+        AntiFarmEligibilityBlock(draft = draft, onDraftChange = onDraftChange)
+
+        // Finish-setup hint (drives the disabled Post button)
+        if (!draft.isValid) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Icon(
-                    Icons.Filled.EmojiEvents,
+                    Icons.Filled.Info,
                     contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(20.dp)
+                    tint = Color(0xFFFF9800),
+                    modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    "Challenge / Giveaway",
-                    color = Color.White,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp
+                    "Finish setup: ${draft.missingFields.joinToString(", ")}",
+                    color = Color(0xFFFF9800),
+                    fontSize = 12.sp
                 )
             }
-            Switch(
-                checked = isChallenge,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = accent,
-                    uncheckedThumbColor = Color.Gray,
-                    uncheckedTrackColor = Color(0xFF2A2A2A)
-                )
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Anti-farm eligibility (giveaway sheet)
+// ============================================================================
+
+@Composable
+private fun AntiFarmEligibilityBlock(
+    draft: ChallengeDraft,
+    onDraftChange: (ChallengeDraft) -> Unit
+) {
+    val green = Color(0xFF4CAF50)
+    var ageMenuExpanded by remember { mutableStateOf(false) }
+    val switchColors = SwitchDefaults.colors(
+        checkedThumbColor = Color.White,
+        checkedTrackColor = green,
+        uncheckedThumbColor = Color.Gray,
+        uncheckedTrackColor = Color(0xFF2A2A2A)
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(green.copy(alpha = 0.06f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                Icons.Filled.Shield,
+                contentDescription = null,
+                tint = green,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                "Anti-farm eligibility",
+                color = Color.Gray,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
             )
         }
 
-        AnimatedVisibility(visible = isChallenge) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Prize
-                OutlinedTextField(
-                    value = draft.prize,
-                    onValueChange = { onDraftChange(draft.copy(prize = it)) },
-                    label = { Text("Prize", color = Color.Gray) },
-                    placeholder = { Text("e.g. \$100 gift card", color = Color.Gray.copy(alpha = 0.5f)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = accent,
-                        unfocusedBorderColor = Color.Gray
-                    ),
-                    singleLine = true
-                )
+        // Always-on: the draw is one ticket per person, not per video.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Filled.HowToReg,
+                contentDescription = null,
+                tint = green,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                "One entry per person",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "ALWAYS ON",
+                color = green,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(green.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
 
-                // Entry hashtag (+ normalized preview)
-                OutlinedTextField(
-                    value = draft.hashtag,
-                    onValueChange = { onDraftChange(draft.copy(hashtag = it)) },
-                    label = { Text("Entry hashtag", color = Color.Gray) },
-                    placeholder = { Text("dancechallenge", color = Color.Gray.copy(alpha = 0.5f)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = accent,
-                        unfocusedBorderColor = Color.Gray
-                    ),
-                    singleLine = true,
-                    leadingIcon = { Text("#", color = accent, fontWeight = FontWeight.Bold) },
-                    supportingText = {
-                        if (draft.normalizedHashtag.isNotEmpty()) {
-                            Text(
-                                "Entries post with #${draft.normalizedHashtag}",
-                                color = accent,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Count unique hypers", color = Color.White, fontSize = 14.sp)
+                Text(
+                    "Qualify on distinct accounts, not raw taps",
+                    color = Color.Gray,
+                    fontSize = 11.sp
                 )
+            }
+            Switch(
+                checked = draft.uniqueHypers,
+                onCheckedChange = { onDraftChange(draft.copy(uniqueHypers = it)) },
+                colors = switchColors
+            )
+        }
 
-                // Scope
-                Text("Who can enter", color = Color.Gray, fontSize = 13.sp)
-                ChallengeSegmented(
-                    options = listOf(
-                        "Anyone" to ChallengeScope.ANYONE,
-                        "Followers" to ChallengeScope.FOLLOWERS,
-                        "Community" to ChallengeScope.COMMUNITY
-                    ),
-                    selected = draft.scope,
-                    accent = accent,
-                    onSelect = { onDraftChange(draft.copy(scope = it)) }
-                )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Verified accounts only",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = draft.verifiedOnly,
+                onCheckedChange = { onDraftChange(draft.copy(verifiedOnly = it)) },
+                colors = switchColors
+            )
+        }
 
-                // Metric
-                Text("Qualify by", color = Color.Gray, fontSize = 13.sp)
-                ChallengeSegmented(
-                    options = listOf(
-                        "Hypes" to ChallengeMetric.HYPES,
-                        "Shares" to ChallengeMetric.SHARES
-                    ),
-                    selected = draft.metric,
-                    accent = accent,
-                    onSelect = { onDraftChange(draft.copy(metric = it)) }
-                )
-
-                // Threshold stepper
-                ChallengeStepper(
-                    label = "Threshold to qualify",
-                    value = "${draft.threshold} ${draft.metric.displayName}",
-                    accent = accent,
-                    onDecrement = {
-                        onDraftChange(draft.copy(threshold = (draft.threshold - 10).coerceAtLeast(1)))
-                    },
-                    onIncrement = { onDraftChange(draft.copy(threshold = draft.threshold + 10)) }
-                )
-
-                // Winners stepper
-                ChallengeStepper(
-                    label = "Winners",
-                    value = if (draft.winnerCount == 1) "1 winner" else "${draft.winnerCount} winners",
-                    accent = accent,
-                    onDecrement = {
-                        onDraftChange(draft.copy(winnerCount = (draft.winnerCount - 1).coerceAtLeast(1)))
-                    },
-                    onIncrement = { onDraftChange(draft.copy(winnerCount = draft.winnerCount + 1)) }
-                )
-
-                // Deadline (date + time)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Min account age",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Box {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(green.copy(alpha = 0.15f))
+                        .clickable { ageMenuExpanded = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Deadline", color = Color.Gray, fontSize = 13.sp)
-                        Text(
-                            deadlineFormat.format(draft.deadline),
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
+                    Text(
+                        if (draft.minAccountAgeDays == 0) "Off" else "${draft.minAccountAgeDays} days",
+                        color = green,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        tint = green,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                DropdownMenu(
+                    expanded = ageMenuExpanded,
+                    onDismissRequest = { ageMenuExpanded = false }
+                ) {
+                    listOf(0, 7, 30, 90).forEach { days ->
+                        DropdownMenuItem(
+                            text = { Text(if (days == 0) "Off" else "$days days") },
+                            onClick = {
+                                onDraftChange(draft.copy(minAccountAgeDays = days))
+                                ageMenuExpanded = false
+                            }
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { showDatePicker = true },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp), tint = accent)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Date", color = accent, fontSize = 13.sp)
-                        }
-                        OutlinedButton(
-                            onClick = { showTimePicker = true },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(16.dp), tint = accent)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Time", color = accent, fontSize = 13.sp)
-                        }
-                    }
                 }
+            }
+        }
+    }
+}
 
-                // Finish-setup hint (drives the disabled Post button)
-                if (!draft.isValid) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.Info,
-                            contentDescription = null,
-                            tint = Color(0xFFFF9800),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            "Finish setup: ${draft.missingFields.joinToString(", ")}",
-                            color = Color(0xFFFF9800),
-                            fontSize = 12.sp
-                        )
-                    }
+// ============================================================================
+// MARK: - Event config (hosted in the add-on sheet)
+// ============================================================================
+
+@Composable
+private fun EventConfigSection(
+    draft: EventDraft,
+    onDraftChange: (EventDraft) -> Unit
+) {
+    val accent = EVENT_TINT
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White,
+        focusedBorderColor = accent,
+        unfocusedBorderColor = Color.Gray
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Event name
+        OutlinedTextField(
+            value = draft.name,
+            onValueChange = { onDraftChange(draft.copy(name = it)) },
+            label = { Text("Event name", color = Color.Gray) },
+            placeholder = { Text("e.g. Rooftop listening party", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors,
+            singleLine = true
+        )
+
+        // Venue
+        OutlinedTextField(
+            value = draft.venueName,
+            onValueChange = { onDraftChange(draft.copy(venueName = it)) },
+            label = { Text("Venue", color = Color.Gray) },
+            placeholder = { Text("e.g. The Loft", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors,
+            singleLine = true
+        )
+
+        // City
+        OutlinedTextField(
+            value = draft.city,
+            onValueChange = { onDraftChange(draft.copy(city = it)) },
+            label = { Text("City", color = Color.Gray) },
+            placeholder = { Text("e.g. Atlanta", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors,
+            singleLine = true
+        )
+
+        // RSVP link (optional)
+        OutlinedTextField(
+            value = draft.rsvpURL,
+            onValueChange = { onDraftChange(draft.copy(rsvpURL = it)) },
+            label = { Text("RSVP link (optional)", color = Color.Gray) },
+            placeholder = { Text("https://…", color = Color.Gray.copy(alpha = 0.5f)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+        )
+
+        // Starts (date + time; min = now — past picks clamp forward)
+        DateTimeEditRow(
+            label = "Starts",
+            value = draft.startAt,
+            accent = accent,
+            onChange = { picked ->
+                onDraftChange(draft.copy(startAt = if (picked.before(Date())) Date() else picked))
+            }
+        )
+
+        // Finish-setup hint (drives the disabled Post button)
+        if (!draft.isValid) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = null,
+                    tint = Color(0xFFFF9800),
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    "Finish setup: ${draft.missingFields.joinToString(", ")}",
+                    color = Color(0xFFFF9800),
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Announcement config (admin-gated; hosted in the add-on sheet)
+// ============================================================================
+
+/** View-layer state the announcement sheet collects; expanded into a real
+ *  announcement doc via AnnouncementService.createAnnouncement once the post
+ *  lands (same attach-after-upload pattern as the challenge). */
+private data class AnnouncementDraft(
+    val priority: AnnouncementPriority = AnnouncementPriority.STANDARD,
+    val type: AnnouncementType = AnnouncementType.UPDATE,
+    val minimumWatchSeconds: Int = 5,
+    val startDate: Date = Date(),
+    val hasEndDate: Boolean = false,
+    val endDate: Date = Date(System.currentTimeMillis() + 7L * 24 * 3600 * 1000),
+    val repeatMode: AnnouncementRepeatMode = AnnouncementRepeatMode.ONCE,
+    val maxDailyShows: Int = 1,
+    val minHoursBetweenShows: Double = 6.0,
+    val hasMaxTotalShows: Boolean = false,
+    val maxTotalShows: Int = 10
+)
+
+@Composable
+private fun AnnouncementConfigSection(
+    draft: AnnouncementDraft,
+    onDraftChange: (AnnouncementDraft) -> Unit
+) {
+    val accent = ANNOUNCEMENT_TINT
+    val switchColors = SwitchDefaults.colors(
+        checkedThumbColor = Color.White,
+        checkedTrackColor = accent,
+        uncheckedThumbColor = Color.Gray,
+        uncheckedTrackColor = Color(0xFF2A2A2A)
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "All users must view this at least once. Pin it to the app and schedule when (and how often) it shows.",
+            color = Color.Gray,
+            fontSize = 12.sp
+        )
+
+        AddOnDropdownRow(
+            label = "Priority",
+            options = AnnouncementPriority.entries.map { it.displayName to it },
+            selectedLabel = draft.priority.displayName,
+            tint = accent,
+            onSelect = { onDraftChange(draft.copy(priority = it)) }
+        )
+
+        AddOnDropdownRow(
+            label = "Type",
+            options = AnnouncementType.entries.map { it.displayName to it },
+            selectedLabel = draft.type.displayName,
+            tint = accent,
+            onSelect = { onDraftChange(draft.copy(type = it)) }
+        )
+
+        ChallengeStepper(
+            label = "Min watch time",
+            value = "${draft.minimumWatchSeconds}s",
+            accent = accent,
+            onDecrement = {
+                onDraftChange(draft.copy(minimumWatchSeconds = (draft.minimumWatchSeconds - 1).coerceAtLeast(3)))
+            },
+            onIncrement = {
+                onDraftChange(draft.copy(minimumWatchSeconds = (draft.minimumWatchSeconds + 1).coerceAtMost(30)))
+            }
+        )
+
+        DateTimeEditRow(
+            label = "Starts",
+            value = draft.startDate,
+            accent = accent,
+            onChange = { onDraftChange(draft.copy(startDate = it)) }
+        )
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Set end date", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked = draft.hasEndDate,
+                onCheckedChange = { onDraftChange(draft.copy(hasEndDate = it)) },
+                colors = switchColors
+            )
+        }
+        if (draft.hasEndDate) {
+            DateTimeEditRow(
+                label = "Ends",
+                value = draft.endDate,
+                accent = accent,
+                onChange = { onDraftChange(draft.copy(endDate = it)) }
+            )
+        }
+
+        AddOnDropdownRow(
+            label = "Repeat",
+            options = AnnouncementRepeatMode.entries.map { it.displayName to it },
+            selectedLabel = draft.repeatMode.displayName,
+            tint = accent,
+            onSelect = { onDraftChange(draft.copy(repeatMode = it)) }
+        )
+        Text(draft.repeatMode.description, color = Color.Gray, fontSize = 11.sp)
+
+        if (draft.repeatMode != AnnouncementRepeatMode.ONCE) {
+            ChallengeStepper(
+                label = "Max shows per day",
+                value = "${draft.maxDailyShows}x",
+                accent = accent,
+                onDecrement = {
+                    onDraftChange(draft.copy(maxDailyShows = (draft.maxDailyShows - 1).coerceAtLeast(1)))
+                },
+                onIncrement = {
+                    onDraftChange(draft.copy(maxDailyShows = (draft.maxDailyShows + 1).coerceAtMost(10)))
                 }
+            )
+            ChallengeStepper(
+                label = "Min hours between shows",
+                value = "${draft.minHoursBetweenShows.toInt()}h",
+                accent = accent,
+                onDecrement = {
+                    onDraftChange(draft.copy(minHoursBetweenShows = (draft.minHoursBetweenShows - 1.0).coerceAtLeast(1.0)))
+                },
+                onIncrement = {
+                    onDraftChange(draft.copy(minHoursBetweenShows = (draft.minHoursBetweenShows + 1.0).coerceAtMost(24.0)))
+                }
+            )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Lifetime cap", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = draft.hasMaxTotalShows,
+                    onCheckedChange = { onDraftChange(draft.copy(hasMaxTotalShows = it)) },
+                    colors = switchColors
+                )
+            }
+            if (draft.hasMaxTotalShows) {
+                ChallengeStepper(
+                    label = "Max total shows",
+                    value = "${draft.maxTotalShows}",
+                    accent = accent,
+                    onDecrement = {
+                        onDraftChange(draft.copy(maxTotalShows = (draft.maxTotalShows - 1).coerceAtLeast(2)))
+                    },
+                    onIncrement = {
+                        onDraftChange(draft.copy(maxTotalShows = (draft.maxTotalShows + 1).coerceAtMost(100)))
+                    }
+                )
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MARK: - Shared add-on sheet controls
+// ============================================================================
+
+@Composable
+private fun <T> AddOnDropdownRow(
+    label: String,
+    options: List<Pair<String, T>>,
+    selectedLabel: String,
+    tint: Color,
+    onSelect: (T) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Box {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tint.copy(alpha = 0.15f))
+                    .clickable { expanded = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(selectedLabel, color = tint, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (optionLabel, value) ->
+                    DropdownMenuItem(
+                        text = { Text(optionLabel) },
+                        onClick = {
+                            onSelect(value)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Label + formatted value with Date/Time buttons; hosts its own picker dialogs. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimeEditRow(
+    label: String,
+    value: Date,
+    accent: Color,
+    onChange: (Date) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    val format = remember {
+        java.text.SimpleDateFormat("MMM d, yyyy · h:mm a", java.util.Locale.getDefault())
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = Color.Gray, fontSize = 13.sp)
+            Text(
+                format.format(value),
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { showDatePicker = true },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
+                border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp), tint = accent)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Date", color = accent, fontSize = 13.sp)
+            }
+            OutlinedButton(
+                onClick = { showTimePicker = true },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
+                border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.5f)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(16.dp), tint = accent)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Time", color = accent, fontSize = 13.sp)
             }
         }
     }
 
     // Date picker dialog — updates the calendar day, preserving time-of-day.
     if (showDatePicker) {
-        val dateState = rememberDatePickerState(initialSelectedDateMillis = draft.deadline.time)
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = value.time)
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
@@ -1346,12 +2204,12 @@ private fun ChallengeComposerSection(
                         val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
                             .apply { timeInMillis = millis }
                         val cal = java.util.Calendar.getInstance().apply {
-                            time = draft.deadline
+                            time = value
                             set(java.util.Calendar.YEAR, utc.get(java.util.Calendar.YEAR))
                             set(java.util.Calendar.MONTH, utc.get(java.util.Calendar.MONTH))
                             set(java.util.Calendar.DAY_OF_MONTH, utc.get(java.util.Calendar.DAY_OF_MONTH))
                         }
-                        onDraftChange(draft.copy(deadline = cal.time))
+                        onChange(cal.time)
                     }
                     showDatePicker = false
                 }) { Text("OK", color = accent) }
@@ -1366,7 +2224,7 @@ private fun ChallengeComposerSection(
 
     // Time picker dialog — updates hour/minute, preserving the calendar day.
     if (showTimePicker) {
-        val cal = remember { java.util.Calendar.getInstance().apply { time = draft.deadline } }
+        val cal = remember(value) { java.util.Calendar.getInstance().apply { time = value } }
         val timeState = rememberTimePickerState(
             initialHour = cal.get(java.util.Calendar.HOUR_OF_DAY),
             initialMinute = cal.get(java.util.Calendar.MINUTE),
@@ -1377,11 +2235,11 @@ private fun ChallengeComposerSection(
             confirmButton = {
                 TextButton(onClick = {
                     val c = java.util.Calendar.getInstance().apply {
-                        time = draft.deadline
+                        time = value
                         set(java.util.Calendar.HOUR_OF_DAY, timeState.hour)
                         set(java.util.Calendar.MINUTE, timeState.minute)
                     }
-                    onDraftChange(draft.copy(deadline = c.time))
+                    onChange(c.time)
                     showTimePicker = false
                 }) { Text("OK", color = accent) }
             },
