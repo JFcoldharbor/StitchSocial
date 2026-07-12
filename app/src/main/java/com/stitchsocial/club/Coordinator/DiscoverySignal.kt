@@ -243,6 +243,10 @@ object DiscoveryEngagementTracker {
 
     fun cardBecameActive(videoID: String, creatorID: String) {
         finalizeCurrentCard(wasManualSwipe = false, wasAutoAdvance = true)
+        // GUARD: pseudo feed entries (sponsored ad slots) have empty creatorID.
+        // Never start tracking them — the persist path is .document(creatorID)
+        // and Firestore throws on .document("") (this crashed iOS).
+        if (creatorID.isBlank()) return
         currentCardStartTime = System.currentTimeMillis()
         currentCardVideoID = videoID
         currentCardCreatorID = creatorID
@@ -259,6 +263,9 @@ object DiscoveryEngagementTracker {
 
     fun cardTappedFullscreen(videoID: String, creatorID: String) {
         registerManualInteraction()
+        // GUARD: sponsored/pseudo cards (empty creatorID) generate no signals —
+        // persisting them would build users/{uid}/discoveryPreferences/"" and crash.
+        if (creatorID.isBlank()) return
         if (!sessionHasIntent) return
 
         var record = videoRecords[videoID] ?: VideoWatchRecord(videoID, creatorID)
@@ -331,6 +338,8 @@ object DiscoveryEngagementTracker {
 
     private fun processSignal(signal: DiscoverySignal) {
         val creatorID = signal.creatorID
+        // GUARD: empty creatorID must never reach the accumulator/persist path
+        if (creatorID.isBlank()) return
         var acc = creatorAccumulators[creatorID] ?: CreatorSignalAccumulator(creatorID)
 
         acc.applyDecay()
@@ -418,6 +427,9 @@ object DiscoveryEngagementTracker {
 
         val batch = db.batch()
         for (creatorID in toFlush) {
+            // FINAL GUARD: .document("") throws IllegalArgumentException — the exact
+            // crash sponsored pseudo-cards caused on iOS. Never build an empty path.
+            if (creatorID.isBlank()) continue
             val acc = creatorAccumulators[creatorID] ?: continue
             val ref = db.collection("users")
                 .document(userID)

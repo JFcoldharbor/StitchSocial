@@ -50,10 +50,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.platform.LocalContext
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.foundation.CoreVideoMetadata
+import com.stitchsocial.club.foundation.SponsoredSlot
 import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.foundation.CollectionContentType
 import com.stitchsocial.club.foundation.Temperature
@@ -77,6 +79,8 @@ fun DiscoverySwipeCards(
     isAnnouncementShowing: Boolean = false,
     isFullscreenActive: Boolean = false,
     collectionCardMap: Map<String, VideoCollection> = emptyMap(),
+    sponsoredSlotMap: Map<String, SponsoredSlot> = emptyMap(),
+    onSponsoredCta: (SponsoredSlot) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (videos.isEmpty()) {
@@ -210,7 +214,9 @@ fun DiscoverySwipeCards(
                     onVideoLoop = { },
                     isAnnouncementShowing = isAnnouncementShowing,
                     isFullscreenActive = isFullscreenActive,
-                    collectionCardMap = collectionCardMap
+                    collectionCardMap = collectionCardMap,
+                    sponsoredSlotMap = sponsoredSlotMap,
+                    onSponsoredCta = onSponsoredCta
                 )
             }
         }
@@ -230,7 +236,9 @@ fun DiscoverySwipeCards(
                     onVideoLoop = { },
                     isAnnouncementShowing = isAnnouncementShowing,
                     isFullscreenActive = isFullscreenActive,
-                    collectionCardMap = collectionCardMap
+                    collectionCardMap = collectionCardMap,
+                    sponsoredSlotMap = sponsoredSlotMap,
+                    onSponsoredCta = onSponsoredCta
                 )
             }
         }
@@ -258,10 +266,17 @@ fun DiscoverySwipeCards(
                                     if (currentTime - lastTapTime > 300) {
                                         lastTapTime = currentTime
                                         val tappedVideo = videos[currentIndex]
-                                        tracker.cardTappedFullscreen(
-                                            videoID = tappedVideo.id,
-                                            creatorID = tappedVideo.creatorID
-                                        )
+                                        // Sponsored/pseudo cards (empty creatorID) never feed the
+                                        // engagement tracker — its Firestore persist path is keyed
+                                        // by creatorID and .document("") crashes (iOS lesson).
+                                        if (tappedVideo.creatorID.isNotBlank() &&
+                                            !sponsoredSlotMap.containsKey(tappedVideo.id)
+                                        ) {
+                                            tracker.cardTappedFullscreen(
+                                                videoID = tappedVideo.id,
+                                                creatorID = tappedVideo.creatorID
+                                            )
+                                        }
                                         onVideoTap(tappedVideo)
                                     }
                                 }
@@ -342,7 +357,9 @@ fun DiscoverySwipeCards(
                         onVideoLoop = handleVideoLoop,
                         isAnnouncementShowing = isAnnouncementShowing,
                         isFullscreenActive = isFullscreenActive,
-                        collectionCardMap = collectionCardMap
+                        collectionCardMap = collectionCardMap,
+                        sponsoredSlotMap = sponsoredSlotMap,
+                        onSponsoredCta = onSponsoredCta
                     )
                 }
             }
@@ -385,7 +402,9 @@ private fun CardLayer(
     onVideoLoop: (String) -> Unit,
     isAnnouncementShowing: Boolean,
     isFullscreenActive: Boolean = false,
-    collectionCardMap: Map<String, VideoCollection> = emptyMap()
+    collectionCardMap: Map<String, VideoCollection> = emptyMap(),
+    sponsoredSlotMap: Map<String, SponsoredSlot> = emptyMap(),
+    onSponsoredCta: (SponsoredSlot) -> Unit = {}
 ) {
     key(video.id) {
         Box(
@@ -407,6 +426,8 @@ private fun CardLayer(
                 onVideoLoop = onVideoLoop,
                 isAnnouncementShowing = isAnnouncementShowing || isFullscreenActive,
                 collection = collectionCardMap.get(video.id),
+                sponsoredSlot = sponsoredSlotMap.get(video.id),
+                onSponsoredCta = onSponsoredCta
             )
         }
     }
@@ -422,7 +443,15 @@ fun DiscoveryCard(
     onVideoLoop: (String) -> Unit,
     isAnnouncementShowing: Boolean,
     collection: VideoCollection? = null,
+    sponsoredSlot: SponsoredSlot? = null,
+    onSponsoredCta: (SponsoredSlot) -> Unit = {}
 ) {
+    // Sponsored ad card — static creative + CTA, no player, no engagement overlay.
+    if (sponsoredSlot != null) {
+        SponsoredSwipeCard(slot = sponsoredSlot, onCtaClick = { onSponsoredCta(sponsoredSlot) })
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -819,6 +848,131 @@ fun CollectionSwipeCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+// ─────────────────────────────────────────────
+// MARK: - SponsoredSwipeCard
+// ─────────────────────────────────────────────
+
+/** Stitch brand magenta — canonical primary (#E91E63). */
+private val SponsoredMagenta = Color(0xFFE91E63)
+
+/**
+ * First-party sponsored ad card for the swipe feed — port of iOS sponsored slot card.
+ * Static 9:16 creative, NO video player, NO engagement overlay:
+ *   - Full-bleed creative image (slot.imageURL)
+ *   - "SPONSORED" capsule badge (top-left)
+ *   - Advertiser name + title over a bottom gradient
+ *   - CTA button in brand magenta with the slot's ctaText
+ * The CTA button records the tap + opens ctaURL via the onCtaClick callback;
+ * tapping anywhere else on the card routes through DiscoveryView's onVideoTap
+ * sponsored branch (same behavior).
+ */
+@Composable
+fun SponsoredSwipeCard(
+    slot: SponsoredSlot,
+    onCtaClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF1A1A2E))
+    ) {
+        // Full-bleed 9:16 creative
+        AsyncImage(
+            model = slot.imageURL,
+            contentDescription = slot.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // "SPONSORED" capsule badge — top-left
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Text(
+                text = "SPONSORED",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                letterSpacing = 1.5.sp
+            )
+        }
+
+        // Dark gradient overlay at bottom
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.55f)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f), Color.Black.copy(alpha = 0.9f))
+                    )
+                )
+        )
+
+        // Bottom info panel: advertiser, title, CTA
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = slot.advertiserName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = slot.title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 26.sp
+            )
+
+            // CTA button — brand magenta capsule
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50))
+                    .background(SponsoredMagenta)
+                    .clickable { onCtaClick() }
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = slot.ctaText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Default.ArrowForward,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp)
+                )
             }
         }
     }

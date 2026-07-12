@@ -359,6 +359,7 @@ class VideoCoordinator(
                 replyToVideoID = hierarchyData.replyToVideoID,
                 conversationDepth = hierarchyData.conversationDepth,
                 contentType = hierarchyData.contentType,
+                isContinuation = hierarchyData.isContinuation,
                 taggedUserIDs = taggedUserIDs, // NEW: Include tagged users
                 hlsURL = cdn.hlsURL,
                 mp4URL = cdn.mp4URL,
@@ -481,7 +482,8 @@ class VideoCoordinator(
                     threadID = rootThreadID,
                     replyToVideoID = null,
                     conversationDepth = 1,
-                    contentType = ContentType.CHILD
+                    contentType = ContentType.CHILD,
+                    isContinuation = true // spine: creator continuing their own thread
                 )
             }
 
@@ -902,6 +904,9 @@ class VideoCoordinator(
             "threadID" to metadata.threadID, // Will update for new threads
             "replyToVideoID" to metadata.replyToVideoID,
             "conversationDepth" to metadata.conversationDepth,
+            // Spine flag: true only when the thread creator posted this via the
+            // continue-thread flow. Regular replies stay false.
+            "isContinuation" to metadata.isContinuation,
             "viewCount" to 0,
             "hypeCount" to 0,
             "coolCount" to 0,
@@ -1002,7 +1007,10 @@ data class ThreadHierarchyData(
     val threadID: String?,
     val replyToVideoID: String?,
     val conversationDepth: Int,
-    val contentType: ContentType
+    val contentType: ContentType,
+    // True only for the continue-thread flow (creator extending their own thread).
+    // Continuations form the thread spine: ordered before replies, chronological.
+    val isContinuation: Boolean = false
 )
 
 // Note: VideoAnalysisResult is imported from com.stitchsocial.club.services

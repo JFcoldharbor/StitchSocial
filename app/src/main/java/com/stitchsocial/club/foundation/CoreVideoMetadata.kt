@@ -30,6 +30,12 @@ data class CoreVideoMetadata(
     val threadID: String?,
     val replyToVideoID: String?,
     val conversationDepth: Int,
+    // True when the thread creator posted this via the continue-thread flow.
+    // Continuations form the thread "spine": always ordered before replies,
+    // locked chronological, never reordered by engagement. Legacy docs lack
+    // the field (decodes false) — see List<CoreVideoMetadata>.threadOrdered
+    // for the fallback rule.
+    val isContinuation: Boolean = false,
 
     // Engagement metrics
     val viewCount: Int,
@@ -618,4 +624,38 @@ data class CoreVideoMetadata(
             }
         }
     }
+}
+
+/**
+ * Thread spine ordering (iOS parity).
+ *
+ * Product rule for a thread's children:
+ * 1. SPINE — the creator's own continuations (isContinuation == true, or the
+ *    legacy fallback: a depth-1 child whose creatorID == the thread creator's
+ *    ID, for docs written before the field existed). Always first, locked
+ *    chronological (createdAt ascending), never reordered by engagement.
+ * 2. REPLIES — everyone else's depth-1 children, ranked by engagement:
+ *    hype count desc, then view count desc, then createdAt asc.
+ * 3. DEPTH >= 2 — stepchildren keep chronological order at the end.
+ *
+ * Any depth-0 head accidentally present in the list is kept in front.
+ */
+fun List<CoreVideoMetadata>.threadOrdered(threadCreatorID: String): List<CoreVideoMetadata> {
+    val heads = filter { it.conversationDepth <= 0 }.sortedBy { it.createdAt }
+    val depthOne = filter { it.conversationDepth == 1 }
+    val deeper = filter { it.conversationDepth >= 2 }.sortedBy { it.createdAt }
+
+    val (spine, replies) = depthOne.partition { child ->
+        child.isContinuation ||
+            (threadCreatorID.isNotEmpty() && child.creatorID == threadCreatorID)
+    }
+
+    val orderedSpine = spine.sortedBy { it.createdAt }
+    val orderedReplies = replies.sortedWith(
+        compareByDescending<CoreVideoMetadata> { it.hypeCount }
+            .thenByDescending { it.viewCount }
+            .thenBy { it.createdAt }
+    )
+
+    return heads + orderedSpine + orderedReplies + deeper
 }

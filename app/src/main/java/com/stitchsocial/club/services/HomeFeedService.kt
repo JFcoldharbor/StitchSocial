@@ -25,6 +25,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
+import com.stitchsocial.club.foundation.threadOrdered
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import com.stitchsocial.club.BuildConfig
@@ -375,6 +376,9 @@ class HomeFeedService(
                 threadID = threadID,
                 replyToVideoID = data[FirebaseSchema.VideoDocument.REPLY_TO_VIDEO_ID] as? String,
                 conversationDepth = conversationDepth,
+                // Thread spine flag (continue-thread flow). Legacy docs -> false;
+                // threadOrdered() applies the creatorID fallback for those.
+                isContinuation = data["isContinuation"] as? Boolean ?: false,
                 viewCount = viewCount,
                 hypeCount = hypeCount,
                 coolCount = coolCount,
@@ -410,7 +414,7 @@ class HomeFeedService(
 
     // MARK: - Load Thread Children
 
-    suspend fun loadThreadChildren(threadID: String): List<CoreVideoMetadata> {
+    suspend fun loadThreadChildren(threadID: String, threadCreatorID: String? = null): List<CoreVideoMetadata> {
         return try {
             val snapshot = db.collection(FirebaseSchema.Collections.VIDEOS)
                 .whereEqualTo(FirebaseSchema.VideoDocument.THREAD_ID, threadID)
@@ -433,7 +437,7 @@ class HomeFeedService(
 
                 val thread = createThreadFromDocument(doc)
                 thread?.parentVideo // Reuse the same parser, extract video
-            }
+            }.threadOrdered(threadCreatorID ?: "") // spine (continuations) first, then ranked replies
 
             // Cache for preloading
             childrenCache[threadID] = children
@@ -466,7 +470,7 @@ class HomeFeedService(
             // Preload children metadata (existing behaviour)
             if (!childrenCache.containsKey(thread.id) && thread.parentVideo.replyCount > 0) {
                 try {
-                    val children = loadThreadChildren(thread.id)
+                    val children = loadThreadChildren(thread.id, thread.parentVideo.creatorID)
                     // Also prefetch child video URLs
                     children.take(3).forEach { child ->
                         if (child.videoURL.isNotEmpty()) urlsToPrefetch.add(child.videoURL)

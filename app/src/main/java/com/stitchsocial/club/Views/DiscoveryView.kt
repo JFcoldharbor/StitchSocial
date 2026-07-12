@@ -14,6 +14,7 @@ package com.stitchsocial.club.views
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -92,6 +93,7 @@ import com.stitchsocial.club.R
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.SearchService
+import com.stitchsocial.club.services.SponsoredSlotService
 import com.stitchsocial.club.services.HashtagService
 import com.stitchsocial.club.services.TrendingHashtag
 import com.stitchsocial.club.services.VelocityTier
@@ -164,6 +166,14 @@ class DiscoveryViewModel(
 
     // Collection card map — videoID → VideoCollection for collection cards injected into swipe feed
     val collectionCardMap = mutableMapOf<String, VideoCollection>()
+
+    // Sponsored slots — slotID → SponsoredSlot for first-party ad cards injected into the feed.
+    // The pseudo CoreVideoMetadata entries live in sponsoredCards ONLY (never in _videos), so
+    // they can never enter diversifyShuffle/weighted shuffles — they're re-spaced
+    // deterministically after every shuffle by injectSponsoredCards().
+    val sponsoredSlotMap = mutableMapOf<String, SponsoredSlot>()
+    private val sponsoredSlotService = SponsoredSlotService()
+    private var sponsoredCards: List<CoreVideoMetadata> = emptyList()
 
     private val _currentCategory = MutableStateFlow(DiscoveryCategory.ALL)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
@@ -254,6 +264,7 @@ class DiscoveryViewModel(
                 if (BuildConfig.DEBUG) { println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total") }
 
                 loadFeaturedCollectionsForSwipeFeed()
+                loadSponsoredSlots()
 
                 val prefetchUrls = combined.take(3).map { it.videoURL }.filter { it.isNotEmpty() }
                 if (prefetchUrls.isNotEmpty()) {
@@ -412,7 +423,7 @@ class DiscoveryViewModel(
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
         }
 
-        _filteredVideos.value = diversifyShuffle(filtered)
+        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(filtered))
 
         if (BuildConfig.DEBUG) { println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos") }
     }
@@ -487,10 +498,83 @@ class DiscoveryViewModel(
         }
     }
 
+    /**
+     * Fetches active sponsored slots (one read per feed load), builds pseudo
+     * CoreVideoMetadata cards and stores them in sponsoredCards + sponsoredSlotMap.
+     * Mirrors iOS SponsoredSlot injection:
+     *   - videoURL = "" — NEVER handed to a player
+     *   - thumbnailURL = slot.imageURL — grid/thumbnail paths render the creative for free
+     *   - creatorID = "" — guarded everywhere (engagement tracker, avatar fetch)
+     *   - isPromoted = true
+     */
+    private fun loadSponsoredSlots() {
+        viewModelScope.launch {
+            try {
+                val slots = sponsoredSlotService.getActiveSlots(4)
+                if (slots.isEmpty()) return@launch
+
+                sponsoredCards = slots.map { slot ->
+                    sponsoredSlotMap[slot.id] = slot
+                    CoreVideoMetadata(
+                        id = slot.id,
+                        title = slot.title,
+                        description = "",
+                        videoURL = "",  // empty = never reaches a player
+                        thumbnailURL = slot.imageURL,  // 9:16 creative renders via thumbnail paths
+                        creatorID = "",  // pseudo entry — empty creatorID is guarded everywhere
+                        creatorName = slot.advertiserName,
+                        createdAt = java.util.Date(),
+                        threadID = null,
+                        replyToVideoID = null,
+                        conversationDepth = 0,
+                        viewCount = 0, hypeCount = 0, coolCount = 0,
+                        replyCount = 0, shareCount = 0,
+                        temperature = com.stitchsocial.club.foundation.Temperature.WARM,
+                        qualityScore = 75,
+                        engagementRatio = 0.5,
+                        velocityScore = 0.0, trendingScore = 0.0,
+                        duration = 0.0, aspectRatio = 9.0 / 16.0, fileSize = 0L,
+                        discoverabilityScore = 0.0,
+                        isPromoted = true,  // sponsored signal
+                        lastEngagementAt = null,
+                        collectionID = null,
+                        segmentNumber = null, segmentTitle = null,
+                        isCollectionSegment = false,
+                        contentType = com.stitchsocial.club.foundation.ContentType.THREAD,
+                        isProcessing = false, isDeleted = false,
+                        recordingSource = ""
+                    )
+                }
+
+                applyFilterAndShuffle()  // re-space ads into the current feed
+                if (BuildConfig.DEBUG) { println("📣 DISCOVERY: Injected ${sponsoredCards.size} sponsored slot(s) into feed") }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY: Sponsored slot load failed — ${e.message}") }
+            }
+        }
+    }
+
+    /**
+     * Deterministically place sponsored cards into an organic feed:
+     * first sponsored card within the first 7 items (index 6), then one every 20.
+     * Any prior placements are stripped first, so reshuffles re-space instead of
+     * duplicating — sponsored cards NEVER participate in any shuffle.
+     */
+    private fun injectSponsoredCards(feed: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
+        if (sponsoredCards.isEmpty()) return feed
+        val organic = feed.filterNot { sponsoredSlotMap.containsKey(it.id) }.toMutableList()
+        if (organic.isEmpty()) return organic  // no ads in empty/special feeds
+        sponsoredCards.forEachIndexed { i, card ->
+            val position = minOf(6 + i * 20, organic.size)
+            organic.add(position, card)
+        }
+        return organic
+    }
+
     private fun applyFilterAndShuffle() {
         // Filter blocked creators — mirrors Swift applyBlockedCreatorFilter
         val blocked = DiscoveryEngagementTracker.blockedCreatorIDs()
-        _filteredVideos.value = diversifyShuffle(_videos.value)
+        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(_videos.value))
     }
 
     /**
@@ -563,6 +647,7 @@ fun DiscoveryView(
     val userService = remember { UserService(context) }
     val searchService = remember { SearchService() }
     val collectionService = remember { CollectionService() }
+    val sponsoredSlotService = remember { SponsoredSlotService() }
 
     // ViewModels
     val viewModel = remember {
@@ -594,6 +679,18 @@ fun DiscoveryView(
     // Follow manager for search (needs context)
     val followManager = remember { FollowManager(context) }
 
+    // Sponsored slot tap: record (session-deduped) + open ctaURL externally — mirrors iOS
+    val openSponsoredSlot: (SponsoredSlot) -> Unit = { slot ->
+        sponsoredSlotService.recordTap(slot.id)
+        if (slot.ctaURL.isNotBlank()) {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(slot.ctaURL)))
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("⚠️ SPONSORED: Could not open ctaURL — ${e.message}") }
+            }
+        }
+    }
+
     // State
     val videos by viewModel.filteredVideos.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -618,6 +715,10 @@ fun DiscoveryView(
     var currentPlayingVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
     var allVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
     var currentVideoIndex by remember { mutableStateOf(0) }
+    // DECK PAGING: position tracked internally while fullscreen is up; synced
+    // back to currentSwipeIndex only at dismiss (live sync makes the hidden
+    // card stack rebind players per page = play-pause-play stutter; see iOS).
+    var deckPosition by remember { mutableStateOf(0) }
 
     // Search sheet state
     var showSearchSheet by remember { mutableStateOf(false) }
@@ -650,6 +751,13 @@ fun DiscoveryView(
 
     // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
     LaunchedEffect(currentSwipeIndex, videos.size) {
+        // Sponsored impression: fires when the ad card becomes the active/top card.
+        // Service dedupes per app session, so reshuffles never double-count.
+        videos.getOrNull(currentSwipeIndex)?.let { active ->
+            viewModel.sponsoredSlotMap[active.id]?.let { slot ->
+                sponsoredSlotService.recordImpression(slot.id)
+            }
+        }
         if (videos.isNotEmpty() && currentSwipeIndex >= videos.size - 1) {
             viewModel.reshuffleAndRestart()
         }
@@ -864,10 +972,18 @@ fun DiscoveryView(
                                         videos = videos,
                                         currentIndex = currentSwipeIndex,
                                         collectionCardMap = viewModel.collectionCardMap,
+                                        sponsoredSlotMap = viewModel.sponsoredSlotMap,
+                                        onSponsoredCta = { slot -> openSponsoredSlot(slot) },
                                         onIndexChange = { newIndex ->
                                             currentSwipeIndex = newIndex
                                         },
                                         onVideoTap = { video ->
+                                            // Sponsored card — recordTap + open ctaURL, never the player
+                                            val slot = viewModel.sponsoredSlotMap[video.id]
+                                            if (slot != null) {
+                                                openSponsoredSlot(slot)
+                                                return@DiscoverySwipeCards
+                                            }
                                             // Check if this is a collection card first — matches Swift
                                             val collection = viewModel.collectionCardMap[video.id]
                                             if (collection != null) {
@@ -876,6 +992,7 @@ fun DiscoveryView(
                                                 return@DiscoverySwipeCards
                                             }
                                             if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped - ${video.title}") }
+                                            deckPosition = currentSwipeIndex
                                             currentPlayingVideo = video
 
                                             // Fetch thread data (parent + children)
@@ -911,8 +1028,20 @@ fun DiscoveryView(
                             DiscoveryMode.GRID -> {
                                 DiscoveryGridView(
                                     videos = videos,
+                                    sponsoredIds = viewModel.sponsoredSlotMap.keys,
+                                    onSponsoredShown = { slotID ->
+                                        // Visible in grid = impression (session-deduped)
+                                        sponsoredSlotService.recordImpression(slotID)
+                                    },
                                     onVideoTapped = { video ->
+                                        // Sponsored card — recordTap + open ctaURL, never the player
+                                        val slot = viewModel.sponsoredSlotMap[video.id]
+                                        if (slot != null) {
+                                            openSponsoredSlot(slot)
+                                            return@DiscoveryGridView
+                                        }
                                         if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped - ${video.title}") }
+                                        deckPosition = videos.indexOfFirst { it.id == video.id }.coerceAtLeast(0)
                                         currentPlayingVideo = video
 
                                         // Fetch thread data (parent + children)
@@ -957,6 +1086,11 @@ fun DiscoveryView(
             val offsetX = remember { Animatable(0f) }
             var isDragging by remember { mutableStateOf(false) }
 
+            // DECK PAGING: vertical strip offset + paging lock
+            val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+            val verticalOffset = remember { Animatable(0f) }
+            var isPagingDeck by remember { mutableStateOf(false) }
+
             // Reset when video changes
             LaunchedEffect(currentPlayingVideo?.id) {
                 currentVideoIndex = 0
@@ -964,6 +1098,63 @@ fun DiscoveryView(
             }
 
             val currentVideo = allVideos.getOrNull(currentVideoIndex) ?: allVideos[0]
+
+            // Mirrors iOS FullscreenVideoView deck mode: exits sync the card
+            // stack to wherever the user paged.
+            fun dismissPlayer() {
+                currentSwipeIndex = deckPosition.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
+                showVideoPlayer = false
+                currentPlayingVideo = null
+                allVideos = emptyList()
+                currentVideoIndex = 0
+            }
+
+            fun pageDeck(direction: Int) {
+                if (isPagingDeck) return
+                var newIndex = deckPosition + direction
+                // Skip non-playable pseudo entries (sponsored slots and collection
+                // cards carry videoURL = "" and must NEVER reach an ExoPlayer).
+                while (newIndex in videos.indices && videos[newIndex].videoURL.isBlank()) {
+                    newIndex += direction
+                }
+                if (newIndex < 0 || newIndex >= videos.size) return
+                isPagingDeck = true
+                scope.launch {
+                    // One continuous spring: outgoing card + glued peek travel together.
+                    verticalOffset.animateTo(
+                        if (direction > 0) -screenHeightPx else screenHeightPx,
+                        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                    )
+                    val newRoot = videos[newIndex]
+                    deckPosition = newIndex
+                    currentPlayingVideo = newRoot
+                    allVideos = listOf(newRoot)   // root plays immediately; replies attach quietly
+                    verticalOffset.snapTo(0f)     // new current renders where the peek settled
+                    isPagingDeck = false
+
+                    // Quiet thread load with stale guard
+                    launch {
+                        try {
+                            val threadID = newRoot.threadID
+                            if (threadID != null) {
+                                val (parent, children) = videoService.getThreadData(threadID)
+                                if (currentPlayingVideo?.id == newRoot.id && parent != null) {
+                                    allVideos = listOf(parent) + children
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // Warm adjacent deck sources so the next page starts instantly
+                    val warm = listOfNotNull(
+                        videos.getOrNull(newIndex + direction)?.videoURL,
+                        videos.getOrNull(newIndex - direction)?.videoURL
+                    ).filter { it.isNotEmpty() }
+                    if (warm.isNotEmpty()) {
+                        com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(warm)
+                    }
+                }
+            }
 
             Box(
                 modifier = Modifier
@@ -1048,26 +1239,101 @@ fun DiscoveryView(
                             }
                         )
                     }
+                    .pointerInput(Unit) {
+                        // DECK PAGING: up = next card, down = previous, down at
+                        // first card = dismiss. Mirrors iOS gesture map.
+                        val vTracker = VelocityTracker()
+                        detectVerticalDragGestures(
+                            onDragStart = { vTracker.resetTracking() },
+                            onDragEnd = {
+                                val velocity = vTracker.calculateVelocity().y
+                                val offset = verticalOffset.value
+                                val threshold = screenHeightPx * 0.12f
+                                val velocityThreshold = 300f
+                                when {
+                                    offset < -threshold || velocity < -velocityThreshold -> {
+                                        if (deckPosition < videos.size - 1) pageDeck(1)
+                                        else scope.launch { verticalOffset.animateTo(0f, spring()) }
+                                    }
+                                    offset > threshold || velocity > velocityThreshold -> {
+                                        if (deckPosition > 0) pageDeck(-1)
+                                        else scope.launch {
+                                            verticalOffset.animateTo(
+                                                screenHeightPx,
+                                                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+                                            )
+                                            dismissPlayer()
+                                        }
+                                    }
+                                    else -> scope.launch { verticalOffset.animateTo(0f, spring()) }
+                                }
+                            },
+                            onDragCancel = { scope.launch { verticalOffset.animateTo(0f, spring()) } },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                vTracker.addPosition(change.uptimeMillis, change.position)
+                                // Rubber-band up-drag at the last card; down at
+                                // first card stays 1:1 (dismiss gesture).
+                                val noNext = deckPosition >= videos.size - 1 && verticalOffset.value + dragAmount < 0
+                                val damp = if (noNext) 0.35f else 1f
+                                scope.launch { verticalOffset.snapTo(verticalOffset.value + dragAmount * damp) }
+                            }
+                        )
+                    }
             ) {
+                // Connected deck strip: neighbor poster frames glued one screen
+                // above/below, tracking the drag 1:1 (Coil caches the loads).
+                videos.getOrNull(deckPosition - 1)?.let { prev ->
+                    AsyncImage(
+                        model = prev.thumbnailURL,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { translationY = verticalOffset.value - screenHeightPx }
+                            .background(Color.Black)
+                    )
+                }
+                videos.getOrNull(deckPosition + 1)?.let { next ->
+                    AsyncImage(
+                        model = next.thumbnailURL,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { translationY = verticalOffset.value + screenHeightPx }
+                            .background(Color.Black)
+                    )
+                }
+
+                // Close button — with vertical swipe now paging the deck, this
+                // (or pull-down at the first card) is how you exit.
+                IconButton(
+                    onClick = { dismissPlayer() },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 48.dp, end = 16.dp)
+                        .zIndex(10f)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+
                 // Video layer with horizontal offset
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
                             translationX = offsetX.value
+                            translationY = verticalOffset.value
                         }
                 ) {
                     key(currentVideo.id) {
                         VideoPlayerComposable(
                             video = currentVideo,
                             isActive = !isAnnouncementShowing && !isDragging,
-                            modifier = Modifier.fillMaxSize(),
-                            onSwipeUp = {
-                                showVideoPlayer = false
-                                currentPlayingVideo = null
-                                allVideos = emptyList()
-                                currentVideoIndex = 0
-                            }
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                 }
@@ -1076,6 +1342,7 @@ fun DiscoveryView(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .graphicsLayer { translationY = verticalOffset.value }
                         .padding(bottom = 18.dp)  // Just a bit lower
                 ) {
                     ContextualVideoOverlay(
@@ -1090,6 +1357,7 @@ fun DiscoveryView(
                         onAction = { action ->
                             when (action) {
                                 is OverlayAction.NavigateToProfile -> {
+                                    currentSwipeIndex = deckPosition
                                     showVideoPlayer = false
                                     onNavigateToProfile(action.userID)
                                 }
@@ -1483,7 +1751,9 @@ private fun SwipeInstructionsIndicator(
 @Composable
 private fun DiscoveryGridView(
     videos: List<CoreVideoMetadata>,
-    onVideoTapped: (CoreVideoMetadata) -> Unit
+    onVideoTapped: (CoreVideoMetadata) -> Unit,
+    sponsoredIds: Set<String> = emptySet(),
+    onSponsoredShown: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     // WiFi gate: only autoplay off cellular (raw MP4s are brutal on cellular).
@@ -1499,13 +1769,21 @@ private fun DiscoveryGridView(
         modifier = Modifier.fillMaxSize()
     ) {
         items(videos.size) { index ->
+            val isSponsored = sponsoredIds.contains(videos[index].id)
+            // Sponsored pseudo entries have videoURL = "" so the isNotBlank()
+            // gate below already excludes them from autoplay selection.
             val row = index / 3
             val isAutoplay = allowAutoplay && videos[index].videoURL.isNotBlank() &&
                     (index % 3 == rowCycle[row % rowCycle.size])
+            if (isSponsored) {
+                // Tile composed = visible in grid = impression (service dedupes per session)
+                LaunchedEffect(videos[index].id) { onSponsoredShown(videos[index].id) }
+            }
             DiscoveryVideoCard(
                 video = videos[index],
                 onTapped = { onVideoTapped(videos[index]) },
-                previewVideoURL = if (isAutoplay) videos[index].videoURL else null
+                previewVideoURL = if (isAutoplay) videos[index].videoURL else null,
+                isSponsored = isSponsored
             )
         }
     }
@@ -1518,7 +1796,8 @@ private fun DiscoveryGridView(
 private fun DiscoveryVideoCard(
     video: CoreVideoMetadata,
     onTapped: () -> Unit,
-    previewVideoURL: String? = null
+    previewVideoURL: String? = null,
+    isSponsored: Boolean = false
 ) {
     val context = LocalContext.current
     Box(
@@ -1570,6 +1849,26 @@ private fun DiscoveryVideoCard(
                     )
                 )
         )
+
+        // Sponsored capsule — first-party ad slot tile (creative renders via thumbnail).
+        if (isSponsored) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "SPONSORED",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
 
         // Contest pill — active challenge head (matches the tile's badge style).
         if (video.isChallengeActive) {

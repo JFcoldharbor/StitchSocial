@@ -316,12 +316,12 @@ class VideoExportService private constructor(private val context: Context) {
                 sourceUri = editState.videoUri,
                 startTimeMs = (editState.trimStartTime * 1000).toLong(),
                 endTimeMs = (editState.trimEndTime * 1000).toLong(),
-                targetSizeMB = 50.0
+                targetSizeMB = 20.0
             )
         } else {
             compressor.compress(
                 sourceUri = editState.videoUri,
-                targetSizeMB = 50.0,
+                targetSizeMB = 20.0,
                 preserveResolution = true
             ) { progress ->
                 _exportProgress.value = progress * 0.9

@@ -117,7 +117,7 @@ fun VideoPlayer(
         isLoadingChildren = true
         try {
             if (video.replyCount > 0) {
-                val children = feedService.loadThreadChildren(video.id)
+                val children = feedService.loadThreadChildren(video.id, video.creatorID)
                 childVideos = children
                 if (BuildConfig.DEBUG) { println("📹 VideoPlayer: Loaded ${children.size} children for ${video.id}") }
             }

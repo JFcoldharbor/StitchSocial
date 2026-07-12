@@ -70,8 +70,8 @@ class FastVideoCompressor private constructor(private val context: Context) {
     
     // MARK: - Configuration
     
-    /** Target file size in bytes (default 50MB for safe upload margin) */
-    var targetFileSizeBytes: Long = 50 * 1024 * 1024
+    /** Target file size in bytes (default 20MB, matches compress() targetSizeMB default) */
+    var targetFileSizeBytes: Long = 20 * 1024 * 1024
     
     /** Minimum bitrate floor (prevents unwatchable quality) */
     private val minBitrate: Int = 800_000  // 800 kbps
@@ -133,7 +133,7 @@ class FastVideoCompressor private constructor(private val context: Context) {
      */
     suspend fun compress(
         sourceUri: Uri,
-        targetSizeMB: Double = 50.0,
+        targetSizeMB: Double = 20.0,
         preserveResolution: Boolean = false,
         trimStartMs: Long? = null,
         trimEndMs: Long? = null,
@@ -253,7 +253,7 @@ class FastVideoCompressor private constructor(private val context: Context) {
         sourceUri: Uri,
         startTimeMs: Long,
         endTimeMs: Long,
-        targetSizeMB: Double = 50.0
+        targetSizeMB: Double = 20.0
     ): CompressionResult {
         return compress(
             sourceUri = sourceUri,

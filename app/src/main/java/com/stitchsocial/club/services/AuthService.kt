@@ -296,11 +296,13 @@ class AuthService {
                     // Required by App Store Guideline 1.2 / Play Store UGC policy:
                     // stop listening to the previous user's block list.
                     BlockService.shared.stopListening()
+                    SaveService.shared.stopListening()
                 }
                 user.isAnonymous -> {
                     _authState.value = AuthState.SIGNED_IN
                     println("AUTH SERVICE: 👤 Anonymous user")
                     BlockService.shared.startListening()
+                    SaveService.shared.startListening()
                 }
                 else -> {
                     _authState.value = AuthState.SIGNED_IN
@@ -308,6 +310,8 @@ class AuthService {
                     // Populates BlockService.blockedUserIds so feed views can
                     // filter blocked content the instant the user signs in.
                     BlockService.shared.startListening()
+                    // Saved-videos listener — powers bookmark state on play surfaces.
+                    SaveService.shared.startListening()
                 }
             }
         }

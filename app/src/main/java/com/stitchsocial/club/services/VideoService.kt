@@ -21,6 +21,7 @@ import java.util.*
 // Foundation imports
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
+import com.stitchsocial.club.foundation.threadOrdered
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.BuildConfig
@@ -114,12 +115,42 @@ class VideoServiceImpl {
             .whereEqualTo("threadID", threadID)
             .get().await()
 
+        val currentUserID = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+
         for (document in threadSnapshot.documents) {
             val data = document.data ?: continue
-            (data["videoURL"] as? String)?.let { deleteFromStorage(it) }
-            (data["thumbnailURL"] as? String)?.let { deleteFromStorage(it) }
-            document.reference.delete().await()
+
+            // The parent doc is deleted explicitly at the end.
+            if (document.id == threadID) continue
+
+            // Skip OTHER users' reply docs — Firestore rules deny deleting them,
+            // and one denied delete must not abort the whole loop (iOS parity bug:
+            // thread deletion died mid-way on the first foreign reply).
+            val docCreatorID = data["creatorID"] as? String
+            if (docCreatorID != null && docCreatorID != currentUserID) continue
+
+            // Per-doc failure tolerance: one bad doc shouldn't strand the rest.
+            try {
+                (data["videoURL"] as? String)?.let { deleteFromStorage(it) }
+                (data["thumbnailURL"] as? String)?.let { deleteFromStorage(it) }
+                document.reference.delete().await()
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to delete thread child ${document.id} (continuing): ${e.message}") }
+            }
         }
+
+        // Delete the parent doc explicitly last, so a mid-loop failure can't leave
+        // an orphaned-but-headless thread.
+        try {
+            val parentData = threadSnapshot.documents.firstOrNull { it.id == threadID }?.data
+            (parentData?.get("videoURL") as? String)?.let { deleteFromStorage(it) }
+            (parentData?.get("thumbnailURL") as? String)?.let { deleteFromStorage(it) }
+            db.collection("videos").document(threadID).delete().await()
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to delete thread parent $threadID: ${e.message}") }
+            throw e
+        }
+
         cleanupRelatedData(threadID)
     }
 
@@ -170,6 +201,11 @@ class VideoServiceImpl {
     private suspend fun deleteFromStorage(url: String) {
         try {
             if (url.isBlank()) return
+            // getReferenceFromUrl throws IllegalArgumentException for URLs outside the
+            // Firebase Storage bucket. Post-June-30 videos live on CloudFront
+            // (https://d3o3pqly2or8bv.cloudfront.net/...), so only attempt Storage
+            // deletion for Firebase URLs; CDN renditions get purged server-side later.
+            if (!url.startsWith("gs://") && !url.contains("firebasestorage.googleapis.com")) return
             val ref = storage.getReferenceFromUrl(url)
             ref.delete().await()
         } catch (e: Exception) {
@@ -304,8 +340,11 @@ class VideoServiceImpl {
             val allVideos = convertFirebaseToVideoMetadata(snapshot.documents)
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š Converted ${allVideos.size} videos") }
 
+            // Spine-first ordering: the thread head is in this query (its threadID is
+            // its own id), so derive the creator for the legacy-continuation fallback.
+            val threadCreatorID = allVideos.firstOrNull { it.conversationDepth == 0 }?.creatorID ?: ""
             val children = allVideos.filter { it.conversationDepth > 0 && !it.isDeleted }
-                .sortedBy { it.createdAt }
+                .threadOrdered(threadCreatorID)
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children (depth > 0, not deleted) for thread $threadID") }
             children
@@ -768,6 +807,10 @@ class VideoServiceImpl {
                     threadID = data["threadID"] as? String,
                     replyToVideoID = data["replyToVideoID"] as? String,
                     conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0,
+                    // Thread spine: creator-posted continuation via continue-thread flow.
+                    // Legacy docs lack the field -> false; threadOrdered() applies the
+                    // creatorID fallback for those.
+                    isContinuation = data["isContinuation"] as? Boolean ?: false,
                     viewCount = (data["viewCount"] as? Long)?.toInt() ?: 0,
                     hypeCount = (data["hypeCount"] as? Long)?.toInt() ?: 0,
                     coolCount = (data["coolCount"] as? Long)?.toInt() ?: 0,

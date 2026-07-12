@@ -36,6 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.layout.offset
+import com.stitchsocial.club.R
+import com.stitchsocial.club.ui.theme.StitchColors
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -457,6 +464,8 @@ fun ContextualVideoOverlay(
         isUserVideo -> Color.Green
         else -> Color(0xFF9C27B0)
     }
+    // Plain stitch shows the brand logo glyph, matching iOS stitchButtonGlyph
+    val stitchUseLogo: Boolean = !isStitchBlocked && !isUserVideo
 
     // Swappable hype/tip slot state (mirrors iOS SwappableEngagementButton)
     var slotMode by remember { mutableStateOf(SwappableSlotMode.HYPE) }
@@ -626,6 +635,7 @@ fun ContextualVideoOverlay(
                 stitchButtonIcon = stitchButtonIcon,
                 stitchButtonLabel = stitchButtonLabel,
                 stitchButtonRingColor = stitchButtonRingColor,
+                stitchUseLogo = stitchUseLogo,
                 videoEngagement = videoEngagement,
                 currentUserTier = currentUserTier,
                 currentUserID = currentUserID,
@@ -657,6 +667,7 @@ fun ContextualVideoOverlay(
                 stitchButtonIcon = stitchButtonIcon,
                 stitchButtonLabel = stitchButtonLabel,
                 stitchButtonRingColor = stitchButtonRingColor,
+                stitchUseLogo = stitchUseLogo,
                 videoEngagement = videoEngagement,
                 videoDescription = videoDescription,
                 currentUserTier = currentUserTier,
@@ -769,7 +780,6 @@ private fun MoreOptionsMenu(
     currentUserID: String?
 ) {
     val isUserVideo = currentUserID != null && currentUserID == video.creatorID
-    if (isUserVideo) return
 
     var menuExpanded by remember { mutableStateOf(false) }
     var showReportSheet by remember { mutableStateOf(false) }
@@ -779,6 +789,9 @@ private fun MoreOptionsMenu(
     val blockedIds by com.stitchsocial.club.services.BlockService.shared
         .blockedUserIds.collectAsStateWithLifecycle()
     val isBlocked = blockedIds.contains(video.creatorID)
+    val savedIds by com.stitchsocial.club.services.SaveService.shared
+        .savedVideoIds.collectAsStateWithLifecycle()
+    val isSaved = savedIds.contains(video.id)
 
     Box {
         IconButton(onClick = { menuExpanded = true }) {
@@ -796,6 +809,24 @@ private fun MoreOptionsMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false }
         ) {
+            // Save for later — private bookmark, available on every video
+            // (own videos included; report/block stay other-users-only below).
+            DropdownMenuItem(
+                text = { Text(if (isSaved) "Remove from Saved" else "Save video") },
+                leadingIcon = {
+                    Icon(
+                        if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = null
+                    )
+                },
+                onClick = {
+                    menuExpanded = false
+                    scope.launch {
+                        com.stitchsocial.club.services.SaveService.shared.toggleSave(video)
+                    }
+                }
+            )
+            if (!isUserVideo) {
             DropdownMenuItem(
                 text = { Text("Report video") },
                 leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
@@ -836,6 +867,7 @@ private fun MoreOptionsMenu(
                     }
                 )
             }
+            }  // if (!isUserVideo)
         }
     }
 
@@ -982,6 +1014,7 @@ private fun CarouselOverlay(
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
+    stitchUseLogo: Boolean,
     videoEngagement: ContextualVideoEngagement?,
     currentUserTier: UserTier,
     currentUserID: String?,
@@ -1040,17 +1073,22 @@ private fun CarouselOverlay(
                 onAction = onAction
             )
 
-            // Stitch Button
+            // Stitch Button — 3D base + brand rim (matches iOS)
             if (canReply) {
-                OverlayActionButton(
-                    icon = stitchButtonIcon,
+                Overlay3DActionButton(
                     label = stitchButtonLabel,
-                    ringColor = stitchButtonRingColor,
+                    rimColors = listOf(
+                        StitchColors.gradientStart.copy(alpha = 0.7f),
+                        StitchColors.gradientEnd.copy(alpha = 0.5f)
+                    ),
+                    glowColor = StitchColors.primary,
                     onClick = {
                         pauseAllVideos(context)
                         onAction?.invoke(OverlayAction.StitchRecording)
                     }
-                )
+                ) {
+                    StitchButtonGlyph(useLogo = stitchUseLogo, icon = stitchButtonIcon)
+                }
             }
         }
     }
@@ -1077,6 +1115,7 @@ private fun FullContextualOverlay(
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
+    stitchUseLogo: Boolean,
     videoEngagement: ContextualVideoEngagement?,
     videoDescription: String?,
     currentUserTier: UserTier,
@@ -1127,6 +1166,7 @@ private fun FullContextualOverlay(
             stitchButtonIcon = stitchButtonIcon,
             stitchButtonLabel = stitchButtonLabel,
             stitchButtonRingColor = stitchButtonRingColor,
+            stitchUseLogo = stitchUseLogo,
             currentUserTier = currentUserTier,
             currentUserID = currentUserID,
             engagementViewModel = engagementViewModel,
@@ -1231,6 +1271,7 @@ private fun BottomSection(
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
     stitchButtonRingColor: Color,
+    stitchUseLogo: Boolean,
     currentUserTier: UserTier,
     currentUserID: String?,
     engagementViewModel: EngagementViewModel?,
@@ -1344,18 +1385,21 @@ private fun BottomSection(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Thread Button
-                OverlayActionButton(
-                    icon = Icons.Default.List,
+                // Thread Button — 3D base + conversation glyph (beta feedback:
+                // the flat circle read washed-out next to its 3D row-mates)
+                Overlay3DActionButton(
                     label = "Thread",
-                    ringColor = Color.Cyan,
+                    rimColors = listOf(Color.Cyan.copy(alpha = 0.8f), Color(0xFF2196F3).copy(alpha = 0.5f)),
+                    glowColor = Color.Cyan,
                     onClick = {
                         // Option 1 entry: parent video keeps playing — no
                         // pauseAllVideos broadcast, no navigation. onThreadTap
                         // is now the panel-open callback (see line ~661).
                         onThreadTap()
                     }
-                )
+                ) {
+                    Icon(Icons.Default.Forum, "Thread", tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))
+                }
 
                 // Cool Button - Progressive 3D
                 if (engagementViewModel != null && iconManager != null) {
@@ -1409,15 +1453,20 @@ private fun BottomSection(
                 // StitchRecording — the caller turns that into the recording flow
                 // with the segment as parent.
                 if (canReply) {
-                    OverlayActionButton(
-                        icon = stitchButtonIcon,
+                    Overlay3DActionButton(
                         label = stitchButtonLabel,
-                        ringColor = stitchButtonRingColor,
+                        rimColors = listOf(
+                            StitchColors.gradientStart.copy(alpha = 0.7f),
+                            StitchColors.gradientEnd.copy(alpha = 0.5f)
+                        ),
+                        glowColor = StitchColors.primary,
                         onClick = {
                             pauseAllVideos(context)
                             onAction?.invoke(OverlayAction.StitchRecording)
                         }
-                    )
+                    ) {
+                        StitchButtonGlyph(useLogo = stitchUseLogo, icon = stitchButtonIcon)
+                    }
                 }
             }
         }
@@ -1712,6 +1761,90 @@ private fun OverlayActionButton(
             Icon(icon, label, tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))
         }
         Text(label, fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+    }
+}
+
+// MARK: - 3D Overlay Button (iOS overlayButton3DBase parity)
+//
+// Stacked offset shadow circles for depth + top-lit sphere + gradient rim +
+// colored glow, so Thread/Stitch feel tactile like the hype/cool 3D buttons.
+
+@Composable
+private fun Overlay3DActionButton(
+    label: String,
+    rimColors: List<Color>,
+    glowColor: Color,
+    onClick: () -> Unit,
+    glyph: @Composable () -> Unit
+) {
+    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
+    val diameter = OverlaySizes.BUTTON_SIZE
+    val density = LocalDensity.current
+    val sphereRadiusPx = with(density) { (diameter * 0.7f).toPx() }
+    val depthRadiusPx = with(density) { (diameter * 0.6f).toPx() }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(
+            modifier = Modifier
+                .size(diameter + 6.dp)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.TopStart
+        ) {
+            // Stacked offset shadow circles → depth
+            for (layer in 0 until 4) {
+                Box(
+                    modifier = Modifier
+                        .size(diameter)
+                        .offset(x = (layer * 1.5f).dp, y = (layer * 1.5f).dp)
+                        .alpha(0.4f - layer * 0.1f)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f)),
+                                radius = depthRadiusPx
+                            ),
+                            CircleShape
+                        )
+                )
+            }
+            // Top-lit sphere + rim + glow
+            Box(
+                modifier = Modifier
+                    .size(diameter)
+                    .shadow(4.dp, CircleShape, ambientColor = glowColor, spotColor = glowColor)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.4f),
+                                Color.Black.copy(alpha = 0.7f),
+                                Color.Black.copy(alpha = 0.9f)
+                            ),
+                            center = Offset(0f, 0f),
+                            radius = sphereRadiusPx
+                        ),
+                        CircleShape
+                    )
+                    .border(1.5.dp, Brush.linearGradient(rimColors), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                glyph()
+            }
+        }
+        Text(label, fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+    }
+}
+
+/** Brand logo glyph for plain stitch, vector icon for reply/continue states. */
+@Composable
+private fun StitchButtonGlyph(useLogo: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    if (useLogo) {
+        Icon(
+            painter = painterResource(R.drawable.stitchsociallogo),
+            contentDescription = "Stitch",
+            tint = Color.White,
+            modifier = Modifier.size(OverlaySizes.ICON_SIZE + 3.dp)
+        )
+    } else {
+        Icon(icon, "Stitch", tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))
     }
 }
 

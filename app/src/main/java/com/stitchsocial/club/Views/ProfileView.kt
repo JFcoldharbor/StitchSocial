@@ -314,6 +314,7 @@ fun ProfileView(
     var selectedTab by remember { mutableStateOf(0) }
     var showingEditProfile by remember { mutableStateOf(false) }
     var showingSettings by remember { mutableStateOf(false) }
+    var showingSavedVideos by remember { mutableStateOf(false) }
     var showingBadgePage by remember { mutableStateOf(false) }
 
     // Video player state
@@ -537,6 +538,7 @@ fun ProfileView(
                             onToggleBio = { isShowingFullBio = !isShowingFullBio },
                             onEditProfile = { showingEditProfile = true },
                             onSettingsClick = { showingSettings = true },
+                            onSavedClick = { showingSavedVideos = true },
                             onFollowersClick = { showStitchersSheet = true },
                             isFollowing = isFollowing,
                             isFollowLoading = isFollowLoading,
@@ -1061,6 +1063,14 @@ fun ProfileView(
         )
     }
 
+    // ===== SAVED VIDEOS =====
+    // Own-profile bookmark grid; zIndexed above the profile like BadgePageView.
+    if (showingSavedVideos) {
+        Box(modifier = Modifier.fillMaxSize().zIndex(60f)) {
+            SavedVideosScreen(onDismiss = { showingSavedVideos = false })
+        }
+    }
+
     // ===== BADGE PAGE =====
     // Mounted at the top of ProfileView (sibling to the LazyColumn) so
     // BadgePageView's verticalScroll has bounded constraints. Mounting
@@ -1156,6 +1166,7 @@ private fun ProfileHeader(
     onToggleBio: () -> Unit,
     onEditProfile: () -> Unit,
     onSettingsClick: () -> Unit,
+    onSavedClick: () -> Unit = {},
     onFollowersClick: () -> Unit,
     isFollowing: Boolean = false,
     isFollowLoading: Boolean = false,
@@ -1235,6 +1246,7 @@ private fun ProfileHeader(
             isFollowLoading = isFollowLoading,
             onEditProfile = onEditProfile,
             onSettingsClick = onSettingsClick,
+            onSavedClick = onSavedClick,
             onFollowToggle = onFollowToggle,
             targetUserID = user.id,
             targetUsername = user.username
@@ -1456,6 +1468,7 @@ private fun ActionButtonsRow(
     isFollowLoading: Boolean,
     onEditProfile: () -> Unit,
     onSettingsClick: () -> Unit,
+    onSavedClick: () -> Unit = {},
     onFollowToggle: () -> Unit,
     targetUserID: String = "",
     targetUsername: String = ""
@@ -1488,6 +1501,18 @@ private fun ActionButtonsRow(
                 contentPadding = PaddingValues(0.dp)
             ) {
                 Icon(Icons.Default.Settings, "Settings", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+            }
+
+            // Saved videos — private bookmarks grid (mirrors iOS profile ... menu entry)
+            Button(
+                onClick = onSavedClick,
+                modifier = Modifier.size(width = 46.dp, height = 44.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
+                border = BorderStroke(1.dp, AppTheme.colors.hairline),
+                shape = RoundedCornerShape(13.dp),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Icon(Icons.Default.BookmarkBorder, "Saved videos", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
             }
         } else {
             Button(

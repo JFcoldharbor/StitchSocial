@@ -209,7 +209,7 @@ fun HomeFeedView(
                             loadedChildren[thread.id] = cachedChildren
                         } else if (!loadedChildren.containsKey(thread.id) && thread.parentVideo.replyCount > 0) {
                             try {
-                                val children = feedService.loadThreadChildren(thread.id)
+                                val children = feedService.loadThreadChildren(thread.id, thread.parentVideo.creatorID)
                                 if (children.isNotEmpty()) {
                                     loadedChildren[thread.id] = children
                                 }
