@@ -959,6 +959,13 @@ private fun ModalOverlay(
     onTabChange: (MainAppTab) -> Unit
 ) {
     if (currentModal != ModalState.NONE) {
+        val context = LocalContext.current
+        val draftManager = remember { LocalDraftManager.getInstance(context) }
+        val drafts by draftManager.drafts.collectAsState()
+        // Keep the drafts list fresh (drops any whose bytes went missing) while
+        // any recording-flow modal is up, so the camera badge count is accurate.
+        LaunchedEffect(currentModal) { draftManager.loadDrafts() }
+
         // FULLY opaque black background. The shared StitchColors.modalOverlay
         // is 90% black which let DiscoveryView's video player bleed through
         // the modal. Recording/review modals need to fully cover the feed.
@@ -998,6 +1005,8 @@ private fun ModalOverlay(
                         onStopAllVideos = {},
                         onDisposeAllVideos = {},
                         onGalleryRequested = { navigationCoordinator.requestGalleryPicker() },
+                        draftCount = drafts.size,
+                        onDraftsRequested = { navigationCoordinator.showModal(ModalState.DRAFTS) },
                         onReactionRequested = {
                             // Switch from RECORDING to REACTION. If we entered
                             // RECORDING from a stitch (parentVideo set), auto-
@@ -1015,6 +1024,25 @@ private fun ModalOverlay(
                             }
                             navigationCoordinator.showModal(ModalState.REACTION, data)
                         },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // Saved-drafts grid (reachable from the camera Drafts badge)
+                ModalState.DRAFTS -> {
+                    DraftsScreen(
+                        onSelectDraft = { draft ->
+                            // Mark it the active session and reopen in review.
+                            draftManager.markActiveDraft(draft.draftId)
+                            navigationCoordinator.showModal(
+                                ModalState.VIDEO_REVIEW,
+                                mapOf(
+                                    "videoPath" to draft.videoUri.toString(),
+                                    "draftId" to draft.draftId
+                                )
+                            )
+                        },
+                        onBack = { navigationCoordinator.showModal(ModalState.RECORDING) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -1039,11 +1067,16 @@ private fun ModalOverlay(
 
                         if (BuildConfig.DEBUG) { println("✂️ MAINACT: Parsed video URI: $videoUri") }
 
+                        // Resuming a saved draft? Load its full state (same
+                        // draftId, persisted bytes) so exiting/posting acts on
+                        // the same draft. Otherwise start a fresh edit session.
+                        val resumeDraftId = modalData["draftId"] as? String
+                        val reviewInitialState = resumeDraftId
+                            ?.let { draftManager.getDraft(it) }
+                            ?: VideoEditState.create(videoUri = videoUri, duration = 0.0)
+
                         VideoReviewView(
-                            initialState = VideoEditState.create(
-                                videoUri = videoUri,
-                                duration = 0.0
-                            ),
+                            initialState = reviewInitialState,
                             onContinueToThread = { editedState ->
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: Video editing complete, starting processing") }
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: hasEdits=${editedState.hasEdits}, hasTrimEdits=${editedState.hasTrimEdits}") }
@@ -1181,7 +1214,12 @@ private fun ModalOverlay(
                             recordingContext = recordingContext,
                             aiResult = aiResult,
                             videoCoordinator = videoCoordinator,
-                            onVideoCreated = { navigationCoordinator.dismissModal(); onTabChange(MainAppTab.HOME) },
+                            onVideoCreated = {
+                                // Posted successfully — drop the resumed draft so
+                                // it can't be double-posted.
+                                draftManager.deleteActiveDraftAfterPost()
+                                navigationCoordinator.dismissModal(); onTabChange(MainAppTab.HOME)
+                            },
                             onCancel = { navigationCoordinator.dismissModal() },
                             modifier = Modifier.fillMaxSize()
                         )

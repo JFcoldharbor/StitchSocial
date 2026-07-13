@@ -67,6 +67,7 @@ import java.util.concurrent.Executors
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.camera.RecordingContext
 import com.stitchsocial.club.viewmodels.CameraViewModel
+import com.stitchsocial.club.LocalDraftManager
 import com.stitchsocial.club.BuildConfig
 
 /**
@@ -85,6 +86,8 @@ fun CameraView(
     onDisposeAllVideos: () -> Unit = {},
     onGalleryRequested: () -> Unit = {},  // NEW: Gallery picker callback
     onReactionRequested: () -> Unit = {}, // NEW: React mode entry (split-canvas recorder)
+    draftCount: Int = 0,                  // NEW: number of saved drafts (badge)
+    onDraftsRequested: () -> Unit = {},   // NEW: open the drafts grid
     modifier: Modifier = Modifier,
     viewModel: CameraViewModel = viewModel()
 ) {
@@ -128,6 +131,9 @@ fun CameraView(
     LaunchedEffect(Unit) {
         onStopAllVideos()
         onDisposeAllVideos()
+        // Fresh camera session — clear any resumed/auto-saved draft marker so
+        // posting THIS recording doesn't delete an unrelated saved draft.
+        LocalDraftManager.getInstance(context).clearActiveDraft()
         if (BuildConfig.DEBUG) { println("CAMERA: Stopped and disposed all background videos") }
     }
 
@@ -402,6 +408,49 @@ fun CameraView(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
             )
+
+            // Drafts entry — badge pill at top-center, shown when saved drafts
+            // exist and we're not mid-take (mirrors iOS RecordingView badge).
+            if (!isRecording && draftCount > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 72.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable { onDraftsRequested() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VideoLibrary,
+                        contentDescription = "Drafts",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Drafts",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(StitchColors.primary)
+                            .size(20.dp)
+                    ) {
+                        Text(
+                            text = draftCount.toString(),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
 
             // React mode entry — small pill at the right side of the screen,
             // similar to iOS's right-side camera mode picker. Hidden during

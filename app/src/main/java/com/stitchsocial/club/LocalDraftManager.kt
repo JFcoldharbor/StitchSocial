@@ -12,6 +12,8 @@
 package com.stitchsocial.club
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +55,16 @@ class LocalDraftManager private constructor(private val context: Context) {
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
+
+    /**
+     * The draft representing the CURRENT in-progress editing session.
+     * Set when a recording is auto-saved on exit, or when a draft is resumed.
+     * Cleared when a fresh camera session starts and after a successful post,
+     * so posting a resumed draft deletes exactly that draft (no double-post).
+     */
+    @Volatile
+    var activeDraftId: String? = null
+        private set
 
     // MARK: - Configuration
 
@@ -118,6 +130,76 @@ class LocalDraftManager private constructor(private val context: Context) {
     }
 
     /**
+     * Persist a recording as a RESUMABLE draft (iOS saveResumableDraft parity).
+     *
+     * The recording lands in `cacheDir` — a purgeable temp dir the OS reclaims
+     * on memory pressure — so a draft that merely points at it is dead on
+     * return. This copies the actual video BYTES into the persistent drafts
+     * directory (skipping the copy if already persisted there), writes a poster
+     * thumbnail, re-points `videoUri` at the persisted copy, marks it the active
+     * draft, and saves. Returns the re-pointed state.
+     */
+    suspend fun persistDraft(editState: VideoEditState): VideoEditState = withContext(Dispatchers.IO) {
+        val id = editState.draftId
+        val persistedVideo = videoFile(id)
+
+        // Copy bytes only if the source isn't already the persisted copy.
+        val srcUri = editState.videoUri
+        val alreadyPersisted = srcUri.path == persistedVideo.absolutePath && persistedVideo.exists()
+        if (!alreadyPersisted) {
+            try {
+                val input = context.contentResolver.openInputStream(srcUri)
+                    ?: srcUri.path?.let { File(it).takeIf { f -> f.exists() }?.inputStream() }
+                input?.use { stream ->
+                    persistedVideo.outputStream().use { out -> stream.copyTo(out) }
+                }
+                if (BuildConfig.DEBUG) { println("💾 DRAFT MANAGER: Persisted ${persistedVideo.length() / 1024}KB for draft $id") }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("❌ DRAFT MANAGER: Failed to persist bytes: ${e.message}") }
+            }
+        }
+
+        // Poster thumbnail (first frame) — skip if we already have one.
+        val thumb = thumbFile(id)
+        if (!thumb.exists() && persistedVideo.exists()) {
+            writePosterThumbnail(persistedVideo, thumb)
+        }
+
+        val persisted = editState.copy(
+            videoUri = Uri.fromFile(persistedVideo),
+            processedThumbnailUri = if (thumb.exists()) Uri.fromFile(thumb) else editState.processedThumbnailUri,
+            lastModified = Date()
+        )
+
+        activeDraftId = id
+        saveDraft(persisted)
+        persisted
+    }
+
+    /** Mark a draft as the active editing session (called when resuming). */
+    fun markActiveDraft(id: String) {
+        activeDraftId = id
+    }
+
+    /** Clear the active session — call when a fresh camera session starts. */
+    fun clearActiveDraft() {
+        activeDraftId = null
+    }
+
+    /**
+     * Delete the active draft after a successful post so it can't be
+     * double-posted. Fire-and-forget on the manager's scope.
+     */
+    fun deleteActiveDraftAfterPost() {
+        val id = activeDraftId ?: return
+        activeDraftId = null
+        scope.launch {
+            deleteDraft(id)
+            if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted posted draft $id") }
+        }
+    }
+
+    /**
      * Auto-save draft (with debounce)
      */
     fun autoSaveDraft(editState: VideoEditState) {
@@ -156,11 +238,14 @@ class LocalDraftManager private constructor(private val context: Context) {
      */
     suspend fun deleteDraft(id: String) = withContext(Dispatchers.IO) {
         try {
-            val draftFile = draftFile(id)
-            draftFile.delete()
+            draftFile(id).delete()
+            // Also remove the persisted video bytes + poster thumbnail.
+            videoFile(id).delete()
+            thumbFile(id).delete()
 
             // Remove from memory
             _drafts.value = _drafts.value.filter { it.draftId != id }
+            if (activeDraftId == id) activeDraftId = null
 
             if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted draft $id") }
 
@@ -188,14 +273,29 @@ class LocalDraftManager private constructor(private val context: Context) {
                     val json = JSONObject(file.readText())
                     val draft = VideoEditState.fromJson(json)
 
-                    // Check if draft is too old
+                    // Re-resolve by draft id against the CURRENT persisted copy,
+                    // then DROP drafts whose bytes are gone so they never show as
+                    // dead cells (iOS load parity).
+                    val persistedVideo = videoFile(draft.draftId)
                     val ageMs = now.time - draft.lastModified.time
-                    if (ageMs < maxDraftAgeMs) {
-                        loadedDrafts.add(draft)
-                    } else {
-                        // Delete old draft
-                        file.delete()
-                        if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted expired draft ${draft.draftId}") }
+                    when {
+                        ageMs >= maxDraftAgeMs -> {
+                            deleteDraft(draft.draftId)
+                            if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Deleted expired draft ${draft.draftId}") }
+                        }
+                        !persistedVideo.exists() -> {
+                            deleteDraft(draft.draftId)
+                            if (BuildConfig.DEBUG) { println("🗑️ DRAFT MANAGER: Dropped draft ${draft.draftId} — bytes missing") }
+                        }
+                        else -> {
+                            val thumb = thumbFile(draft.draftId)
+                            loadedDrafts.add(
+                                draft.copy(
+                                    videoUri = Uri.fromFile(persistedVideo),
+                                    processedThumbnailUri = if (thumb.exists()) Uri.fromFile(thumb) else draft.processedThumbnailUri
+                                )
+                            )
+                        }
                     }
 
                 } catch (e: Exception) {
@@ -259,6 +359,34 @@ class LocalDraftManager private constructor(private val context: Context) {
 
     private fun draftFile(draftId: String): File {
         return File(draftsDirectory, "$draftId.draft")
+    }
+
+    /** Persistent copy of the recording bytes for a draft (survives cache purge). */
+    private fun videoFile(draftId: String): File {
+        return File(draftsDirectory, "$draftId.mp4")
+    }
+
+    /** Poster thumbnail for a draft. */
+    private fun thumbFile(draftId: String): File {
+        return File(draftsDirectory, "$draftId.jpg")
+    }
+
+    /** Extract the first frame and write it as a JPEG poster. */
+    private fun writePosterThumbnail(video: File, out: File) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(video.absolutePath)
+            val frame: Bitmap? = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            frame?.let { bmp ->
+                out.outputStream().use { stream ->
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                }
+            }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("⚠️ DRAFT MANAGER: Thumbnail failed: ${e.message}") }
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
     }
 }
 

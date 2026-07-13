@@ -61,7 +61,6 @@ fun VideoReviewView(
     // EditPanel? activePanel pattern.
     var activePanel by remember { mutableStateOf<EditTab?>(null) }
     var isPlaying by remember { mutableStateOf(true) }
-    var showingCancelAlert by remember { mutableStateOf(false) }
     var showingExportError by remember { mutableStateOf(false) }
     var exportError by remember { mutableStateOf<String?>(null) }
 
@@ -92,13 +91,26 @@ fun VideoReviewView(
     // never wanted captioned. The CaptionEditorView empty state now offers a
     // "Generate captions" button that triggers AutoCaptionService on demand.
 
-    // Auto-save draft periodically
+    // Auto-save draft periodically — persists the actual bytes into the drafts
+    // dir (not the purgeable cacheDir) and re-points editState at the copy so
+    // subsequent saves don't re-copy.
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000) // 30 seconds
-            LocalDraftManager.getInstance(context).saveDraft(editState)
+            editState = LocalDraftManager.getInstance(context).persistDraft(editState)
         }
     }
+
+    // Exit-without-posting = AUTO-SAVE (no dialog, matches iOS). Copies the
+    // recording bytes into the persistent drafts dir, writes a poster, then
+    // leaves. Covers both the X button and the hardware back gesture.
+    val autoSaveAndExit: () -> Unit = {
+        coroutineScope.launch {
+            LocalDraftManager.getInstance(context).persistDraft(editState)
+            onCancel()
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = true) { autoSaveAndExit() }
 
     // Cleanup
     DisposableEffect(Unit) {
@@ -124,10 +136,10 @@ fun VideoReviewView(
 
         // ── Top bar: cancel left, save right ───────────────────────
         TopToolbar(
-            onClose = { showingCancelAlert = true },
+            onClose = autoSaveAndExit,
             onSave = {
                 coroutineScope.launch {
-                    LocalDraftManager.getInstance(context).saveDraft(editState)
+                    editState = LocalDraftManager.getInstance(context).persistDraft(editState)
                 }
             },
             modifier = Modifier
@@ -208,31 +220,6 @@ fun VideoReviewView(
         if (editState.isProcessing) {
             ProcessingOverlay(progress = editState.processingProgress)
         }
-    }
-
-    // Cancel alert dialog
-    if (showingCancelAlert) {
-        AlertDialog(
-            onDismissRequest = { showingCancelAlert = false },
-            title = { Text("Cancel Editing?") },
-            text = { Text("Your edits will be lost if you haven't saved a draft.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showingCancelAlert = false
-                        onCancel()
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                ) {
-                    Text("Discard")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showingCancelAlert = false }) {
-                    Text("Keep Editing")
-                }
-            }
-        )
     }
 
     // Export error dialog

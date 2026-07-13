@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -51,6 +52,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 // Foundation imports
 import com.stitchsocial.club.foundation.CoreVideoMetadata
@@ -119,6 +121,10 @@ fun CardVideoCarouselView(
     var currentConversationPartner by remember { mutableStateOf<String?>(null) }
     var offsetY by remember { mutableStateOf(0f) }
     var dragOffsetX by remember { mutableStateOf(0f) }
+    // True while the finger is actively swiping the strip horizontally.
+    // Gates video playback (pause the active card mid-swipe, resume when settled)
+    // — matches the iOS reply-carousel glitch fix.
+    var isDragging by remember { mutableStateOf(false) }
 
     val iconMgr = iconManager ?: remember { FloatingIconManager() }
 
@@ -217,11 +223,15 @@ fun CardVideoCarouselView(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
+                        .pointerInput(videos.size) {
+                            val stepThreshold = 60.dp.toPx()
                             detectHorizontalDragGestures(
+                                onDragStart = { isDragging = true },
                                 onDragEnd = {
-                                    val threshold = 30.dp.toPx()
-                                    if (kotlin.math.abs(dragOffsetX) > threshold) {
+                                    isDragging = false
+                                    // Exactly one reply advances per gesture, past a
+                                    // consistent distance threshold.
+                                    if (kotlin.math.abs(dragOffsetX) > stepThreshold) {
                                         if (dragOffsetX > 0 && currentPage > 0) {
                                             currentPage -= 1
                                         } else if (dragOffsetX < 0 && currentPage < videos.size - 1) {
@@ -230,8 +240,20 @@ fun CardVideoCarouselView(
                                     }
                                     dragOffsetX = 0f
                                 },
-                                onHorizontalDrag = { _, dragAmount ->
-                                    dragOffsetX += dragAmount
+                                onDragCancel = {
+                                    isDragging = false
+                                    dragOffsetX = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    // Feed the drag straight into a per-card offset so the
+                                    // strip tracks the finger 1:1 and the neighbor card
+                                    // peeks in live. Rubber-band at the two ends.
+                                    val next = dragOffsetX + dragAmount
+                                    val atStart = currentPage == 0 && next > 0f
+                                    val atEnd = currentPage == videos.size - 1 && next < 0f
+                                    val resistance = if (atStart || atEnd) 0.35f else 1f
+                                    dragOffsetX += dragAmount * resistance
                                 }
                             )
                         }
@@ -243,6 +265,8 @@ fun CardVideoCarouselView(
                         CarouselDiscoveryCard(
                             video = video,
                             isActive = isActive,
+                            isDragging = isDragging,
+                            dragOffsetX = dragOffsetX,
                             distance = distance,
                             cardWidth = cardWidth,
                             cardHeight = cardHeight,
@@ -548,6 +572,8 @@ private fun PageIndicator(
 private fun CarouselDiscoveryCard(
     video: CoreVideoMetadata,
     isActive: Boolean,
+    isDragging: Boolean,
+    dragOffsetX: Float,
     distance: Int,
     cardWidth: Dp,
     cardHeight: Dp,
@@ -598,6 +624,9 @@ private fun CarouselDiscoveryCard(
             .width(cardWidth)
             .height(cardHeight)
             .offset(x = offsetX)
+            // Live finger tracking: every card follows the drag 1:1 (un-animated) so
+            // the strip moves with the finger and the neighbor peeks in during the swipe.
+            .offset { IntOffset(dragOffsetX.roundToInt(), 0) }
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -636,10 +665,13 @@ private fun CarouselDiscoveryCard(
         )
 
         if (isActive) {
-            // Active card - video player fills card
+            // Active card - video player fills card.
+            // Pause playback while the strip is being dragged (isActive && !isDragging)
+            // so the video doesn't keep playing mid-swipe; it resumes when the swipe
+            // settles. The player stays composed by stable identity, so no flicker.
             VideoPlayerComposable(
                 video = video,
-                isActive = true,
+                isActive = isActive && !isDragging,
                 modifier = Modifier.fillMaxSize()
             )
 

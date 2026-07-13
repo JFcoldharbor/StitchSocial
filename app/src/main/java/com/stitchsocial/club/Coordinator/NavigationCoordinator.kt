@@ -41,6 +41,7 @@ enum class ModalState {
     NONE,
     RECORDING,
     REACTION,               // ← Split-canvas reaction recorder (camera + content zone)
+    DRAFTS,                 // ← Saved-drafts grid (reachable from the camera screen)
     VIDEO_REVIEW,           // Video editing (trim, captions)
     PARALLEL_PROCESSING,
     THREAD_COMPOSER,
