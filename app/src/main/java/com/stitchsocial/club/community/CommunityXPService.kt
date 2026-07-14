@@ -85,6 +85,8 @@ class CommunityXPService private constructor() {
         source: CommunityXPSource,
         multiplier: Double = 1.0
     ) {
+        // Empty IDs would produce document("") downstream → IllegalArgumentException. Drop silently.
+        if (userID.isEmpty() || communityID.isEmpty()) return
         val amount = (source.xpAmount * multiplier).toInt()
         if (amount <= 0) return
 
@@ -110,6 +112,7 @@ class CommunityXPService private constructor() {
         userID: String, communityID: String,
         source: CommunityXPSource, multiplier: Double = 1.0
     ): XPAwardResult {
+        if (userID.isEmpty() || communityID.isEmpty()) throw CommunityError.InvalidIdentifiers
         val amount = (source.xpAmount * multiplier).toInt()
         return writeXP(userID, communityID, amount, source)
     }
@@ -143,6 +146,8 @@ class CommunityXPService private constructor() {
     private suspend fun writeXP(
         userID: String, communityID: String, amount: Int, source: CommunityXPSource
     ): XPAwardResult {
+        // Final guard before the actual document() calls — empty IDs crash here.
+        if (userID.isEmpty() || communityID.isEmpty()) throw CommunityError.InvalidIdentifiers
         val memberRef = db.collection(Col.COMMUNITIES).document(communityID)
             .collection(Col.MEMBERS).document(userID)
 
@@ -236,6 +241,7 @@ class CommunityXPService private constructor() {
     // MARK: - Daily Login XP
 
     suspend fun claimDailyLogin(userID: String, communityID: String): DailyLoginResult {
+        if (userID.isEmpty() || communityID.isEmpty()) throw CommunityError.InvalidIdentifiers
         val memberRef = db.collection(Col.COMMUNITIES).document(communityID)
             .collection(Col.MEMBERS).document(userID)
         val doc = memberRef.get().await()
@@ -306,6 +312,7 @@ class CommunityXPService private constructor() {
     // MARK: - XP from Coin Spending
 
     fun awardCoinSpendXP(userID: String, communityID: String, coinsSpent: Int) {
+        if (userID.isEmpty() || communityID.isEmpty()) return
         val totalXP = coinsSpent * CommunityXPSource.SPENT_HYPE_COIN.xpAmount
         val key = "${userID}_${communityID}"
         val existing = pendingXP[key]

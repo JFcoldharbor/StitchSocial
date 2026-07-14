@@ -101,12 +101,15 @@ fun SettingsView(
     var liveUser by remember(currentUser.id) { mutableStateOf(currentUser) }
     val userService = remember { com.stitchsocial.club.services.UserService(context) }
     LaunchedEffect(activeUID) {
-        val uid = activeUID ?: return@LaunchedEffect
-        if (uid != liveUser.id) {
-            try {
-                userService.getUserProfile(uid)?.let { liveUser = it }
-            } catch (_: Exception) { /* keep last value on error */ }
-        }
+        // Always re-fetch the active user's profile on open so a tier granted
+        // server-side (e.g. ambassador) reflects here — the creator section /
+        // "My Community" row is gated on liveUser.tier. Mirrors iOS
+        // SettingsView.loadData → refreshCurrentUser. (Previously only
+        // re-fetched on an account switch, so same-user grants stayed stale.)
+        val uid = activeUID ?: currentUser.id
+        try {
+            userService.getUserProfile(uid)?.let { liveUser = it }
+        } catch (_: Exception) { /* keep last value on error */ }
     }
 
     val isBusiness = liveUser.isBusiness ?: false

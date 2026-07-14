@@ -147,6 +147,10 @@ class CommunityService private constructor() {
     // MARK: - Fetch Community Status
 
     suspend fun fetchCommunityStatus(creatorID: String): CommunityStatus {
+        if (creatorID.isEmpty()) return CommunityStatus.NotCreated
+        // NOTE: unlike iOS (strict Codable), Community.fromFirestore is lenient
+        // (per-field `as? T ?: default`), so an old-schema doc never fails to
+        // decode into NotCreated — no create-vs-activate trap to guard against.
         val community = fetchCommunity(creatorID) ?: return CommunityStatus.NotCreated
         return if (community.isActive) CommunityStatus.Active(community) else CommunityStatus.Inactive(community)
     }
@@ -160,6 +164,7 @@ class CommunityService private constructor() {
         displayName: String? = null,
         description: String? = null
     ): Community {
+        if (creatorID.isEmpty()) throw CommunityError.InvalidIdentifiers
         val docRef = db.collection(Col.COMMUNITIES).document(creatorID)
         val doc = docRef.get().await()
         val data = doc.data ?: throw CommunityError.CommunityNotFound

@@ -636,6 +636,7 @@ sealed class CommunityError(override val message: String) : Exception(message) {
     object LevelTooLow : CommunityError("Level requirement not met")
     object Banned : CommunityError("You've been banned from this community")
     object CreatorOnly : CommunityError("Only the creator can perform this action")
+    object InvalidIdentifiers : CommunityError("Missing account or community details")
 }
 
 sealed class CommunityFeedError(override val message: String) : Exception(message) {
