@@ -230,6 +230,36 @@ class EventsViewModel : ViewModel() {
         _upcomingEvents.value = _upcomingEvents.value.map { if (it.id == eventID) transform(it) else it }
     }
 
+    // MARK: - Presence (geofenced — Phase 3)
+
+    private val _isOnsite = MutableStateFlow(false)
+    val isOnsite: StateFlow<Boolean> = _isOnsite.asStateFlow()
+
+    private val _isCheckingPresence = MutableStateFlow(false)
+    val isCheckingPresence: StateFlow<Boolean> = _isCheckingPresence.asStateFlow()
+
+    /**
+     * Fetch the device fix, test it against the venue geofence (with the GPS-accuracy
+     * buffer), and record the caller's onsite flag if they're Going. WhenInUse only.
+     */
+    fun refreshPresence(event: StitchEventEntity, location: LocationService) {
+        viewModelScope.launch {
+            _isCheckingPresence.value = true
+            try {
+                val fix = location.fetchCurrentLocation()
+                val onsite = fix != null && event.isWithinGeofence(fix.lat, fix.lng, fix.accuracyMeters)
+                _isOnsite.value = onsite
+                if (currentUserID.isNotBlank() && rsvpStatus(event.id) == EventRSVPStatus.GOING) {
+                    runCatching { service.setOnsite(event.id, currentUserID, onsite) }
+                }
+            } catch (e: Exception) {
+                _isOnsite.value = false
+            } finally {
+                _isCheckingPresence.value = false
+            }
+        }
+    }
+
     // MARK: - Agenda (each slot is a host thread)
 
     fun loadAgenda(eventID: String) {

@@ -11,8 +11,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +43,13 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
     val isGoing = myRSVPs[event.id] == EventRSVPStatus.GOING
 
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val locationService = remember { LocationService(context) }
+    val isOnsite by vm.isOnsite.collectAsState()
+    val isCheckingPresence by vm.isCheckingPresence.collectAsState()
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result.values.any { it }) vm.refreshPresence(event, locationService)
+    }
     var tab by remember { mutableStateOf(HubTab.AGENDA) }
     var menuOpen by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
@@ -47,6 +58,9 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
     LaunchedEffect(event.id) {
         vm.loadAgenda(event.id)
         vm.loadGiveaways(event.id)
+    }
+    LaunchedEffect(event.id, isGoing) {
+        if (!isHost && isGoing && locationService.hasPermission()) vm.refreshPresence(event, locationService)
     }
 
     if (showEdit) {
@@ -85,6 +99,26 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
                 onClick = { vm.toggleGoing(event) },
                 colors = ButtonDefaults.buttonColors(containerColor = if (isGoing) Color.White.copy(alpha = 0.15f) else Color.White)
             ) { Text(if (isGoing) "Going" else "Join", color = if (isGoing) Color.White else Color.Black, fontWeight = FontWeight.Bold) }
+        }
+
+        // Presence — geofenced check-in for Going guests during a live event.
+        if (!isHost && isGoing && event.isLive) {
+            val (label, color) = when {
+                isCheckingPresence -> "Checking you're here…" to Color.White.copy(alpha = 0.6f)
+                isOnsite -> "You're at the venue ✓" to StitchColors.success
+                else -> "Not at the venue · tap to check in" to Color.White.copy(alpha = 0.6f)
+            }
+            Text(
+                label, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.08f))
+                    .clickable {
+                        if (locationService.hasPermission()) vm.refreshPresence(event, locationService)
+                        else permLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
 
         // Clock rail

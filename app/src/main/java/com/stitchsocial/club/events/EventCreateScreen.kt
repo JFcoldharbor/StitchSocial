@@ -1,6 +1,10 @@
 package com.stitchsocial.club.events
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -49,6 +54,30 @@ fun EventCreateScreen(
     var isSaving by remember { mutableStateOf(false) }
     val error by vm.errorMessage.collectAsState()
 
+    // Venue pin (Phase 3 location: current fix + Geocoder search).
+    val context = LocalContext.current
+    val locationService = remember { LocationService(context) }
+    var venueCandidates by remember { mutableStateOf<List<LocationService.GeoPlace>>(emptyList()) }
+    var lookingUp by remember { mutableStateOf(false) }
+
+    suspend fun useCurrentLocation() {
+        lookingUp = true
+        val fix = locationService.fetchCurrentLocation()
+        if (fix != null) {
+            val place = locationService.reverseGeocode(fix.lat, fix.lng)
+            draft = draft.copy(
+                venueName = draft.venueName.ifBlank { place?.name ?: "Current location" },
+                city = draft.city.ifBlank { place?.city ?: "" },
+                venueLat = fix.lat, venueLng = fix.lng, hasVenuePin = true
+            )
+        }
+        lookingUp = false
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result.values.any { it }) scope.launch { useCurrentLocation() }
+    }
+
     val canSave = draft.name.isNotBlank() && draft.venueName.isNotBlank() &&
         draft.city.isNotBlank() && draft.hasVenuePin &&
         (isEditing || draft.doorsAt.time > System.currentTimeMillis())
@@ -78,13 +107,39 @@ fun EventCreateScreen(
             }
 
             field("Venue") {
-                inputField(draft.venueName, "Ponce City Market") {
-                    // Typed venue → treat as pinned for now (real pin in Phase 3).
-                    draft = draft.copy(venueName = it, hasVenuePin = it.isNotBlank())
+                inputField(draft.venueName, "Search a venue or address") {
+                    // Editing the text clears the pin until it's re-resolved to coords.
+                    draft = draft.copy(venueName = it, hasVenuePin = false)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { scope.launch { lookingUp = true; venueCandidates = locationService.geocode(draft.venueName); lookingUp = false } }) {
+                        Text("Find", color = Color.White)
+                    }
+                    OutlinedButton(onClick = {
+                        if (locationService.hasPermission()) scope.launch { useCurrentLocation() }
+                        else permLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }) { Text("Use current location", color = Color.White) }
+                    if (lookingUp) CircularProgressIndicator(Modifier.size(20.dp), color = StitchColors.primary, strokeWidth = 2.dp)
+                }
+                venueCandidates.forEach { place ->
+                    Text(
+                        "${place.name}${if (place.address.isNotBlank()) " · ${place.address}" else ""}",
+                        color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            draft = draft.copy(
+                                venueName = place.name,
+                                city = draft.city.ifBlank { place.city },
+                                venueLat = place.lat, venueLng = place.lng, hasVenuePin = true
+                            )
+                            venueCandidates = emptyList()
+                        }.padding(vertical = 6.dp)
+                    )
                 }
                 Text(
-                    "📍 Precise map pin + geofence coming soon",
-                    color = Color.White.copy(alpha = 0.35f), fontSize = 11.sp
+                    if (draft.hasVenuePin) "📍 Pinned · geofence ${draft.geofenceRadiusMeters.toInt()}m around this spot"
+                    else "Pick a venue above to set the geofence pin",
+                    color = if (draft.hasVenuePin) StitchColors.success else Color.White.copy(alpha = 0.35f),
+                    fontSize = 11.sp
                 )
             }
 
