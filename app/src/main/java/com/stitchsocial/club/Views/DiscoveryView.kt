@@ -776,6 +776,22 @@ fun DiscoveryView(
     val currentUserID = authService.getCurrentUserId()
     val currentUserTier = UserTier.ROOKIE // TODO: Load from user profile
 
+    // Events — shared VM + a full-screen Hub overlay (hoisted to the Discovery
+    // root so the event page takes over the screen like iOS, above the chrome).
+    val eventsContext = androidx.compose.ui.platform.LocalContext.current
+    val eventsVM = remember { com.stitchsocial.club.events.EventsViewModel() }
+    var eventHub by remember { mutableStateOf<com.stitchsocial.club.events.StitchEventEntity?>(null) }
+    LaunchedEffect(currentUserID) {
+        val uid = currentUserID ?: ""
+        val username = if (uid.isNotBlank())
+            runCatching { com.stitchsocial.club.services.UserService(eventsContext).getBasicUserInfo(uid)?.username }.getOrNull() ?: "" else ""
+        eventsVM.configure(uid, username)
+    }
+    LaunchedEffect(selectedCategory) {
+        if (selectedCategory == DiscoveryCategory.EVENTS) eventsVM.load()
+    }
+    LaunchedEffect(eventHub) { onTabBarVisibilityChange?.invoke(eventHub == null) }
+
     // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
     LaunchedEffect(currentSwipeIndex, videos.size) {
         // Sponsored impression: fires when the ad card becomes the active/top card.
@@ -850,6 +866,21 @@ fun DiscoveryView(
                 )
             )
     ) {
+
+        // Event Hub — full-screen overlay above the Discovery chrome (iOS fullScreenCover parity).
+        eventHub?.let { ev ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(200f)
+            ) {
+                com.stitchsocial.club.events.EventHubScreen(
+                    event = ev,
+                    vm = eventsVM,
+                    onDismiss = { eventHub = null; eventsVM.load() }
+                )
+            }
+        }
 
         // Collection player fullscreen overlay
         if (showCollectionPlayer && selectedCollection != null) {
@@ -977,7 +1008,7 @@ fun DiscoveryView(
                     }
                     // Events tab = the Concept B rows/hub, not the v1 video feed.
                     selectedCategory == DiscoveryCategory.EVENTS -> {
-                        com.stitchsocial.club.events.EventRowsScreen(currentUserID = currentUserID ?: "")
+                        com.stitchsocial.club.events.EventRowsScreen(vm = eventsVM, onOpenEvent = { eventHub = it })
                     }
                     // Show the loading view whenever the feed is empty AND
                     // either we're actively loading OR there's no error.

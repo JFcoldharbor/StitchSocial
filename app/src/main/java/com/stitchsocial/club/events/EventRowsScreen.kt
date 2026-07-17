@@ -32,8 +32,7 @@ private enum class EventsTab { BROWSE, MINE }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EventRowsScreen(currentUserID: String = "", currentUsername: String = "") {
-    val vm = remember { EventsViewModel() }
+fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Unit) {
     val blue = StitchColors.secondary
 
     val live by vm.liveEvents.collectAsState()
@@ -43,27 +42,11 @@ fun EventRowsScreen(currentUserID: String = "", currentUsername: String = "") {
     val isLoading by vm.isLoading.collectAsState()
 
     var tab by remember { mutableStateOf(EventsTab.BROWSE) }
-    var selectedEvent by remember { mutableStateOf<StitchEventEntity?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<StitchEventEntity?>(null) }
 
-    val context = LocalContext.current
-    LaunchedEffect(currentUserID) {
-        // Resolve the handle for RSVP / host attribution if the caller didn't supply it.
-        val username = currentUsername.ifBlank {
-            if (currentUserID.isNotBlank())
-                runCatching { UserService(context).getBasicUserInfo(currentUserID)?.username }.getOrNull() ?: ""
-            else ""
-        }
-        vm.configure(currentUserID, username)
-        vm.load()
-    }
-
-    // Fullscreen overlays (matches the live-stream boolean-overlay precedent).
-    selectedEvent?.let { ev ->
-        EventHubScreen(event = ev, vm = vm, onDismiss = { selectedEvent = null; vm.load() })
-        return
-    }
+    // Create is a form → fine inside the tab content. The Hub is hoisted to the
+    // Discovery root so it takes over the full screen (see onOpenEvent).
     if (showCreate) {
         EventCreateScreen(vm = vm, onDismiss = { showCreate = false })
         return
@@ -87,11 +70,11 @@ fun EventRowsScreen(currentUserID: String = "", currentUsername: String = "") {
                         LazyColumn(Modifier.weight(1f)) {
                             if (live.isNotEmpty()) {
                                 item { sectionHeader("Today") }
-                                items(live, key = { it.id }) { EventRow(it, myRSVPs[it.id], blue, { selectedEvent = it }, { vm.toggleGoing(it) }) }
+                                items(live, key = { it.id }) { EventRow(it, myRSVPs[it.id], blue, { onOpenEvent(it) }, { vm.toggleGoing(it) }) }
                             }
                             if (upcoming.isNotEmpty()) {
                                 item { sectionHeader("This week") }
-                                items(upcoming, key = { it.id }) { EventRow(it, myRSVPs[it.id], blue, { selectedEvent = it }, { vm.toggleGoing(it) }) }
+                                items(upcoming, key = { it.id }) { EventRow(it, myRSVPs[it.id], blue, { onOpenEvent(it) }, { vm.toggleGoing(it) }) }
                             }
                         }
                     }
@@ -104,7 +87,7 @@ fun EventRowsScreen(currentUserID: String = "", currentUsername: String = "") {
                     } else {
                         LazyColumn(Modifier.weight(1f)) {
                             items(mine, key = { it.id }) { ev ->
-                                MyEventRow(ev, blue, onOpen = { selectedEvent = ev }, onLongPress = { pendingDelete = ev })
+                                MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
                             }
                         }
                     }

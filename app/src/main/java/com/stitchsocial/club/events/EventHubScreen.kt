@@ -30,7 +30,7 @@ import java.util.Date
  * Edit/Delete + Agenda and Prizes tabs. Invite, Host-Thread video cards, promo/
  * recap videos, and geofenced POV land in Phase 4.
  */
-private enum class HubTab(val label: String) { AGENDA("Timeline"), PRIZES("Prizes") }
+private enum class HubTab(val label: String) { AGENDA("Timeline"), INVITE("Invite"), PRIZES("Prizes") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,6 +159,7 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
 
         when (tab) {
             HubTab.AGENDA -> AgendaTab(event, agenda, isHost, blue, vm)
+            HubTab.INVITE -> InviteTab(event, blue) { showInvite = true }
             HubTab.PRIZES -> PrizesTab(event, giveaways, isHost, blue, vm)
         }
     }
@@ -236,6 +237,26 @@ private fun PrizesTab(event: StitchEventEntity, giveaways: List<EventGiveaway>, 
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun InviteTab(event: StitchEventEntity, blue: Color, onInvite: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Text("Invite people", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Send it to anyone — they land right on this event.", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+        Button(onClick = onInvite, modifier = Modifier.fillMaxWidth().height(50.dp), colors = ButtonDefaults.buttonColors(containerColor = blue)) {
+            Text("Invite from your circle", color = Color.Black, fontWeight = FontWeight.Bold)
+        }
+        if (event.goingCount > 0) {
+            Text("${event.goingCount} going", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+        }
+        Text("stitchsocial.me/e/${event.id}", color = Color.White.copy(alpha = 0.4f), fontSize = 12.sp)
     }
 }
 
