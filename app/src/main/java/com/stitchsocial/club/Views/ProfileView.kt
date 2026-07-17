@@ -1214,7 +1214,15 @@ private fun ProfileHeader(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(user.displayName, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+                    // Headliner name — ~30sp bold, single line (iOS uses 32pt title).
+                    Text(
+                        user.displayName,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppTheme.colors.textPrimary,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                     // Tier-as-verification: a tier-colored check IS the verification
                     // (UserTier.color). Personal shows for tier != Rookie or verified;
                     // business shows a teal check. Replaces the red icon + tier chip.
@@ -1461,21 +1469,29 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
 
 @Composable
 private fun StatsRow(user: BasicUserInfo, videoCount: Int, onFollowersClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-        StatItem(videoCount, "Videos") { }
-        StatItem(user.followerCount ?: 0, "Stitchers", onFollowersClick)
-        StatItem(user.clout ?: 0, "Clout") { }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        StatCard(videoCount, "Videos", Modifier.weight(1f)) { }
+        StatCard(user.followerCount ?: 0, "Stitchers", Modifier.weight(1f), onFollowersClick)
+        StatCard(user.clout ?: 0, "Clout", Modifier.weight(1f)) { }
     }
 }
 
 @Composable
-private fun StatItem(count: Int, label: String, onClick: () -> Unit) {
+private fun StatCard(count: Int, label: String, modifier: Modifier, onClick: () -> Unit) {
     Column(
-        modifier = Modifier.clickable(onClick = onClick).padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = modifier
+            .clip(RoundedCornerShape(13.dp))
+            .background(AppTheme.colors.surface)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(formatLargeNumber(count), color = AppTheme.colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = if (label == "Stitchers") Color.Cyan else AppTheme.colors.textSecondary, fontSize = 11.sp)
+        Text(formatLargeNumber(count), color = AppTheme.colors.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text(label.uppercase(), color = AppTheme.colors.textSecondary, fontSize = 10.sp, letterSpacing = 0.5.sp)
     }
 }
 

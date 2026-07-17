@@ -203,17 +203,23 @@ fun ProfileBadgeStack(
             }
         }
 
-        // "N new" pill when there are unseen badges.
+        // Pulsing red dot when there are unseen badges — NO number (iOS parity).
         if (newCount > 0) {
             Spacer(Modifier.width(6.dp))
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color.Red)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("$newCount", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            val transition = rememberInfiniteTransition(label = "badgeStackDot")
+            val pulseScale by transition.animateFloat(
+                initialValue = 0.9f, targetValue = 2.2f,
+                animationSpec = infiniteRepeatable(animation = tween(1400, easing = LinearEasing)),
+                label = "scale"
+            )
+            val pulseAlpha by transition.animateFloat(
+                initialValue = 0.6f, targetValue = 0f,
+                animationSpec = infiniteRepeatable(animation = tween(1400, easing = LinearEasing)),
+                label = "alpha"
+            )
+            Box(modifier = Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(7.dp).scale(pulseScale).alpha(pulseAlpha).clip(CircleShape).background(Color.Red))
+                Box(Modifier.size(7.dp).clip(CircleShape).background(Color.Red))
             }
         }
     }

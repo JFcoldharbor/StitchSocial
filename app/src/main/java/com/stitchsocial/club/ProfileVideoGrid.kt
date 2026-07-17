@@ -386,64 +386,29 @@ private fun VideoThumbnailContent(
             PlaceholderThumbnail(video.title)
         }
 
-        // Bottom gradient overlay
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.7f)
-                        )
-                    )
-                )
-        )
-
-        // Engagement badges
-        if (video.hypeCount > 0 || video.coolCount > 0) {
+        // Hype badge — TOP-RIGHT, flame only (iOS parity: no cool count, no
+        // bottom gradient). Only when there are hypes.
+        if (video.hypeCount > 0) {
             Row(
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (video.hypeCount > 0) {
-                    Icon(
-                        imageVector = Icons.Default.Whatshot,
-                        contentDescription = "Hypes",
-                        tint = Color(0xFFFF6B35),
-                        modifier = Modifier.size(10.dp)
-                    )
-                    Text(
-                        text = formatCount(video.hypeCount),
-                        color = Color.White,
-                        fontSize = 9.sp
-                    )
-                }
-
-                if (video.coolCount > 0) {
-                    Icon(
-                        imageVector = Icons.Default.AcUnit,
-                        contentDescription = "Cools",
-                        tint = Color(0xFF00BFFF),
-                        modifier = Modifier.size(10.dp)
-                    )
-                    Text(
-                        text = formatCount(video.coolCount),
-                        color = Color.White,
-                        fontSize = 9.sp
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Whatshot,
+                    contentDescription = "Hypes",
+                    tint = Color(0xFFFF6B35),
+                    modifier = Modifier.size(10.dp)
+                )
+                Text(text = formatCount(video.hypeCount), color = Color.White, fontSize = 9.sp)
             }
         }
 
-        // Duration badge
+        // Duration badge — BOTTOM-RIGHT.
         if (video.duration > 0) {
             Text(
                 text = formatDuration(video.duration),
@@ -452,8 +417,8 @@ private fun VideoThumbnailContent(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
