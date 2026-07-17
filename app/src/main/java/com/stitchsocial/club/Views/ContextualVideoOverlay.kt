@@ -43,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.offset
 import com.stitchsocial.club.R
 import com.stitchsocial.club.ui.theme.StitchColors
+import com.stitchsocial.club.ui.theme.Spacing
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -1273,26 +1274,29 @@ private fun TopSection(
         }
 
         // Right: share (fullscreen) + exit (fullscreen) + Report/Block menu — one
-        // coordinated row so nothing overlaps (App Store Guideline 1.2 / Play UGC).
+        // coordinated row, all uniform 40dp circular buttons on an 8pt (Spacing.xs)
+        // gap so they read in sync (App Store Guideline 1.2 / Play UGC).
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showShareInTop) {
+                // SMALL = no dangling "Share" label, matching the icon-only exit/3-dots.
                 ShareButton(
                     video = video,
                     creatorUsername = displayCreatorName,
-                    size = ShareButtonSize.MEDIUM
+                    size = ShareButtonSize.SMALL
                 )
             }
             if (onExit != null) {
                 IconButton(
                     onClick = onExit,
                     modifier = Modifier
+                        .size(40.dp)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(Color.Black.copy(alpha = 0.4f))
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
             MoreOptionsMenu(
