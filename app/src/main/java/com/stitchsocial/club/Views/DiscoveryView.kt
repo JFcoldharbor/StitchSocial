@@ -755,10 +755,8 @@ fun DiscoveryView(
     var showCollectionPlayer by remember { mutableStateOf(false) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
 
-    // Hide tab bar when collection player is open — matches iOS fullScreenCover behavior
-    LaunchedEffect(showCollectionPlayer) {
-        onTabBarVisibilityChange?.invoke(!showCollectionPlayer)
-    }
+    // (Tab-bar visibility is driven by a single combined effect below, after all
+    // fullscreen surfaces are declared — see LaunchedEffect(showVideoPlayer, ...).)
 
     // Preload collections on first composition so COLLECTIONS tab is instant
     LaunchedEffect(Unit) {
@@ -790,7 +788,13 @@ fun DiscoveryView(
     LaunchedEffect(selectedCategory) {
         if (selectedCategory == DiscoveryCategory.EVENTS) eventsVM.load()
     }
-    LaunchedEffect(eventHub) { onTabBarVisibilityChange?.invoke(eventHub == null) }
+    // Hide the custom tab bar whenever ANY fullscreen surface is up — the
+    // fullscreen video deck, the collection player, or the event hub — so those
+    // are truly full screen (matches iOS fullScreenCover). Single combined effect
+    // so the surfaces can't race each other on tab-bar visibility.
+    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub) {
+        onTabBarVisibilityChange?.invoke(!showVideoPlayer && !showCollectionPlayer && eventHub == null)
+    }
 
     // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
     LaunchedEffect(currentSwipeIndex, videos.size) {
