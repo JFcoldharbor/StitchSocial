@@ -21,6 +21,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
@@ -1141,403 +1143,40 @@ fun DiscoveryView(
             }
         }
 
-        // Fullscreen Video Player with Horizontal Swipe (like HomeFeedView)
-        if (showVideoPlayer && allVideos.isNotEmpty()) {
-            val scope = rememberCoroutineScope()
-            val configuration = LocalConfiguration.current
-            val density = LocalDensity.current
-            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-
-            val videoCount = allVideos.size
-            val offsetX = remember { Animatable(0f) }
-            var isDragging by remember { mutableStateOf(false) }
-
-            // DECK PAGING: vertical strip offset + paging lock
-            val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-            val verticalOffset = remember { Animatable(0f) }
-            var isPagingDeck by remember { mutableStateOf(false) }
-
-            // Reset when video changes
-            LaunchedEffect(currentPlayingVideo?.id) {
-                currentVideoIndex = 0
-                offsetX.snapTo(0f)
-            }
-
-            val currentVideo = allVideos.getOrNull(currentVideoIndex) ?: allVideos[0]
-
-            // Mirrors iOS FullscreenVideoView deck mode: exits sync the card
-            // stack to wherever the user paged.
-            fun dismissPlayer() {
-                currentSwipeIndex = deckPosition.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
-                showVideoPlayer = false
-                currentPlayingVideo = null
-                allVideos = emptyList()
-                currentVideoIndex = 0
-            }
-
-            fun pageDeck(direction: Int) {
-                if (isPagingDeck) return
-                var newIndex = deckPosition + direction
-                // Skip non-playable pseudo entries (sponsored slots and collection
-                // cards carry videoURL = "" and must NEVER reach an ExoPlayer).
-                while (newIndex in videos.indices && videos[newIndex].videoURL.isBlank()) {
-                    newIndex += direction
-                }
-                if (newIndex < 0 || newIndex >= videos.size) return
-                isPagingDeck = true
-                scope.launch {
-                    // One continuous spring: outgoing card + glued peek travel together.
-                    verticalOffset.animateTo(
-                        if (direction > 0) -screenHeightPx else screenHeightPx,
-                        spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
-                    )
-                    val newRoot = videos[newIndex]
-                    deckPosition = newIndex
-                    currentPlayingVideo = newRoot
-                    allVideos = listOf(newRoot)   // root plays immediately; replies attach quietly
-                    verticalOffset.snapTo(0f)     // new current renders where the peek settled
-                    isPagingDeck = false
-
-                    // Quiet thread load with stale guard
-                    launch {
-                        try {
-                            val threadID = newRoot.threadID
-                            if (threadID != null) {
-                                val (parent, children) = videoService.getThreadData(threadID)
-                                if (currentPlayingVideo?.id == newRoot.id && parent != null) {
-                                    allVideos = listOf(parent) + children
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
-
-                    // Warm adjacent deck sources so the next page starts instantly
-                    val warm = listOfNotNull(
-                        videos.getOrNull(newIndex + direction)?.videoURL,
-                        videos.getOrNull(newIndex - direction)?.videoURL
-                    ).filter { it.isNotEmpty() }
-                    if (warm.isNotEmpty()) {
-                        com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(warm)
-                    }
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(100f)
-                    .background(Color.Black)
-                    .pointerInput(videoCount) {
-                        if (videoCount <= 1) return@pointerInput  // No swipe for single video
-
-                        val velocityTracker = VelocityTracker()
-
-                        detectHorizontalDragGestures(
-                            onDragStart = {
-                                isDragging = true
-                                velocityTracker.resetTracking()
-                            },
-                            onDragEnd = {
-                                isDragging = false
-
-                                val velocity = velocityTracker.calculateVelocity().x
-                                val currentOffset = offsetX.value
-
-                                val threshold = screenWidthPx * 0.2f  // 20% of screen
-                                val velocityThreshold = 300f
-
-                                scope.launch {
-                                    val targetIndex = when {
-                                        // Swipe left (next) - negative offset or velocity
-                                        currentOffset < -threshold || velocity < -velocityThreshold -> {
-                                            (currentVideoIndex + 1).coerceAtMost(videoCount - 1)
-                                        }
-                                        // Swipe right (prev) - positive offset or velocity
-                                        currentOffset > threshold || velocity > velocityThreshold -> {
-                                            (currentVideoIndex - 1).coerceAtLeast(0)
-                                        }
-                                        // Snap back
-                                        else -> currentVideoIndex
-                                    }
-
-                                    currentVideoIndex = targetIndex
-
-                                    offsetX.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioLowBouncy,
-                                            stiffness = Spring.StiffnessLow
-                                        )
-                                    )
-
-                                    if (BuildConfig.DEBUG) { println("DISCOVERY SWIPE: Index now $currentVideoIndex / ${videoCount - 1}") }
-                                }
-                            },
-                            onDragCancel = {
-                                isDragging = false
-                                scope.launch {
-                                    offsetX.animateTo(
-                                        0f,
-                                        spring(
-                                            dampingRatio = Spring.DampingRatioLowBouncy,
-                                            stiffness = Spring.StiffnessLow
-                                        )
-                                    )
-                                }
-                            },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                velocityTracker.addPosition(
-                                    change.uptimeMillis,
-                                    change.position
-                                )
-
-                                // Edge resistance
-                                val resistance = when {
-                                    currentVideoIndex == 0 && offsetX.value + dragAmount > 0 -> 0.4f
-                                    currentVideoIndex == videoCount - 1 && offsetX.value + dragAmount < 0 -> 0.4f
-                                    else -> 1f
-                                }
-
-                                scope.launch {
-                                    offsetX.snapTo(offsetX.value + dragAmount * resistance)
-                                }
-                            }
-                        )
-                    }
-                    .pointerInput(Unit) {
-                        // DECK PAGING: up = next card, down = previous, down at
-                        // first card = dismiss. Mirrors iOS gesture map.
-                        val vTracker = VelocityTracker()
-                        detectVerticalDragGestures(
-                            onDragStart = { vTracker.resetTracking() },
-                            onDragEnd = {
-                                val velocity = vTracker.calculateVelocity().y
-                                val offset = verticalOffset.value
-                                val threshold = screenHeightPx * 0.12f
-                                val velocityThreshold = 300f
-                                when {
-                                    offset < -threshold || velocity < -velocityThreshold -> {
-                                        if (deckPosition < videos.size - 1) pageDeck(1)
-                                        else scope.launch { verticalOffset.animateTo(0f, spring()) }
-                                    }
-                                    offset > threshold || velocity > velocityThreshold -> {
-                                        if (deckPosition > 0) pageDeck(-1)
-                                        else scope.launch {
-                                            verticalOffset.animateTo(
-                                                screenHeightPx,
-                                                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
-                                            )
-                                            dismissPlayer()
-                                        }
-                                    }
-                                    else -> scope.launch { verticalOffset.animateTo(0f, spring()) }
-                                }
-                            },
-                            onDragCancel = { scope.launch { verticalOffset.animateTo(0f, spring()) } },
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                vTracker.addPosition(change.uptimeMillis, change.position)
-                                // Rubber-band up-drag at the last card; down at
-                                // first card stays 1:1 (dismiss gesture).
-                                val noNext = deckPosition >= videos.size - 1 && verticalOffset.value + dragAmount < 0
-                                val damp = if (noNext) 0.35f else 1f
-                                scope.launch { verticalOffset.snapTo(verticalOffset.value + dragAmount * damp) }
-                            }
-                        )
-                    }
-            ) {
-                // Connected deck strip: neighbor poster frames glued one screen
-                // above/below, tracking the drag 1:1 (Coil caches the loads).
-                videos.getOrNull(deckPosition - 1)?.let { prev ->
-                    AsyncImage(
-                        model = prev.thumbnailURL,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { translationY = verticalOffset.value - screenHeightPx }
-                            .background(Color.Black)
-                    )
-                }
-                videos.getOrNull(deckPosition + 1)?.let { next ->
-                    AsyncImage(
-                        model = next.thumbnailURL,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { translationY = verticalOffset.value + screenHeightPx }
-                            .background(Color.Black)
-                    )
-                }
-
-                // Top-right controls (share + exit + 3-dots) are rendered inside
-                // the overlay's TopSection as one coordinated row — see the
-                // showShareInTop / onExit args on ContextualVideoOverlay below.
-                // (Vertical swipe / pull-down at the first card also exits.)
-
-                // Video layer with horizontal offset
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            translationX = offsetX.value
-                            translationY = verticalOffset.value
-                        }
-                ) {
-                    key(currentVideo.id) {
-                        VideoPlayerComposable(
-                            video = currentVideo,
-                            isActive = !isAnnouncementShowing && !isDragging,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
-
-                // Contextual overlay with bottom padding for tab bar area - FULL OVERLAY
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { translationY = verticalOffset.value }
-                        .padding(bottom = 18.dp)  // Just a bit lower
-                ) {
-                    ContextualVideoOverlay(
-                        video = currentVideo,
-                        overlayContext = OverlayContext.HOME_FEED,  // Full overlay with all buttons
-                        currentUserID = currentUserID,
-                        currentUserTier = currentUserTier ?: UserTier.ROOKIE,
-                        engagementViewModel = engagementViewModel,
-                        iconManager = iconManager,
-                        followManager = followManager,
-                        isVisible = true && !isDragging,
-                        // Fullscreen hides the tab bar, so bring the metadata + action
-                        // buttons down (the 70dp HomeFeed tab-bar clearance is too high here).
-                        bottomPaddingOverride = 24.dp,
-                        // Render share + exit in the overlay's top row next to the
-                        // 3-dots, so nothing overlaps.
-                        showShareInTop = true,
-                        onExit = { dismissPlayer() },
-                        onAction = { action ->
-                            when (action) {
-                                is OverlayAction.NavigateToProfile -> {
-                                    currentSwipeIndex = deckPosition
-                                    showVideoPlayer = false
-                                    onNavigateToProfile(action.userID)
-                                }
-                                is OverlayAction.NavigateToThread -> {
-                                    // Navigate to thread via parent callback. Respect the
-                                    // Thread3DInfoPanel's focus target if the user tapped
-                                    // a specific reply in the preview.
-                                    val threadID = currentVideo.threadID ?: currentVideo.id
-                                    onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
-                                    if (BuildConfig.DEBUG) { println("DISCOVERY: Thread button tapped - navigating to $threadID") }
-                                }
-                                is OverlayAction.StitchRecording -> {
-                                    val isOwn = currentVideo.creatorID == currentUserID
-                                    val ctx = if (isOwn) {
-                                        RecordingContextFactory.createContinueThread(
-                                            currentVideo.threadID ?: currentVideo.id,
-                                            currentVideo.creatorName,
-                                            currentVideo.title
-                                        )
-                                    } else {
-                                        RecordingContextFactory.createStitchToThread(
-                                            currentVideo.threadID ?: currentVideo.id,
-                                            currentVideo.creatorName,
-                                            currentVideo.title
-                                        )
-                                    }
-                                    navigationCoordinator?.showModal(
-                                        ModalState.RECORDING,
-                                        mapOf(
-                                            "context" to ctx,
-                                            "parentVideo" to currentVideo
-                                        )
-                                    )
-                                }
-                                else -> {}
-                            }
-                        }
-                    )
-                }
-
-                // (Share moved into the top-right row with Close above — it was a
-                // second TopEnd element overlapping the close button.)
-
-                // Navigation indicators (like HomeFeedView)
-                if (videoCount > 1) {
-                    // Next video preview (right edge)
-                    if (currentVideoIndex < videoCount - 1) {
-                        val nextVideo = allVideos[currentVideoIndex + 1]
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 8.dp)
-                                .size(60.dp, 80.dp)
-                                .graphicsLayer {
-                                    translationX = offsetX.value
-                                    alpha = 0.9f  // More visible
-                                }
-                        ) {
-                            AsyncImage(
-                                model = nextVideo.thumbnailURL,
-                                contentDescription = "Next",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                        }
-                    }
-
-                    // Previous video preview (left edge)
-                    if (currentVideoIndex > 0) {
-                        val prevVideo = allVideos[currentVideoIndex - 1]
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = 8.dp)
-                                .size(60.dp, 80.dp)
-                                .graphicsLayer {
-                                    translationX = offsetX.value
-                                    alpha = 0.9f  // More visible
-                                }
-                        ) {
-                            AsyncImage(
-                                model = prevVideo.thumbnailURL,
-                                contentDescription = "Previous",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                        }
-                    }
-
-                    // Progress indicator
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 60.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        repeat(videoCount.coerceAtMost(10)) { index ->
-                            Box(
-                                modifier = Modifier
-                                    .size(if (index == currentVideoIndex) 8.dp else 6.dp)
-                                    .background(
-                                        color = if (index == currentVideoIndex)
-                                            Color.White
-                                        else
-                                            Color.White.copy(alpha = 0.4f),
-                                        shape = CircleShape
-                                    )
-                            )
-                        }
-                    }
-                }
-            }
+        // Fullscreen video deck — VerticalPager (TikTok-style; mirrors HomeFeedView).
+        // The old hand-rolled Animatable deck paged by swapping data + snapTo(0) and
+        // re-mounting a fresh ExoPlayer for the new id, so you saw the neighbor as a
+        // static thumbnail then a black->buffer->play flash on settle. A VerticalPager
+        // keeps a window of pages composed, so the incoming video's player is already
+        // prepared (eager prepare()) as it scrolls in and just plays when it lands.
+        if (showVideoPlayer && currentPlayingVideo != null && videos.isNotEmpty()) {
+            DiscoveryFullscreenDeck(
+                rootVideos = videos,
+                initialVideoID = currentPlayingVideo!!.id,
+                currentUserID = currentUserID,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                navigationCoordinator = navigationCoordinator,
+                videoService = videoService,
+                isAnnouncementShowing = isAnnouncementShowing,
+                onSettledIndexChange = { idx -> deckPosition = idx },
+                onDismiss = { settledIdx ->
+                    currentSwipeIndex = settledIdx.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
+                    showVideoPlayer = false
+                    currentPlayingVideo = null
+                    allVideos = emptyList()
+                },
+                onNavigateToProfile = { userID, settledIdx ->
+                    currentSwipeIndex = settledIdx
+                    showVideoPlayer = false
+                    onNavigateToProfile(userID)
+                },
+                onShowThreadView = { threadID, targetVideoID ->
+                    onShowThreadView(threadID, targetVideoID)
+                },
+                modifier = Modifier.zIndex(100f)
+            )
         }
 
         // Search Sheet Modal
@@ -2254,5 +1893,243 @@ private fun DiscoveryHashtagChip(
             fontSize = 11.sp,
             color = if (isSelected) Color.Black.copy(alpha = 0.7f) else Color.Gray
         )
+    }
+}
+
+// MARK: - Fullscreen Video Deck (TikTok-style VerticalPager)
+//
+// Replaces the old hand-rolled Animatable deck. Sponsored / collection
+// pseudo-cards carry a blank videoURL and are filtered out so they never reach
+// an ExoPlayer. beyondBoundsPageCount = 1 keeps one neighbor on each side
+// composed, so the next video's player is prepared before it scrolls in.
+@Composable
+private fun DiscoveryFullscreenDeck(
+    rootVideos: List<CoreVideoMetadata>,
+    initialVideoID: String,
+    currentUserID: String?,
+    engagementViewModel: EngagementViewModel,
+    iconManager: FloatingIconManager,
+    followManager: FollowManager,
+    navigationCoordinator: NavigationCoordinator?,
+    videoService: VideoServiceImpl,
+    isAnnouncementShowing: Boolean,
+    onSettledIndexChange: (Int) -> Unit,
+    onDismiss: (settledIndex: Int) -> Unit,
+    onNavigateToProfile: (userID: String, settledIndex: Int) -> Unit,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val playable = remember(rootVideos) { rootVideos.filter { it.videoURL.isNotBlank() } }
+    if (playable.isEmpty()) return
+
+    val initialPage = remember(playable, initialVideoID) {
+        playable.indexOfFirst { it.id == initialVideoID }.coerceAtLeast(0)
+    }
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { playable.size })
+
+    fun currentFullIndex(): Int {
+        val settled = playable.getOrNull(pagerState.currentPage) ?: return 0
+        return rootVideos.indexOfFirst { it.id == settled.id }.coerceAtLeast(0)
+    }
+
+    // Sync the settled page back to the caller's full-list index (hidden swipe
+    // cursor + dismiss) and warm the neighbor byte-caches.
+    LaunchedEffect(pagerState.currentPage, playable) {
+        onSettledIndexChange(currentFullIndex())
+        val warm = listOfNotNull(
+            playable.getOrNull(pagerState.currentPage + 1)?.videoURL,
+            playable.getOrNull(pagerState.currentPage - 1)?.videoURL
+        ).filter { it.isNotBlank() }
+        if (warm.isNotEmpty()) {
+            runCatching { com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(warm) }
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+        VerticalPager(
+            state = pagerState,
+            beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val root = playable[page]
+            val isCurrentPage = pagerState.currentPage == page
+            key(root.id) {
+                DiscoveryFullscreenCard(
+                    root = root,
+                    isCurrentPage = isCurrentPage,
+                    isAnnouncementShowing = isAnnouncementShowing,
+                    currentUserID = currentUserID,
+                    engagementViewModel = engagementViewModel,
+                    iconManager = iconManager,
+                    followManager = followManager,
+                    videoService = videoService,
+                    onExit = { onDismiss(currentFullIndex()) },
+                    onNavigateToProfile = { userID -> onNavigateToProfile(userID, currentFullIndex()) },
+                    onShowThreadView = onShowThreadView,
+                    onStitchRecording = { video ->
+                        val isOwn = video.creatorID == currentUserID
+                        val ctx = if (isOwn) {
+                            RecordingContextFactory.createContinueThread(
+                                video.threadID ?: video.id, video.creatorName, video.title
+                            )
+                        } else {
+                            RecordingContextFactory.createStitchToThread(
+                                video.threadID ?: video.id, video.creatorName, video.title
+                            )
+                        }
+                        navigationCoordinator?.showModal(
+                            ModalState.RECORDING,
+                            mapOf("context" to ctx, "parentVideo" to video)
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+// MARK: - Fullscreen card (one root video + its horizontal reply strip)
+@Composable
+private fun DiscoveryFullscreenCard(
+    root: CoreVideoMetadata,
+    isCurrentPage: Boolean,
+    isAnnouncementShowing: Boolean,
+    currentUserID: String?,
+    engagementViewModel: EngagementViewModel,
+    iconManager: FloatingIconManager,
+    followManager: FollowManager,
+    videoService: VideoServiceImpl,
+    onExit: () -> Unit,
+    onNavigateToProfile: (String) -> Unit,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    onStitchRecording: (CoreVideoMetadata) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+
+    // Thread reply strip: parent + children, loaded once the card is composed so
+    // the horizontal reply swipe is ready by the time the page is current.
+    var allVideos by remember(root.id) { mutableStateOf(listOf(root)) }
+    LaunchedEffect(root.id) {
+        val threadID = root.threadID
+        if (threadID != null) {
+            runCatching {
+                val (parent, children) = videoService.getThreadData(threadID)
+                if (parent != null) allVideos = listOf(parent) + children
+            }
+        }
+    }
+
+    val videoCount = allVideos.size
+    var currentIndex by remember(root.id) { mutableStateOf(0) }
+    val safeIndex = currentIndex.coerceIn(0, (videoCount - 1).coerceAtLeast(0))
+    val currentVideo = allVideos.getOrElse(safeIndex) { root }
+    val isOnParent = safeIndex == 0
+
+    val offsetX = remember { Animatable(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
+
+    val dragThreshold = screenWidthPx * 0.3f
+    val velocityTracker = remember { VelocityTracker() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(videoCount) {
+                if (videoCount <= 1) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { isDragging = true },
+                    onDragEnd = {
+                        scope.launch {
+                            val velocity = velocityTracker.calculateVelocity().x
+                            val shouldSnap = kotlin.math.abs(offsetX.value) > dragThreshold ||
+                                kotlin.math.abs(velocity) > 1000f
+                            if (shouldSnap) {
+                                val targetIndex = if (offsetX.value < 0)
+                                    (safeIndex + 1).coerceIn(0, videoCount - 1)
+                                else
+                                    (safeIndex - 1).coerceIn(0, videoCount - 1)
+                                offsetX.animateTo(
+                                    targetValue = when {
+                                        targetIndex > safeIndex -> -screenWidthPx
+                                        targetIndex < safeIndex -> screenWidthPx
+                                        else -> 0f
+                                    },
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                                if (targetIndex != safeIndex) currentIndex = targetIndex
+                                offsetX.snapTo(0f)
+                            } else {
+                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                            }
+                            isDragging = false
+                        }
+                    },
+                    onDragCancel = {
+                        scope.launch {
+                            offsetX.animateTo(0f)
+                            isDragging = false
+                        }
+                    }
+                ) { change, dragAmount ->
+                    change.consume()
+                    scope.launch {
+                        val newOffset = (offsetX.value + dragAmount).coerceIn(
+                            if (safeIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
+                            if (safeIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
+                        )
+                        offsetX.snapTo(newOffset)
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    }
+                }
+            }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationX = offsetX.value }
+        ) {
+            key(currentVideo.id) {
+                VideoPlayerComposable(
+                    video = currentVideo,
+                    isActive = isActive,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            ContextualVideoOverlay(
+                video = currentVideo,
+                overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
+                currentUserID = currentUserID,
+                currentUserTier = UserTier.ROOKIE,
+                threadVideo = if (!isOnParent) allVideos.firstOrNull() else null,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                isVisible = !isDragging,
+                // Fullscreen hides the tab bar; drop the metadata + actions lower and
+                // let the overlay's scrim sit flush to the screen edge.
+                bottomPaddingOverride = 42.dp,
+                showShareInTop = true,
+                onExit = onExit,
+                onAction = { action ->
+                    when (action) {
+                        is OverlayAction.NavigateToProfile -> onNavigateToProfile(action.userID)
+                        is OverlayAction.NavigateToThread -> {
+                            val threadID = currentVideo.threadID ?: currentVideo.id
+                            onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
+                        }
+                        is OverlayAction.StitchRecording -> onStitchRecording(currentVideo)
+                        else -> {}
+                    }
+                }
+            )
+        }
     }
 }

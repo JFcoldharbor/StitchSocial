@@ -1,404 +1,408 @@
 /*
- * VideoWatermarkService.kt - VIDEO WATERMARK SERVICE
- * STITCH SOCIAL - ANDROID KOTLIN
+ * VideoWatermarkService.kt
+ * STITCH SOCIAL — ANDROID KOTLIN
  *
- * Layer 4: Services - Video Watermarking
- * Burns "@username · StitchSocial" onto video frames using MediaCodec.
- * Matches iOS VideoWatermarkService.swift behavior.
+ * Layer 4: Services — burns the share watermark + end screen into a video,
+ * the Android port of iOS VideoWatermarkService. Runs the local (already
+ * downloaded) MP4 through a Media3 Transformer composition that bakes in:
  *
- * Pipeline: Decode source → draw watermark via Canvas → encode → mux output
+ *   • a jumping watermark (Stitch logo + @username + "StitchSocial") that
+ *     hops between 3 corners every 2s over the main clip — iOS parity
+ *     (WatermarkPosition topLeft / rightMiddle / bottomLeft),
+ *   • a concatenated end screen (res/raw/stitch_end_screen.mp4, the same
+ *     asset as the iOS bundle) with the creator's @username over it.
  *
- * CACHING: Paint objects created once and reused across all frames.
- * Output file uses "StitchWM_" prefix for targeted cleanup.
+ * iOS ships NO sound asset (its addSound path no-ops), so we match by not
+ * adding one. The composition/overlay idiom mirrors ThreadCollageService +
+ * CaptionBurnIn — the two proven Transformer patterns already in this app.
+ *
+ * NOTE: this replaces a dead hand-rolled MediaCodec (decode → JPEG-per-frame
+ * → redraw → encode) implementation that was never wired into anything. The
+ * Transformer path is GPU-composited, faster, and matches the iOS look.
  */
 
 package com.stitchsocial.club.services
 
 import android.content.Context
-import android.graphics.*
-import android.media.*
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.view.Surface
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import androidx.annotation.OptIn
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.Presentation
+import androidx.media3.effect.TextureOverlay
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
+import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
+import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.R
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.nio.ByteBuffer
 import java.util.UUID
-import com.stitchsocial.club.BuildConfig
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
-class VideoWatermarkService private constructor(private val context: Context) {
+@OptIn(UnstableApi::class)
+object VideoWatermarkService {
 
-    companion object {
-        @Volatile
-        private var instance: VideoWatermarkService? = null
+    private const val TAG = "WATERMARK"
 
-        fun getInstance(context: Context): VideoWatermarkService {
-            return instance ?: synchronized(this) {
-                instance ?: VideoWatermarkService(context.applicationContext).also { instance = it }
-            }
-        }
+    // iOS: jumpInterval = 2.0s, discrete jump between 3 zones.
+    private const val JUMP_INTERVAL_US = 2_000_000L
 
-        private const val TIMEOUT_US = 10_000L
-    }
-
-    private val _isProcessing = MutableStateFlow(false)
-    val isProcessing: StateFlow<Boolean> = _isProcessing
-
-    data class WatermarkResult(
-        val success: Boolean,
-        val outputFile: File? = null,
-        val error: String? = null
-    )
-
-    // MARK: - Export With Watermark
-
+    /**
+     * Burn the watermark + end screen into [sourceFile] and return a file://
+     * Uri of the exported MP4 in cacheDir. [onProgress] receives 0.0..1.0.
+     * Throws on Transformer failure (caller falls back to the raw file).
+     */
     suspend fun exportWithWatermark(
+        context: Context,
         sourceFile: File,
-        creatorUsername: String
-    ): WatermarkResult = withContext(Dispatchers.IO) {
-        try {
-            _isProcessing.value = true
-            if (BuildConfig.DEBUG) { println("🎨 WATERMARK: Starting watermark export for @$creatorUsername") }
-
-            val sourceUri = Uri.fromFile(sourceFile)
-            val outputFile = File(context.cacheDir, "StitchWM_${UUID.randomUUID()}.mp4")
-
-            // Extract source video info
-            val extractor = MediaExtractor()
-            extractor.setDataSource(context, sourceUri, null)
-
-            val videoTrackIndex = findTrack(extractor, "video/")
-            val audioTrackIndex = findTrack(extractor, "audio/")
-
-            if (videoTrackIndex < 0) {
-                extractor.release()
-                return@withContext WatermarkResult(false, error = "No video track")
-            }
-
-            val videoFormat = extractor.getTrackFormat(videoTrackIndex)
-            val width = videoFormat.getInteger(MediaFormat.KEY_WIDTH)
-            val height = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
-            val mime = videoFormat.getString(MediaFormat.KEY_MIME)
-                ?: MediaFormat.MIMETYPE_VIDEO_AVC
-            val frameRate = try {
-                videoFormat.getInteger(MediaFormat.KEY_FRAME_RATE)
-            } catch (_: Exception) { 30 }
-            val bitRate = try {
-                videoFormat.getInteger(MediaFormat.KEY_BIT_RATE)
-            } catch (_: Exception) { 8_000_000 }
-
-            val scale = minOf(width, height) / 1080f
-
-            // CACHING: Create paint objects once, reuse every frame
-            val watermarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = 20f * scale
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                setShadowLayer(4f * scale, 1f, 1f, Color.argb(204, 0, 0, 0))
-            }
-
-            val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = 22f * scale
-                typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-                textAlign = Paint.Align.CENTER
-            }
-
-            val logoBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(
-                    0f, 0f, 40f * scale, 40f * scale,
-                    Color.rgb(0, 229, 255), Color.rgb(124, 77, 255),
-                    Shader.TileMode.CLAMP
-                )
-            }
-
-            // Setup encoder
-            val outputFormat = MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_AVC, width, height
-            ).apply {
-                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            }
-
-            val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val encoderSurface = encoder.createInputSurface()
-            encoder.start()
-
-            // Setup decoder with output to encoder surface
-            val decoder = MediaCodec.createDecoderByType(mime)
-            // We'll decode to a surface, then draw watermark, then feed to encoder
-            // Actually, for watermark overlay we need to:
-            // 1. Decode to an ImageReader or Bitmap
-            // 2. Draw watermark on Canvas
-            // 3. Draw result onto encoder surface
-
-            // Simpler approach: decode to bitmap via MediaMetadataRetriever frame-by-frame
-            // is too slow. Use surface-to-surface with an intermediate OpenGL or
-            // use the decode→software bitmap→draw→encode approach.
-
-            // Decode to software bitmap approach:
-            decoder.configure(videoFormat, null, null, 0)
-            decoder.start()
-
-            val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            var muxerVideoTrack = -1
-            var muxerAudioTrack = -1
-            var muxerStarted = false
-
-            // Process video track
-            extractor.selectTrack(videoTrackIndex)
-
-            val inputBuffer = ByteBuffer.allocate(1024 * 1024)
-            val bufferInfo = MediaCodec.BufferInfo()
-            var inputDone = false
-            var outputDone = false
-
-            while (!outputDone) {
-                // Feed input to decoder
-                if (!inputDone) {
-                    val inputBufIndex = decoder.dequeueInputBuffer(TIMEOUT_US)
-                    if (inputBufIndex >= 0) {
-                        val buf = decoder.getInputBuffer(inputBufIndex) ?: continue
-                        val sampleSize = extractor.readSampleData(buf, 0)
-                        if (sampleSize < 0) {
-                            decoder.queueInputBuffer(inputBufIndex, 0, 0, 0,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                        } else {
-                            val sampleFlags = extractor.sampleFlags
-                            val codecFlags = if (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
-                                MediaCodec.BUFFER_FLAG_KEY_FRAME
-                            } else { 0 }
-                            decoder.queueInputBuffer(inputBufIndex, 0, sampleSize,
-                                extractor.sampleTime, codecFlags)
-                            extractor.advance()
-                        }
-                    }
-                }
-
-                // Get decoded output
-                val outputBufIndex = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
-                if (outputBufIndex >= 0) {
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                        // Signal encoder end
-                        encoder.signalEndOfInputStream()
-                        decoder.releaseOutputBuffer(outputBufIndex, false)
-                        outputDone = true
-                    } else {
-                        // Get decoded frame as Image (API 21+)
-                        val image = decoder.getOutputImage(outputBufIndex)
-                        if (image != null) {
-                            // Convert YUV to Bitmap
-                            val bitmap = yuvImageToBitmap(image, width, height)
-                            image.close()
-
-                            // Draw watermark onto bitmap
-                            val canvas = Canvas(bitmap)
-                            drawWatermark(canvas, width, height, scale,
-                                creatorUsername, watermarkPaint, logoPaint, logoBgPaint)
-
-                            // Feed watermarked frame to encoder via surface
-                            val encoderCanvas = encoderSurface.lockCanvas(null)
-                            encoderCanvas.drawBitmap(bitmap, 0f, 0f, null)
-                            encoderSurface.unlockCanvasAndPost(encoderCanvas)
-
-                            bitmap.recycle()
-                        }
-
-                        decoder.releaseOutputBuffer(outputBufIndex, false)
-                    }
-                }
-
-                // Drain encoder output
-                drainEncoder(encoder, muxer, bufferInfo, muxerVideoTrack, muxerStarted) { track, started ->
-                    muxerVideoTrack = track
-                    muxerStarted = started
-                }
-            }
-
-            // Drain remaining encoder output
-            drainEncoderFinal(encoder, muxer, bufferInfo, muxerVideoTrack)
-
-            // Copy audio track (passthrough — no re-encoding)
-            if (audioTrackIndex >= 0) {
-                extractor.unselectTrack(videoTrackIndex)
-                extractor.selectTrack(audioTrackIndex)
-                extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-
-                val audioFormat = extractor.getTrackFormat(audioTrackIndex)
-                muxerAudioTrack = muxer.addTrack(audioFormat)
-                if (!muxerStarted) {
-                    muxer.start()
-                    muxerStarted = true
-                }
-
-                val audioBuf = ByteBuffer.allocate(256 * 1024)
-                val audioInfo = MediaCodec.BufferInfo()
-
-                while (true) {
-                    audioInfo.size = extractor.readSampleData(audioBuf, 0)
-                    if (audioInfo.size < 0) break
-                    audioInfo.presentationTimeUs = extractor.sampleTime
-                    audioInfo.flags = extractor.sampleFlags
-                    audioInfo.offset = 0
-                    muxer.writeSampleData(muxerAudioTrack, audioBuf, audioInfo)
-                    extractor.advance()
-                }
-            }
-
-            // Cleanup
-            decoder.stop()
-            decoder.release()
-            encoder.stop()
-            encoder.release()
-            muxer.stop()
-            muxer.release()
-            extractor.release()
-            encoderSurface.release()
-
-            _isProcessing.value = false
-            if (BuildConfig.DEBUG) { println("✅ WATERMARK: Export complete — ${outputFile.name}") }
-            WatermarkResult(success = true, outputFile = outputFile)
-
-        } catch (e: Exception) {
-            _isProcessing.value = false
-            if (BuildConfig.DEBUG) { println("❌ WATERMARK: Failed — ${e.message}") }
-            WatermarkResult(success = false, error = e.message)
-        }
-    }
-
-    // MARK: - Draw Watermark
-
-    private fun drawWatermark(
-        canvas: Canvas,
-        width: Int, height: Int, scale: Float,
         creatorUsername: String,
-        textPaint: Paint, logoPaint: Paint, logoBgPaint: Paint
-    ) {
-        val padding = 24f * scale
+        onProgress: (Double) -> Unit = {}
+    ): Uri = withContext(Dispatchers.IO) {
+        val probe = probeSource(sourceFile)
+        val mainDurationUs = probe.durationUs
+        val (outW, outH) = probe.outputResolution()
 
-        // Logo square (top-left)
-        val logoSize = 40f * scale
-        val logoRadius = 10f * scale
-        val logoRect = RectF(padding, padding, padding + logoSize, padding + logoSize)
-        canvas.drawRoundRect(logoRect, logoRadius, logoRadius, logoBgPaint)
-        canvas.drawText("S", padding + logoSize / 2, padding + logoSize * 0.7f, logoPaint)
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "🎬 export: src=${probe.width}x${probe.height} rot=${probe.rotation} " +
+                "dur=${mainDurationUs / 1000}ms → canvas ${outW}x$outH")
+        }
 
-        // Username text next to logo
-        val textX = padding + logoSize + 10f * scale
-        val textY = padding + logoSize * 0.65f
-        canvas.drawText("@$creatorUsername", textX, textY, textPaint)
-    }
+        // Main clip (keep audio) + concatenated bundled end screen (keep its audio).
+        val mainItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(sourceFile)))
+            .setRemoveAudio(false)
+            .build()
 
-    // MARK: - YUV to Bitmap conversion
+        val endUri = Uri.parse("android.resource://${context.packageName}/${R.raw.stitch_end_screen}")
+        val endItem = EditedMediaItem.Builder(MediaItem.fromUri(endUri))
+            .setRemoveAudio(false)
+            .build()
 
-    private fun yuvImageToBitmap(image: android.media.Image, width: Int, height: Int): Bitmap {
-        val planes = image.planes
-        val yBuffer = planes[0].buffer
-        val uBuffer = planes[1].buffer
-        val vBuffer = planes[2].buffer
+        val sequence = EditedMediaItemSequence(listOf(mainItem, endItem))
 
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
+        // Composition-level output canvas — SCALE_TO_FIT reconciles the main
+        // clip and the end screen even if their resolutions differ.
+        val presentation = Presentation.createForWidthAndHeight(
+            outW, outH, Presentation.LAYOUT_SCALE_TO_FIT
+        )
 
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
+        // Overlays (composition timeline is continuous across the sequence, so
+        // presentationTimeUs >= mainDurationUs == "we're on the end screen").
+        val overlays = mutableListOf<TextureOverlay>()
+        overlays.add(JumpingWatermarkOverlay(
+            bitmap = renderWatermarkBitmap(context, creatorUsername, outH),
+            mainDurationUs = mainDurationUs
+        ))
+        if (creatorUsername.isNotBlank()) {
+            overlays.add(EndScreenUsernameOverlay(
+                bitmap = renderEndScreenUsernameBitmap(creatorUsername, outW, outH),
+                mainDurationUs = mainDurationUs
+            ))
+        }
+        val overlayEffect = OverlayEffect(ImmutableList.copyOf(overlays))
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        val out = java.io.ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 95, out)
+        val videoEffects: List<Effect> = listOf(presentation, overlayEffect)
+        val composition = Composition.Builder(listOf(sequence))
+            .setEffects(Effects(emptyList(), videoEffects))
+            .build()
 
-        val bytes = out.toByteArray()
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val outputFile = File(context.cacheDir, "StitchWM_${UUID.randomUUID()}.mp4")
 
-        // Make mutable for drawing
-        return bitmap.copy(Bitmap.Config.ARGB_8888, true)
-    }
+        suspendCancellableCoroutine<Uri> { cont ->
+            val mainHandler = Handler(Looper.getMainLooper())
+            mainHandler.post {
+                val transformer = Transformer.Builder(context)
+                    .addListener(object : Transformer.Listener {
+                        override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                            if (BuildConfig.DEBUG) {
+                                Log.d(TAG, "✅ watermark export complete — ${outputFile.length() / 1024} KB")
+                            }
+                            onProgress(1.0)
+                            if (cont.isActive) cont.resume(Uri.fromFile(outputFile))
+                        }
 
-    // MARK: - Encoder drain helpers
+                        override fun onError(
+                            composition: Composition,
+                            exportResult: ExportResult,
+                            exportException: ExportException
+                        ) {
+                            if (BuildConfig.DEBUG) {
+                                Log.w(TAG, "❌ watermark export failed — ${exportException.message}")
+                            }
+                            if (cont.isActive) cont.resumeWithException(exportException)
+                        }
+                    })
+                    .build()
 
-    private fun drainEncoder(
-        encoder: MediaCodec,
-        muxer: MediaMuxer,
-        bufferInfo: MediaCodec.BufferInfo,
-        currentTrack: Int,
-        muxerStarted: Boolean,
-        onTrackReady: (Int, Boolean) -> Unit
-    ) {
-        var track = currentTrack
-        var started = muxerStarted
-
-        while (true) {
-            val outIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
-            if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (!started) {
-                    track = muxer.addTrack(encoder.outputFormat)
-                    muxer.start()
-                    started = true
-                    onTrackReady(track, started)
+                cont.invokeOnCancellation {
+                    mainHandler.post { runCatching { transformer.cancel() } }
                 }
-            } else if (outIndex >= 0) {
-                val buf = encoder.getOutputBuffer(outIndex) ?: break
-                if (bufferInfo.size > 0 && started) {
-                    buf.position(bufferInfo.offset)
-                    buf.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeSampleData(track, buf, bufferInfo)
+
+                transformer.start(composition, outputFile.absolutePath)
+
+                // Media3 has no continuous progress stream — poll getProgress.
+                val holder = ProgressHolder()
+                val tick = object : Runnable {
+                    override fun run() {
+                        if (!cont.isActive) return
+                        val state = transformer.getProgress(holder)
+                        if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                            onProgress((holder.progress / 100.0).coerceIn(0.0, 0.99))
+                        }
+                        if (state != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                            mainHandler.postDelayed(this, 200)
+                        }
+                    }
                 }
-                encoder.releaseOutputBuffer(outIndex, false)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-            } else {
-                break
+                mainHandler.postDelayed(tick, 200)
             }
         }
     }
 
-    private fun drainEncoderFinal(
-        encoder: MediaCodec,
-        muxer: MediaMuxer,
-        bufferInfo: MediaCodec.BufferInfo,
-        track: Int
+    /** Best-effort cleanup of watermark temp files (StitchWM_ prefix). */
+    fun cleanupTempFiles(context: Context) {
+        context.cacheDir.listFiles()
+            ?.filter { it.name.startsWith("StitchWM_") }
+            ?.forEach { runCatching { it.delete() } }
+    }
+
+    // ── Source probe ──────────────────────────────────────────────────
+
+    private data class SourceProbe(
+        val durationUs: Long,
+        val width: Int,
+        val height: Int,
+        val rotation: Int
     ) {
-        while (true) {
-            val outIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
-            if (outIndex >= 0) {
-                val buf = encoder.getOutputBuffer(outIndex) ?: break
-                if (bufferInfo.size > 0) {
-                    buf.position(bufferInfo.offset)
-                    buf.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeSampleData(track, buf, bufferInfo)
-                }
-                encoder.releaseOutputBuffer(outIndex, false)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-            } else {
-                break
+        /** Displayed dimensions accounting for rotation. */
+        private fun displaySize(): Pair<Int, Int> =
+            if (rotation == 90 || rotation == 270) height to width else width to height
+
+        /**
+         * Even output canvas that preserves the source aspect, capped to a
+         * 1080×1920 box. Falls back to portrait 1080×1920 if probe was empty.
+         */
+        fun outputResolution(): Pair<Int, Int> {
+            val (dw, dh) = displaySize()
+            if (dw <= 0 || dh <= 0) return 1080 to 1920
+            val scale = minOf(1080f / dw, 1920f / dh, 1f)
+            val w = (dw * scale).toInt().let { if (it % 2 == 0) it else it - 1 }.coerceAtLeast(2)
+            val h = (dh * scale).toInt().let { if (it % 2 == 0) it else it - 1 }.coerceAtLeast(2)
+            return w to h
+        }
+    }
+
+    private fun probeSource(file: File): SourceProbe {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            fun key(k: Int) = retriever.extractMetadata(k)?.toIntOrNull() ?: 0
+            SourceProbe(
+                durationUs = (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L) * 1000L,
+                width = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),
+                height = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT),
+                rotation = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            )
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "probe failed — ${e.message}")
+            SourceProbe(0L, 0, 0, 0)
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    // ── Jumping watermark overlay ─────────────────────────────────────
+
+    /**
+     * Logo + @username watermark that jumps between 3 zones every 2s over the
+     * main clip and is hidden (alpha 0) once the end screen starts. Anchor
+     * space matches CaptionBurnIn: x/y in -1..1, (-1,-1) = bottom-left,
+     * (1,1) = top-right of the frame.
+     */
+    private class JumpingWatermarkOverlay(
+        private val bitmap: Bitmap,
+        private val mainDurationUs: Long
+    ) : BitmapOverlay() {
+
+        // 3 zones — iOS topLeft / rightMiddle / bottomLeft. Each pins the
+        // overlay's matching edge ~8% inside the frame edge.
+        private val zones: List<OverlaySettings> = listOf(
+            zone(bg = -0.92f to 0.92f, overlay = -1f to 1f),   // topLeft
+            zone(bg = 0.92f to 0f, overlay = 1f to 0f),        // rightMiddle
+            zone(bg = -0.92f to -0.92f, overlay = -1f to -1f)  // bottomLeft
+        )
+        private val hidden: OverlaySettings = OverlaySettings.Builder()
+            .setOverlayFrameAnchor(-1f, 1f)
+            .setBackgroundFrameAnchor(-0.92f, 0.92f)
+            .setAlphaScale(0f)
+            .build()
+
+        override fun getBitmap(presentationTimeUs: Long): Bitmap = bitmap
+
+        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
+            if (mainDurationUs > 0 && presentationTimeUs >= mainDurationUs) return hidden
+            val index = ((presentationTimeUs / JUMP_INTERVAL_US) % zones.size).toInt()
+            return zones[index]
+        }
+
+        private fun zone(bg: Pair<Float, Float>, overlay: Pair<Float, Float>): OverlaySettings =
+            OverlaySettings.Builder()
+                .setBackgroundFrameAnchor(bg.first, bg.second)
+                .setOverlayFrameAnchor(overlay.first, overlay.second)
+                .setAlphaScale(1f)
+                .build()
+    }
+
+    /** Centered @username shown only during the end screen. */
+    private class EndScreenUsernameOverlay(
+        private val bitmap: Bitmap,
+        private val mainDurationUs: Long
+    ) : BitmapOverlay() {
+
+        private val visible: OverlaySettings = OverlaySettings.Builder()
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(0f, -0.15f) // slightly below center, under the logo
+            .setAlphaScale(1f)
+            .build()
+        private val hidden: OverlaySettings = OverlaySettings.Builder()
+            .setOverlayFrameAnchor(0f, 0f)
+            .setBackgroundFrameAnchor(0f, -0.15f)
+            .setAlphaScale(0f)
+            .build()
+
+        override fun getBitmap(presentationTimeUs: Long): Bitmap = bitmap
+
+        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings =
+            if (mainDurationUs > 0 && presentationTimeUs >= mainDurationUs) visible else hidden
+    }
+
+    // ── Bitmap renderers ──────────────────────────────────────────────
+
+    /**
+     * Watermark = [logo] @username / StitchSocial, transparent background with
+     * a drop shadow so it reads on any footage. Sizes scale with canvas height
+     * (iOS scales off min-dimension/1080; height is fine for portrait).
+     */
+    private fun renderWatermarkBitmap(
+        context: Context,
+        creatorUsername: String,
+        canvasHeight: Int
+    ): Bitmap {
+        val display = if (creatorUsername.isBlank()) "StitchSocial" else "@$creatorUsername"
+
+        val logoSize = canvasHeight * 0.05f
+        val userFont = canvasHeight * 0.024f
+        val brandFont = userFont * 0.62f
+        val gap = canvasHeight * 0.012f
+        val pad = canvasHeight * 0.01f
+
+        val userPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.WHITE
+            textSize = userFont
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setShadowLayer(6f, 0f, 2f, AndroidColor.argb(200, 0, 0, 0))
+        }
+        val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.argb(230, 255, 255, 255)
+            textSize = brandFont
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            setShadowLayer(5f, 0f, 1f, AndroidColor.argb(180, 0, 0, 0))
+        }
+
+        val userBounds = Rect().also { userPaint.getTextBounds(display, 0, display.length, it) }
+        val brandStr = "StitchSocial"
+        val brandBounds = Rect().also { brandPaint.getTextBounds(brandStr, 0, brandStr.length, it) }
+
+        val textWidth = maxOf(userBounds.width(), brandBounds.width()).toFloat()
+        val textBlockHeight = userBounds.height() + gap + brandBounds.height()
+
+        val contentHeight = maxOf(logoSize, textBlockHeight)
+        val bmpW = (pad + logoSize + gap + textWidth + pad).toInt().coerceAtLeast(2)
+        val bmpH = (pad + contentHeight + pad).toInt().coerceAtLeast(2)
+
+        val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        // Logo (left), forced white via SRC_IN so a monochrome mask reads
+        // correctly — the drawable is tinted white everywhere else in the app.
+        val logo = runCatching {
+            BitmapFactory.decodeResource(context.resources, R.drawable.stitchsociallogo)
+        }.getOrNull()
+        val logoTop = (bmpH - logoSize) / 2f
+        if (logo != null) {
+            val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = PorterDuffColorFilter(AndroidColor.WHITE, PorterDuff.Mode.SRC_IN)
             }
+            canvas.drawBitmap(
+                logo,
+                Rect(0, 0, logo.width, logo.height),
+                RectF(pad, logoTop, pad + logoSize, logoTop + logoSize),
+                logoPaint
+            )
         }
+
+        // Text block (right of logo), vertically centered.
+        val textX = pad + logoSize + gap
+        val blockTop = (bmpH - textBlockHeight) / 2f
+        val userBaseline = blockTop + userBounds.height()
+        canvas.drawText(display, textX, userBaseline, userPaint)
+        val brandBaseline = userBaseline + gap + brandBounds.height()
+        canvas.drawText(brandStr, textX, brandBaseline, brandPaint)
+
+        return bitmap
     }
 
-    // MARK: - Helpers
-
-    private fun findTrack(extractor: MediaExtractor, prefix: String): Int {
-        for (i in 0 until extractor.trackCount) {
-            val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith(prefix)) return i
+    /** Large centered @username for the end screen (transparent background). */
+    private fun renderEndScreenUsernameBitmap(
+        creatorUsername: String,
+        canvasWidth: Int,
+        canvasHeight: Int
+    ): Bitmap {
+        val text = "@$creatorUsername"
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.WHITE
+            textSize = canvasHeight * 0.032f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+            setShadowLayer(8f, 0f, 2f, AndroidColor.argb(200, 0, 0, 0))
         }
-        return -1
-    }
+        val bounds = Rect().also { paint.getTextBounds(text, 0, text.length, it) }
+        val pad = (canvasHeight * 0.02f).toInt()
+        val bmpW = (bounds.width() + pad * 2).coerceIn(2, canvasWidth)
+        val bmpH = (bounds.height() + pad * 2).coerceAtLeast(2)
 
-    // MARK: - Cleanup
-
-    fun cleanupTempFiles() {
-        context.cacheDir.listFiles()?.filter { it.name.startsWith("StitchWM_") }?.forEach {
-            try { it.delete() } catch (_: Exception) {}
-        }
+        val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val baseline = bmpH / 2f - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(text, bmpW / 2f, baseline, paint)
+        return bitmap
     }
 }

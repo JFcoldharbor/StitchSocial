@@ -112,25 +112,48 @@ object ShareService {
             }
 
             Log.d(TAG, "✅ Video file ready: ${localFile.absolutePath} (${localFile.length() / 1024}KB)")
-            currentShareFile = localFile
 
-            // Step 2: Save to gallery (on IO thread — file is 30MB+)
+            // Step 2: Burn the share watermark + end screen (iOS parity). On any
+            // failure, fall back to the raw download so sharing still works.
+            val shareFile = try {
+                _exportProgress.value = "Adding watermark…"
+                val wmUri = VideoWatermarkService.exportWithWatermark(
+                    context = context,
+                    sourceFile = localFile,
+                    creatorUsername = creatorUsername,
+                    onProgress = { p -> _exportProgress.value = "Adding watermark… ${(p * 100).toInt()}%" }
+                )
+                val out = wmUri.path?.let { File(it) }
+                if (out != null && out.exists() && out.length() > 0L) {
+                    Log.d(TAG, "✅ Watermarked: ${out.absolutePath} (${out.length() / 1024}KB)")
+                    out
+                } else {
+                    Log.w(TAG, "⚠️ Watermark output missing — sharing raw clip")
+                    localFile
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Watermark failed — sharing raw clip: ${e.message}", e)
+                localFile
+            }
+            currentShareFile = shareFile
+
+            // Step 3: Save to gallery (on IO thread — file is 30MB+)
             Log.d(TAG, "💾 Attempting gallery save...")
             try {
-                saveToGallery(context, localFile, creatorUsername)
+                saveToGallery(context, shareFile, creatorUsername)
                 Log.d(TAG, "💾 Gallery save completed")
             } catch (e: Exception) {
                 Log.e(TAG, "⚠️ Gallery save failed (non-fatal): ${e.message}", e)
             }
 
-            // Step 3: Open share sheet (must be on Main thread)
+            // Step 4: Open share sheet (must be on Main thread)
             withContext(Dispatchers.Main) {
                 _isExporting.value = false
                 _exportProgress.value = ""
 
                 shareVideoFile(
                     context = context,
-                    videoFile = localFile,
+                    videoFile = shareFile,
                     creatorUsername = creatorUsername,
                     threadID = threadID ?: video.threadID
                 )

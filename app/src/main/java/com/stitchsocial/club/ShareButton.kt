@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
-import com.stitchsocial.club.Views.ThreadCollageSelectionView
+import com.stitchsocial.club.views.ThreadCollageSelectionView
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.services.ShareService
@@ -43,6 +43,7 @@ import java.io.File
 private const val TAG = "SHARE_BTN"
 
 enum class ShareButtonSize(val iconSize: Dp) {
+    TINY(16.dp),   // 32dp button, no label — for the fullscreen top stack
     SMALL(24.dp),
     MEDIUM(28.dp),
     LARGE(32.dp)
@@ -105,7 +106,7 @@ fun ShareButton(
             }
         }
 
-        if (size != ShareButtonSize.SMALL) {
+        if (size != ShareButtonSize.SMALL && size != ShareButtonSize.TINY) {
             Text(
                 if (isSharing || loadingCollageData) "..." else "Share",
                 fontSize = 11.sp,
@@ -131,9 +132,13 @@ fun ShareButton(
                     isSharing = true
                     scope.launch {
                         try {
+                            // Share/watermark needs a real downloadable MP4 — the
+                            // faststart mp4URL (CDN), NOT the HLS .m3u8 playbackURL and
+                            // NOT a legacy/empty videoURL. Prefer mp4URL, fall back to videoURL.
+                            val downloadURL = video.mp4URL?.takeIf { it.isNotBlank() } ?: video.videoURL
                             val shareable = ShareableVideo(
                                 id = video.id,
-                                videoURL = video.videoURL,
+                                videoURL = downloadURL,
                                 thumbnailURL = video.thumbnailURL,
                                 title = video.title,
                                 creatorID = video.creatorID,

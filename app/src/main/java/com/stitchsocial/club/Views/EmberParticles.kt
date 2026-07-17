@@ -1,4 +1,4 @@
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.*

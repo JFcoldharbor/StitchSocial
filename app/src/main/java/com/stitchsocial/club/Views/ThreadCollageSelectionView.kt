@@ -16,7 +16,7 @@
  * service; this view's Build button is the only thing that calls it.
  */
 
-package com.stitchsocial.club.Views
+package com.stitchsocial.club.views
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

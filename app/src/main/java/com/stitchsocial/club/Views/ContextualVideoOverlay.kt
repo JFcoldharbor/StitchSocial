@@ -805,15 +805,20 @@ private fun MoreOptionsMenu(
     val isSaved = savedIds.contains(video.id)
 
     Box {
-        IconButton(onClick = { menuExpanded = true }) {
+        // 32dp circle to match the share + exit buttons in the vertical top stack.
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable { menuExpanded = true },
+            contentAlignment = Alignment.Center
+        ) {
             Icon(
                 imageVector = Icons.Default.MoreVert,
                 contentDescription = "More options",
                 tint = Color.White,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .padding(6.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
         DropdownMenu(
@@ -1273,30 +1278,31 @@ private fun TopSection(
             }
         }
 
-        // Right: share (fullscreen) + exit (fullscreen) + Report/Block menu — one
-        // coordinated row, all uniform 40dp circular buttons on an 8pt (Spacing.xs)
+        // Right: share (fullscreen) + exit (fullscreen) + Report/Block menu — a
+        // VERTICAL stack of uniform 32dp circular buttons on an 8pt (Spacing.xs)
         // gap so they read in sync (App Store Guideline 1.2 / Play UGC).
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
             if (showShareInTop) {
-                // SMALL = no dangling "Share" label, matching the icon-only exit/3-dots.
+                // TINY = 32dp, no dangling "Share" label — matches the icon-only exit/3-dots.
                 ShareButton(
                     video = video,
                     creatorUsername = displayCreatorName,
-                    size = ShareButtonSize.SMALL
+                    size = ShareButtonSize.TINY
                 )
             }
             if (onExit != null) {
-                IconButton(
-                    onClick = onExit,
+                Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable(onClick = onExit),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
             MoreOptionsMenu(
@@ -1889,11 +1895,13 @@ private fun Overlay3DActionButton(
 @Composable
 private fun StitchButtonGlyph(useLogo: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     if (useLogo) {
+        // The brand logo has internal whitespace, so at ICON_SIZE it read tiny inside
+        // the 42dp sphere. Fill most of the button (34dp) leaving ~4dp margin to the rim.
         Icon(
             painter = painterResource(R.drawable.stitchsociallogo),
             contentDescription = "Stitch",
             tint = Color.White,
-            modifier = Modifier.size(OverlaySizes.ICON_SIZE + 3.dp)
+            modifier = Modifier.size(OverlaySizes.BUTTON_SIZE - 8.dp)
         )
     } else {
         Icon(icon, "Stitch", tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))

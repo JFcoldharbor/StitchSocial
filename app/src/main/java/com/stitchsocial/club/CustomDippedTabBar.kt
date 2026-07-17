@@ -41,7 +41,7 @@ import kotlinx.coroutines.delay
 import com.stitchsocial.club.VideoManager
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.services.BackgroundPostManager
-import com.stitchsocial.club.Views.EmberParticles
+import com.stitchsocial.club.views.EmberParticles
 
 // MARK: - Color System (Purple Theme)
 object StitchColors {
