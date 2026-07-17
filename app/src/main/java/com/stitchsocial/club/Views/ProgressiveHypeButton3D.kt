@@ -240,21 +240,8 @@ fun ProgressiveHypeButton3D(
                 }
             }
 
-            // Processing overlay
-            if (isProcessing) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = Color(0xFFFF8C00),
-                        strokeWidth = 2.dp
-                    )
-                }
-            }
+            // No processing spinner — iOS keeps the button responsive (the count
+            // updates optimistically; the server write happens in the background).
 
             // Clickable
             Box(
@@ -262,7 +249,11 @@ fun ProgressiveHypeButton3D(
                     .fillMaxSize()
                     .clip(CircleShape)
                     .clickable(
-                        enabled = !isProcessing && !isDisabled,
+                        // Optimistic like iOS: taps always register instantly (the count
+                        // bumps via localTapIncrement). The server write happens in the
+                        // background — don't gate the button on the global isProcessing flag,
+                        // which was locking it for the whole ~1s network round-trip.
+                        enabled = !isDisabled,
                         onClick = {
                             if (BuildConfig.DEBUG) { println("🔴 HYPE TAP FIRED - videoID: $videoID, disabled: $isDisabled, selfBlock: $shouldBlockSelfEngagement, cloutCap: $hasHitCloutCap, engCap: $hasHitEngagementCap, creatorID: $creatorID, currentUserID: $currentUserID, tier: $userTier") }
 

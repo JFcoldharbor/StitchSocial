@@ -259,21 +259,8 @@ fun ProgressiveCoolButton3D(
                 }
             }
 
-            // Processing overlay
-            if (isProcessing) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = Color(0xFF00BFFF),
-                        strokeWidth = 2.dp
-                    )
-                }
-            }
+            // No processing spinner — iOS keeps the button responsive (the count
+            // updates optimistically; the server write happens in the background).
 
             // Clickable
             Box(
@@ -281,7 +268,8 @@ fun ProgressiveCoolButton3D(
                     .fillMaxSize()
                     .clip(CircleShape)
                     .clickable(
-                        enabled = !isProcessing && !isDisabled,
+                        // Optimistic like iOS: taps register instantly, server write in bg.
+                        enabled = !isDisabled,
                         onClick = {
                             if (BuildConfig.DEBUG) { println("🔵 COOL TAP FIRED - videoID: $videoID, disabled: $isDisabled, selfBlock: $shouldBlockSelfEngagement, engCap: $hasHitEngagementCap, creatorID: $creatorID, currentUserID: $currentUserID, tier: $userTier") }
 
