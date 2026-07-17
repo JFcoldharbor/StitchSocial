@@ -975,6 +975,10 @@ fun DiscoveryView(
                             }
                         )
                     }
+                    // Events tab = the Concept B rows/hub, not the v1 video feed.
+                    selectedCategory == DiscoveryCategory.EVENTS -> {
+                        com.stitchsocial.club.events.EventRowsScreen(currentUserID = currentUserID ?: "")
+                    }
                     // Show the loading view whenever the feed is empty AND
                     // either we're actively loading OR there's no error.
                     // Covers (a) the initial cold-launch black gap and
