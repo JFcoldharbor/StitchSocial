@@ -2,6 +2,10 @@ package com.stitchsocial.club.events
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stitchsocial.club.foundation.BasicUserInfo
+import com.stitchsocial.club.services.NotificationService
+import com.stitchsocial.club.services.StitchNotificationType
+import com.stitchsocial.club.services.UserService
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -288,6 +292,47 @@ class EventsViewModel : ViewModel() {
 
     /** Filled slots (host has posted their video), time-ordered = the Host Threads. */
     fun hostThreads(): List<EventAgendaItem> = _agenda.value.filter { it.isFilled }.byTime()
+
+    // MARK: - Invite
+
+    /** People the host can invite — union of who they follow and who follows them. */
+    suspend fun inviteCandidates(userService: UserService): List<BasicUserInfo> {
+        if (currentUserID.isBlank()) return emptyList()
+        return try {
+            val following = userService.getFollowing(currentUserID, 100)
+            val followers = userService.getFollowers(currentUserID, 100)
+            (following + followers).distinctBy { it.id }
+                .filter { it.id != currentUserID }
+                .sortedBy { it.username.lowercase() }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun searchInviteCandidates(userService: UserService, query: String): List<BasicUserInfo> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        return try { userService.searchUsers(q, 20) } catch (e: Exception) { emptyList() }
+    }
+
+    /** Send an in-app invite notification to each picked user. Returns how many landed. */
+    suspend fun inviteUsers(notificationService: NotificationService, users: List<BasicUserInfo>, event: StitchEventEntity): Int {
+        if (currentUserID.isBlank()) return 0
+        var sent = 0
+        for (u in users) {
+            if (u.id == currentUserID) continue
+            val ok = runCatching {
+                notificationService.createNotificationDirect(
+                    type = StitchNotificationType.SYSTEM,
+                    title = "Event invite",
+                    message = "@$currentUsername invited you to ${event.name}",
+                    senderID = currentUserID,
+                    recipientID = u.id,
+                    payload = mapOf("notificationType" to "event_invite", "eventID" to event.id, "eventName" to event.name)
+                )
+            }.getOrDefault(false)
+            if (ok) sent++
+        }
+        return sent
+    }
 
     // MARK: - Giveaways
 

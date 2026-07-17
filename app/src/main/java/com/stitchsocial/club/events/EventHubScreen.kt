@@ -53,6 +53,7 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
     var tab by remember { mutableStateOf(HubTab.AGENDA) }
     var menuOpen by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
+    var showInvite by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(event.id) {
@@ -67,6 +68,10 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
         EventCreateScreen(vm = vm, editing = event, onDismiss = { showEdit = false; onDismiss() })
         return
     }
+    if (showInvite) {
+        EventInviteSheet(vm = vm, event = event, onDismiss = { showInvite = false })
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(StitchColors.background)) {
 
@@ -79,6 +84,7 @@ fun EventHubScreen(event: StitchEventEntity, vm: EventsViewModel, onDismiss: () 
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     if (isHost) {
                         DropdownMenuItem(text = { Text("Edit event") }, onClick = { menuOpen = false; showEdit = true })
+                        DropdownMenuItem(text = { Text("Invite people") }, onClick = { menuOpen = false; showInvite = true })
                         DropdownMenuItem(text = { Text("Delete event", color = Color.Red) }, onClick = { menuOpen = false; confirmDelete = true })
                     } else {
                         DropdownMenuItem(text = { Text("Not interested", color = Color.Red) }, onClick = {
