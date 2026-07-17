@@ -1435,6 +1435,9 @@ fun DiscoveryView(
                         iconManager = iconManager,
                         followManager = followManager,
                         isVisible = true && !isDragging,
+                        // Fullscreen hides the tab bar, so bring the metadata + action
+                        // buttons down (the 70dp HomeFeed tab-bar clearance is too high here).
+                        bottomPaddingOverride = 24.dp,
                         onAction = { action ->
                             when (action) {
                                 is OverlayAction.NavigateToProfile -> {

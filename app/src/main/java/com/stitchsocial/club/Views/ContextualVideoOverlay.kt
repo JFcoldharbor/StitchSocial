@@ -291,6 +291,9 @@ fun ContextualVideoOverlay(
     followManager: FollowManager? = null,
     navigationCoordinator: com.stitchsocial.club.coordination.NavigationCoordinator? = null,
     actualReplyCount: Int? = null,
+    // Override the computed bottom padding — e.g. Discovery fullscreen hides the
+    // tab bar, so it wants the content lower than the HomeFeed tab-bar clearance.
+    bottomPaddingOverride: Dp? = null,
     onAction: ((OverlayAction) -> Unit)? = null
 ) {
     // Early return if not visible
@@ -313,8 +316,9 @@ fun ContextualVideoOverlay(
         }
     }
 
-    // Calculate responsive bottom padding based on screen height
-    val bottomPadding = remember(screenHeight) {
+    // Calculate responsive bottom padding based on screen height (unless the
+    // caller overrides it — e.g. fullscreen with no tab bar wants a smaller gap).
+    val bottomPadding = bottomPaddingOverride ?: remember(screenHeight) {
         when {
             screenHeight < 600.dp -> OverlaySizes.BOTTOM_PADDING_MIN
             screenHeight > 800.dp -> OverlaySizes.BOTTOM_PADDING_MAX
@@ -1153,6 +1157,20 @@ private fun FullContextualOverlay(
             )
         }
 
+        // Readability scrim — a soft gradient behind the bottom metadata + action
+        // buttons so white text/icons stay legible over bright video.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(320.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))
+                    )
+                )
+        )
+
         // Bottom Section
         BottomSection(
             video = video,
@@ -1298,7 +1316,7 @@ private fun BottomSection(
         modifier = modifier
             .fillMaxWidth()
             .padding(bottom = bottomPadding),  // Use responsive padding
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)  // tightened (was 12)
     ) {
         // Video Title - with side padding to avoid right column
         if (video.title.isNotEmpty()) {
