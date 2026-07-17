@@ -1368,18 +1368,33 @@ fun DiscoveryView(
                     )
                 }
 
-                // Close button — with vertical swipe now paging the deck, this
-                // (or pull-down at the first card) is how you exit.
-                IconButton(
-                    onClick = { dismissPlayer() },
+                // Top-right controls: share + close (exit), in one row so they
+                // don't overlap. Vertical swipe (or pull-down at the first card)
+                // also exits. Discovery fullscreen shows share; Home/Profile don't.
+                // end=72 clears the overlay's own 3-dots menu (which sits at
+                // top=50/end=16), so share + close sit to its LEFT in a clean
+                // top-right row: [share] [close]  [⋮] — no overlap.
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 48.dp, end = 16.dp)
-                        .zIndex(10f)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .padding(top = 50.dp, end = 72.dp)
+                        .zIndex(10f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    ShareButton(
+                        video = currentVideo,
+                        creatorUsername = currentVideo.creatorName,
+                        size = ShareButtonSize.MEDIUM
+                    )
+                    IconButton(
+                        onClick = { dismissPlayer() },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
                 }
 
                 // Video layer with horizontal offset
@@ -1460,19 +1475,8 @@ fun DiscoveryView(
                     )
                 }
 
-                // Share button at top-right
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .zIndex(10f)
-                ) {
-                    ShareButton(
-                        video = currentVideo,
-                        creatorUsername = currentVideo.creatorName,
-                        size = ShareButtonSize.MEDIUM
-                    )
-                }
+                // (Share moved into the top-right row with Close above — it was a
+                // second TopEnd element overlapping the close button.)
 
                 // Navigation indicators (like HomeFeedView)
                 if (videoCount > 1) {
