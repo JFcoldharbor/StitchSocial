@@ -53,6 +53,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import com.stitchsocial.club.services.AdRevenueShare
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -315,6 +317,7 @@ fun ProfileView(
     var showingEditProfile by remember { mutableStateOf(false) }
     var showingSettings by remember { mutableStateOf(false) }
     var showingSavedVideos by remember { mutableStateOf(false) }
+    var showingAdOpportunities by remember { mutableStateOf(false) }
     var showingBadgePage by remember { mutableStateOf(false) }
 
     // Video player state
@@ -527,6 +530,16 @@ fun ProfileView(
             currentUser == null -> NoUserView()
             currentUser != null -> {
                 LazyColumn(state = scrollState, modifier = Modifier.fillMaxSize()) {
+                    // Top bar — share + overflow (iOS profileTopBar parity)
+                    item {
+                        ProfileTopBar(
+                            isOwnProfile = isOwnProfile,
+                            username = currentUser?.username ?: "",
+                            onSaved = { showingSavedVideos = true },
+                            onSettings = { showingSettings = true },
+                            onEdit = { showingEditProfile = true }
+                        )
+                    }
                     // Header
                     item {
                         ProfileHeader(
@@ -539,6 +552,7 @@ fun ProfileView(
                             onEditProfile = { showingEditProfile = true },
                             onSettingsClick = { showingSettings = true },
                             onSavedClick = { showingSavedVideos = true },
+                            onAdOpportunities = { showingAdOpportunities = true },
                             onFollowersClick = { showStitchersSheet = true },
                             isFollowing = isFollowing,
                             isFollowLoading = isFollowLoading,
@@ -1071,6 +1085,13 @@ fun ProfileView(
         }
     }
 
+    // ===== AD OPPORTUNITIES ===== (green $ button; Influencer+ personal)
+    if (showingAdOpportunities && currentUser != null) {
+        Box(modifier = Modifier.fillMaxSize().zIndex(60f)) {
+            AdOpportunitiesView(user = currentUser!!, onDismiss = { showingAdOpportunities = false })
+        }
+    }
+
     // ===== BADGE PAGE =====
     // Mounted at the top of ProfileView (sibling to the LazyColumn) so
     // BadgePageView's verticalScroll has bounded constraints. Mounting
@@ -1167,6 +1188,7 @@ private fun ProfileHeader(
     onEditProfile: () -> Unit,
     onSettingsClick: () -> Unit,
     onSavedClick: () -> Unit = {},
+    onAdOpportunities: () -> Unit = {},
     onFollowersClick: () -> Unit,
     isFollowing: Boolean = false,
     isFollowLoading: Boolean = false,
@@ -1265,8 +1287,10 @@ private fun ProfileHeader(
             isFollowLoading = isFollowLoading,
             onEditProfile = onEditProfile,
             onSettingsClick = onSettingsClick,
-            onSavedClick = onSavedClick,
             onFollowToggle = onFollowToggle,
+            userTier = user.tier,
+            isBusiness = user.isBusiness,
+            onAdOpportunities = onAdOpportunities,
             targetUserID = user.id,
             targetUsername = user.username
         )
@@ -1495,6 +1519,58 @@ private fun StatCard(count: Int, label: String, modifier: Modifier, onClick: () 
     }
 }
 
+// ===== TOP BAR (share + overflow menu) — iOS profileTopBar parity =====
+
+@Composable
+private fun ProfileTopBar(
+    isOwnProfile: Boolean,
+    username: String,
+    onSaved: () -> Unit,
+    onSettings: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val context = LocalContext.current
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Share
+        Box(
+            modifier = Modifier.size(34.dp).clip(CircleShape).background(AppTheme.colors.surface)
+                .clickable {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, "https://stitchsocial.me/u/$username")
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share profile"))
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.Share, "Share", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+        }
+
+        // Overflow (own profile: Saved / Settings / Edit)
+        if (isOwnProfile) {
+            Spacer(Modifier.width(Spacing.xs))
+            Box {
+                Box(
+                    modifier = Modifier.size(34.dp).clip(CircleShape).background(AppTheme.colors.surface).clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.MoreHoriz, "More", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Saved videos") }, onClick = { menuOpen = false; onSaved() })
+                    DropdownMenuItem(text = { Text("Settings") }, onClick = { menuOpen = false; onSettings() })
+                    DropdownMenuItem(text = { Text("Edit profile") }, onClick = { menuOpen = false; onEdit() })
+                }
+            }
+        }
+    }
+}
+
 // ===== ACTION BUTTONS ROW (iOS: side by side) =====
 
 @Composable
@@ -1504,8 +1580,10 @@ private fun ActionButtonsRow(
     isFollowLoading: Boolean,
     onEditProfile: () -> Unit,
     onSettingsClick: () -> Unit,
-    onSavedClick: () -> Unit = {},
     onFollowToggle: () -> Unit,
+    userTier: UserTier = UserTier.ROOKIE,
+    isBusiness: Boolean = false,
+    onAdOpportunities: () -> Unit = {},
     targetUserID: String = "",
     targetUsername: String = ""
 ) {
@@ -1526,8 +1604,20 @@ private fun ActionButtonsRow(
                 Text("Edit profile", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
             }
 
-            // Settings — surface fill + neutral hairline. No ad-market button on
-            // Android (no ad-marketplace feature here); iOS gates a $ button by tier.
+            // Ad opportunities — green $ button, Influencer+ personal only (iOS parity).
+            if (!isBusiness && AdRevenueShare.canAccessAds(userTier)) {
+                Button(
+                    onClick = onAdOpportunities,
+                    modifier = Modifier.size(width = 46.dp, height = 44.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33C759)),
+                    shape = RoundedCornerShape(13.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(Icons.Default.AttachMoney, "Ad opportunities", tint = Color(0xFF053610), modifier = Modifier.size(20.dp))
+                }
+            }
+
+            // Settings — surface fill + neutral hairline.
             Button(
                 onClick = onSettingsClick,
                 modifier = Modifier.size(width = 46.dp, height = 44.dp),
@@ -1538,18 +1628,7 @@ private fun ActionButtonsRow(
             ) {
                 Icon(Icons.Default.Settings, "Settings", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
             }
-
-            // Saved videos — private bookmarks grid (mirrors iOS profile ... menu entry)
-            Button(
-                onClick = onSavedClick,
-                modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
-                border = BorderStroke(1.dp, AppTheme.colors.hairline),
-                shape = RoundedCornerShape(13.dp),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Icon(Icons.Default.BookmarkBorder, "Saved videos", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
-            }
+            // Saved moved to the top-bar ⋯ menu (iOS parity).
         } else {
             Button(
                 onClick = onFollowToggle,
