@@ -384,10 +384,14 @@ class VideoServiceImpl {
 
     // ===== USER VIDEOS =====
 
-    suspend fun getUserVideos(userID: String, limit: Int = 50): List<CoreVideoMetadata> {
+    suspend fun getUserVideos(userID: String, limit: Int = 150): List<CoreVideoMetadata> {
         return try {
+            // Order server-side so we fetch the NEWEST `limit` deterministically —
+            // an unordered fetch returned an arbitrary slice, which starved the
+            // Stitches (depth 1) and Replies (depth 2) tabs.
             val snapshot = db.collection("videos")
                 .whereEqualTo("creatorID", userID)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get()
                 .await()

@@ -380,8 +380,10 @@ fun ProfileView(
     suspend fun loadVideos() {
         isLoadingVideos = true
         try {
-            userVideos = videoService.getUserVideos(userID, limit = 50)
-            hasMoreVideos = userVideos.size >= 50
+            // Fetch newest 150 (ordered server-side) so Threads/Stitches/Replies
+            // all populate — the old arbitrary 50 starved the depth-1/2 tabs.
+            userVideos = videoService.getUserVideos(userID, limit = 150)
+            hasMoreVideos = userVideos.size >= 150
         } catch (_: Exception) { } finally {
             isLoadingVideos = false
         }
