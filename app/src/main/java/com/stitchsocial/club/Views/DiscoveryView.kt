@@ -1372,34 +1372,10 @@ fun DiscoveryView(
                     )
                 }
 
-                // Top-right controls: share + close (exit), in one row so they
-                // don't overlap. Vertical swipe (or pull-down at the first card)
-                // also exits. Discovery fullscreen shows share; Home/Profile don't.
-                // end=72 clears the overlay's own 3-dots menu (which sits at
-                // top=50/end=16), so share + close sit to its LEFT in a clean
-                // top-right row: [share] [close]  [⋮] — no overlap.
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 50.dp, end = 72.dp)
-                        .zIndex(10f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ShareButton(
-                        video = currentVideo,
-                        creatorUsername = currentVideo.creatorName,
-                        size = ShareButtonSize.MEDIUM
-                    )
-                    IconButton(
-                        onClick = { dismissPlayer() },
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                    }
-                }
+                // Top-right controls (share + exit + 3-dots) are rendered inside
+                // the overlay's TopSection as one coordinated row — see the
+                // showShareInTop / onExit args on ContextualVideoOverlay below.
+                // (Vertical swipe / pull-down at the first card also exits.)
 
                 // Video layer with horizontal offset
                 Box(
@@ -1438,6 +1414,10 @@ fun DiscoveryView(
                         // Fullscreen hides the tab bar, so bring the metadata + action
                         // buttons down (the 70dp HomeFeed tab-bar clearance is too high here).
                         bottomPaddingOverride = 24.dp,
+                        // Render share + exit in the overlay's top row next to the
+                        // 3-dots, so nothing overlaps.
+                        showShareInTop = true,
+                        onExit = { dismissPlayer() },
                         onAction = { action ->
                             when (action) {
                                 is OverlayAction.NavigateToProfile -> {

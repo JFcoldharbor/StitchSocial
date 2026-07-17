@@ -294,6 +294,10 @@ fun ContextualVideoOverlay(
     // Override the computed bottom padding — e.g. Discovery fullscreen hides the
     // tab bar, so it wants the content lower than the HomeFeed tab-bar clearance.
     bottomPaddingOverride: Dp? = null,
+    // Fullscreen hosts pass these so share + exit + the 3-dots render in ONE
+    // coordinated top-right row (no overlapping floating buttons).
+    showShareInTop: Boolean = false,
+    onExit: (() -> Unit)? = null,
     onAction: ((OverlayAction) -> Unit)? = null
 ) {
     // Early return if not visible
@@ -696,7 +700,9 @@ fun ContextualVideoOverlay(
                     // Option 1: opens the preview panel locally instead of
                     // pushing full ThreadView. Parent video keeps playing.
                     showThreadPanel = true
-                }
+                },
+                showShareInTop = showShareInTop,
+                onExit = onExit
             )
         }
 
@@ -1137,7 +1143,9 @@ private fun FullContextualOverlay(
     onFollowToggle: () -> Unit,
     onViewersTap: () -> Unit,
     onAction: ((OverlayAction) -> Unit)?,
-    onThreadTap: () -> Unit
+    onThreadTap: () -> Unit,
+    showShareInTop: Boolean = false,
+    onExit: (() -> Unit)? = null
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Top Section - hide for CAROUSEL to keep view clean
@@ -1153,7 +1161,9 @@ private fun FullContextualOverlay(
                 overlayContext = overlayContext,
                 context = context,
                 onAction = onAction,
-                currentUserID = currentUserID
+                currentUserID = currentUserID,
+                showShareInTop = showShareInTop,
+                onExit = onExit
             )
         }
 
@@ -1220,7 +1230,9 @@ private fun TopSection(
     overlayContext: OverlayContext,
     context: Context,
     onAction: ((OverlayAction) -> Unit)?,
-    currentUserID: String? = null
+    currentUserID: String? = null,
+    showShareInTop: Boolean = false,
+    onExit: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -1260,11 +1272,29 @@ private fun TopSection(
             }
         }
 
-        // Right: Report / Block menu (App Store Guideline 1.2 / Play Store UGC)
-        Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        // Right: share (fullscreen) + exit (fullscreen) + Report/Block menu — one
+        // coordinated row so nothing overlaps (App Store Guideline 1.2 / Play UGC).
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            if (showShareInTop) {
+                ShareButton(
+                    video = video,
+                    creatorUsername = displayCreatorName,
+                    size = ShareButtonSize.MEDIUM
+                )
+            }
+            if (onExit != null) {
+                IconButton(
+                    onClick = onExit,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
             MoreOptionsMenu(
                 video = video,
                 displayCreatorName = displayCreatorName,
