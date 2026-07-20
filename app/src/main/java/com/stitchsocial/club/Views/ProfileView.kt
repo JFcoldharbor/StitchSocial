@@ -36,6 +36,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -249,6 +251,30 @@ private val profileTabs = listOf(
 
 // ===== MAIN PROFILE VIEW =====
 
+/**
+ * Retains loaded profile data across tab switches / modal re-opens. The tab host
+ * disposes ProfileView on every switch, so without this the own profile re-fetched
+ * user + videos + pinned + collections from the network on each return. Keyed by
+ * userID (small LRU cap) so the own tab AND recently-viewed profiles restore
+ * instantly. Activity-scoped via viewModel().
+ */
+class ProfileCacheViewModel : ViewModel() {
+    data class Entry(
+        val user: com.stitchsocial.club.foundation.BasicUserInfo?,
+        val videos: List<com.stitchsocial.club.foundation.CoreVideoMetadata>,
+        val pinned: List<com.stitchsocial.club.foundation.CoreVideoMetadata>,
+        val collections: List<com.stitchsocial.club.foundation.VideoCollection>
+    )
+    private val cache = LinkedHashMap<String, Entry>()
+    private val cap = 6
+    fun get(userID: String): Entry? = synchronized(cache) { cache[userID] }
+    fun put(userID: String, e: Entry) = synchronized(cache) {
+        cache.remove(userID); cache[userID] = e
+        while (cache.size > cap) cache.remove(cache.keys.first())
+    }
+    fun invalidate(userID: String) = synchronized(cache) { cache.remove(userID) }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ProfileView(
@@ -301,11 +327,16 @@ fun ProfileView(
     val isFollowing = followingStates[userID] ?: false
     val isFollowLoading = loadingStates.contains(userID)
 
-    // Profile state
-    var currentUser by remember { mutableStateOf<BasicUserInfo?>(null) }
-    var userVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
-    var pinnedVideos by remember { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    // Retained profile cache (Activity-scoped) — restores instantly on tab re-entry
+    // / modal re-open instead of re-fetching. Keyed by userID. See ProfileCacheViewModel.
+    val profileCache: ProfileCacheViewModel = viewModel()
+    val cachedProfile = remember(userID) { profileCache.get(userID) }
+
+    // Profile state — seeded from cache when present (instant, no spinner).
+    var currentUser by remember(userID) { mutableStateOf(cachedProfile?.user) }
+    var userVideos by remember(userID) { mutableStateOf(cachedProfile?.videos ?: emptyList()) }
+    var pinnedVideos by remember(userID) { mutableStateOf(cachedProfile?.pinned ?: emptyList()) }
+    var isLoading by remember(userID) { mutableStateOf(cachedProfile == null) }
     var isLoadingVideos by remember { mutableStateOf(false) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var hasMoreVideos by remember { mutableStateOf(true) }
@@ -340,7 +371,7 @@ fun ProfileView(
     var ageGateChecked by remember { mutableStateOf(false) }
 
     // Collections state
-    var userCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
+    var userCollections by remember(userID) { mutableStateOf(cachedProfile?.collections ?: emptyList()) }
     var showCollectionPlayer by remember { mutableStateOf(false) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
     var showingAllCollections by remember { mutableStateOf(false) }
@@ -422,7 +453,22 @@ fun ProfileView(
 
     val isOwnProfileForAgeGate = (userID == currentAuthUserID)
 
+    // Persist loaded profile data into the retained cache so the next return to this
+    // profile restores instantly. Fires whenever the loaded content changes.
+    LaunchedEffect(userID, currentUser, userVideos, pinnedVideos, userCollections) {
+        if (currentUser != null) {
+            profileCache.put(
+                userID,
+                ProfileCacheViewModel.Entry(currentUser, userVideos, pinnedVideos, userCollections)
+            )
+        }
+    }
+
     LaunchedEffect(userID) {
+        // Restored from the retained cache → skip every network load (instant). The
+        // age gate also only runs on a real (uncached) load, which is fine — it
+        // already ran when this profile was first loaded this session.
+        if (cachedProfile != null) return@LaunchedEffect
         // Launch all in parallel — collections no longer blocked by user/video load
         launch { loadUser() }
         launch { loadVideos() }

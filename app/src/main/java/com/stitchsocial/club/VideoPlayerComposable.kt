@@ -101,7 +101,23 @@ fun VideoPlayerComposable(
             ExoPlayer.Builder(context)
         }
 
-        playerBuilder.build().apply {
+        // Short-form tuning — the single biggest lever against "buffers too much".
+        // The feed player had NO LoadControl, so it used ExoPlayer defaults: wait
+        // ~2.5s of buffer before playback starts and keep up to 50s buffered. For
+        // TikTok-style vertical clips that reads as constant buffering. Start after
+        // ~0.3s buffered and cap the buffer so we don't over-fetch. (GlobalVideoPlayer
+        // already tunes this; the feed player never did.)
+        val shortFormLoadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 2_000,
+                /* maxBufferMs = */ 20_000,
+                /* bufferForPlaybackMs = */ 300,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        playerBuilder.setLoadControl(shortFormLoadControl).build().apply {
             // Configure for seamless looping
             repeatMode = Player.REPEAT_MODE_ONE
             playWhenReady = false

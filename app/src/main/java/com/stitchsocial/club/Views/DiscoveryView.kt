@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -194,6 +195,20 @@ class DiscoveryViewModel(
     private val _hashtagVideos = MutableStateFlow<List<CoreVideoMetadata>>(emptyList())
     val hashtagVideos: StateFlow<List<CoreVideoMetadata>> = _hashtagVideos.asStateFlow()
 
+    // These MUST be declared BEFORE init{}. init calls loadInitialContent(), and its
+    // viewModelScope coroutine (Main.immediate) can run SYNCHRONOUSLY during
+    // construction — especially now the VM is created via a retained viewModel{}.
+    // If these are declared after init, they're still null/0 at that point:
+    //   • db.collection(...) NPEs on a null ref → feed never loads, and
+    //   • MAX_LOAD_RETRIES reads 0 → 0 < 0 is false → NO retry, error shown instantly.
+    // remember{} happened to defer the dispatch, which hid this ordering bug.
+    // Generous retry budget (~10s) rides out the cold-start auth/connection race;
+    // capped so a genuine failure can't loop forever.
+    private val db = FirebaseFirestore.getInstance("stitchfin")
+    private var hasLoaded = false
+    private var loadRetries = 0
+    private val MAX_LOAD_RETRIES = 6
+
     init {
         loadInitialContent()
         // Load persisted creator preferences — mirrors Swift .task { await loadPreferences() }
@@ -204,12 +219,13 @@ class DiscoveryViewModel(
 
     // MARK: - Load All Videos (mirrors iOS — one query, full catalog, shuffle on exhaust)
 
-    private val db = FirebaseFirestore.getInstance("stitchfin")
-    private var hasLoaded = false
-
-    fun loadInitialContent() {
+    fun loadInitialContent(isRetry: Boolean = false) {
         viewModelScope.launch {
             if (_isLoading.value || hasLoaded) return@launch
+            // Fresh (user-initiated / first) load resets the retry budget so a manual
+            // "try again" gets its own full set of auto-retries; internal auto-retries
+            // pass isRetry=true to keep counting down toward the cap.
+            if (!isRetry) loadRetries = 0
             _isLoading.value = true
             _errorMessage.value = null
             try {
@@ -262,6 +278,7 @@ class DiscoveryViewModel(
                 val combined = fresh + rest
 
                 hasLoaded = true
+                loadRetries = 0
                 _videos.value = combined
                 applyFilterAndShuffle()
                 if (BuildConfig.DEBUG) { println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total") }
@@ -274,17 +291,26 @@ class DiscoveryViewModel(
                     com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(prefetchUrls)
                 }
             } catch (e: Exception) {
-                // FIX: don't flash "Failed to load" to the user when we're
-                // about to auto-retry — only set the visible error when the
-                // user actually needs to act. Logs still fire so we can see
-                // transient failures in adb.
-                if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed: ${e.message} (retrying in 2s)") }
-                delay(2000)
-                hasLoaded = false
-                _isLoading.value = false
-                _errorMessage.value = null  // keep the slate clean for the retry
-                loadInitialContent()
-                return@launch
+                // Don't flash "Failed to load" while we're about to auto-retry —
+                // only surface the visible error once retries are exhausted. But
+                // CAP the retries (was an unconditional 2s-delay recursion that
+                // could loop forever on a persistent failure) and use a short
+                // increasing backoff instead of a flat 2s so a cold-start hiccup
+                // doesn't cost a fixed 2s.
+                if (loadRetries < MAX_LOAD_RETRIES) {
+                    loadRetries++
+                    val backoffMs = (600L * loadRetries).coerceAtMost(2000L)  // 0.6,1.2,1.8,2,2,2 ≈ 9.6s
+                    if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed: ${e.message} (retry $loadRetries/$MAX_LOAD_RETRIES in ${backoffMs}ms)") }
+                    delay(backoffMs)
+                    hasLoaded = false
+                    _isLoading.value = false
+                    _errorMessage.value = null  // keep the slate clean for the retry
+                    loadInitialContent(isRetry = true)
+                    return@launch
+                } else {
+                    if (BuildConfig.DEBUG) { println("❌ DISCOVERY: Load failed after $MAX_LOAD_RETRIES retries: ${e.message}") }
+                    _errorMessage.value = "Couldn't load videos. Pull to retry."
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -350,6 +376,20 @@ class DiscoveryViewModel(
     }
 
     fun loadMoreContent() { reshuffleAndRestart() }
+
+    /**
+     * Fresh order each time you return to Discovery WITHOUT a network reload. The
+     * VM is now retained across tab switches (keep-alive), so the feed no longer
+     * reloads/reshuffles on re-entry — this reorders the already-loaded list in
+     * memory (instant) so returning still feels fresh. No-op on the very first
+     * mount (nothing loaded yet); the initial load does its own shuffle.
+     */
+    fun reshuffleOnReentry() {
+        if (hasLoaded && _videos.value.isNotEmpty()) {
+            reshuffleAndRestart()
+            if (BuildConfig.DEBUG) { println("🔀 DISCOVERY: reshuffled on re-entry (no reload)") }
+        }
+    }
 
 
     // MARK: - Refresh Content
@@ -679,7 +719,12 @@ fun DiscoveryView(
     val sponsoredSlotService = remember { SponsoredSlotService() }
 
     // ViewModels
-    val viewModel = remember {
+    // Retained in the Activity ViewModelStore (viewModel {}), NOT remember {}. The
+    // tab host swaps screens with when(selectedTab), which disposes this composable
+    // on every tab switch — with remember the VM (and its loaded feed) was destroyed
+    // and fully reloaded from the network each time you returned to Discovery. A
+    // retained VM keeps hasLoaded/_videos alive, so re-entry renders instantly.
+    val viewModel: DiscoveryViewModel = viewModel {
         DiscoveryViewModel(videoService, searchService)
     }
 
@@ -763,6 +808,14 @@ fun DiscoveryView(
     // Preload collections on first composition so COLLECTIONS tab is instant
     LaunchedEffect(Unit) {
         try { discoveryCollections = collectionService.getDiscoveryCollections(30) } catch (e: Exception) { println("Collections preload failed: ${e.message}") }
+    }
+
+    // Fires once per entry into Discovery. The VM is retained across tab switches,
+    // so returning no longer reloads/reshuffles — this reorders the retained feed
+    // in memory (instant, no network) so each visit still feels fresh. No-op on the
+    // first mount while the initial load is still running.
+    LaunchedEffect(Unit) {
+        viewModel.reshuffleOnReentry()
     }
 
     // Reload when explicitly switching to COLLECTIONS tab (cache hit — free)

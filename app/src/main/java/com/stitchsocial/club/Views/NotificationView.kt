@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -126,7 +127,12 @@ fun NotificationViewComplete(
     val engagementCoordinator = remember { EngagementCoordinator(videoService, userService) }
 
     // ViewModel
-    val viewModel = remember {
+    // Retained in the Activity ViewModelStore (viewModel {}), NOT remember {}. The
+    // tab host swaps screens with when(selectedTab), disposing this composable on
+    // every tab switch — with remember the VM was recreated each time, re-running
+    // its init load + restarting the realtime listener (spinner + reload). Retained,
+    // the loaded notifications and the live listener survive, so re-entry is instant.
+    val viewModel: NotificationViewModel = viewModel {
         NotificationViewModel(
             userService = userService,
             engagementCoordinator = engagementCoordinator,

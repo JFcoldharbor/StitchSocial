@@ -16,6 +16,9 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import java.util.*
 
 // Foundation imports
@@ -226,25 +229,31 @@ class VideoServiceImpl {
 
         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“± Loading feed for ${followingIDs.size} followed users") }
 
-        val allVideos = mutableListOf<CoreVideoMetadata>()
-
-        followingIDs.chunked(10).forEachIndexed { chunkIndex, chunk ->
-            try {
-                val snapshot = db.collection("videos")
-                    .whereIn("creatorID", chunk)
-                    .limit(100)
-                    .get()
-                    .await()
-
-                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents") }
-
-                val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                val parentVideos = videos.filter { it.conversationDepth == 0 && !it.isDeleted }
-                allVideos.addAll(parentVideos)
-
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Chunk query failed: ${e.message}") }
-            }
+        // Fan out the whereIn chunks in PARALLEL instead of sequentially. The old
+        // code awaited each 10-creator chunk one after another, so following N
+        // people cost ceil(N/10) serial round-trips (multi-second for big follow
+        // lists). async/awaitAll collapses that to one parallel batch — wall-clock
+        // is now the slowest single chunk, not their sum. No orderBy is added (that
+        // would need a creatorID+createdAt composite index); we keep limit(100) per
+        // chunk and sort client-side, same result set as before.
+        val allVideos = coroutineScope {
+            followingIDs.chunked(10).mapIndexed { chunkIndex, chunk ->
+                async {
+                    try {
+                        val snapshot = db.collection("videos")
+                            .whereIn("creatorID", chunk)
+                            .limit(100)
+                            .get()
+                            .await()
+                        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents") }
+                        convertFirebaseToVideoMetadata(snapshot.documents)
+                            .filter { it.conversationDepth == 0 && !it.isDeleted }
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk query failed: ${e.message}") }
+                        emptyList()
+                    }
+                }
+            }.awaitAll().flatten()
         }
 
         val sorted = allVideos.sortedByDescending { it.createdAt }.take(limit)

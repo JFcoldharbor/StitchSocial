@@ -59,6 +59,27 @@ import com.stitchsocial.club.services.SocialSignalService
 import com.stitchsocial.club.foundation.SocialSignal
 import com.stitchsocial.club.views.ProfileView
 import com.stitchsocial.club.BuildConfig
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+/**
+ * Retains the Home feed across tab switches. The tab host (MainActivity's
+ * when(selectedTab)) disposes HomeFeedView on every switch; holding the feed
+ * service + already-loaded threads in an Activity-scoped ViewModel means
+ * returning to Home restores instantly instead of re-fetching from the network.
+ */
+class HomeFeedRetainViewModel(app: Application) : AndroidViewModel(app) {
+    val feedService = HomeFeedService(
+        videoService = VideoServiceImpl(),
+        userService = UserService(app),
+        context = app
+    )
+    var cachedThreads: List<ThreadData> = emptyList()
+    var cachedSignals: List<SocialSignal> = emptyList()
+    var cachedFollowingCount: Int = 0
+    var loaded = false
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -80,9 +101,11 @@ fun HomeFeedView(
         FeedViewHistory.initialize(context)
     }
 
-    val feedService = remember {
-        HomeFeedService(videoService = videoService, userService = userService, context = context)
-    }
+    // Retained across tab switches (Activity-scoped) so the loaded feed survives —
+    // see HomeFeedRetainViewModel. Previously this was remember { HomeFeedService(...) },
+    // recreated on every return to Home, forcing a full network reload each time.
+    val retain: HomeFeedRetainViewModel = viewModel()
+    val feedService = retain.feedService
 
     val engagementViewModel = remember {
         EngagementViewModel(
@@ -134,6 +157,16 @@ fun HomeFeedView(
     }
 
     LaunchedEffect(userID) {
+        // Instant restore on tab re-entry — if we already loaded this session, show
+        // the retained feed immediately and skip the network entirely.
+        if (retain.loaded && retain.cachedThreads.isNotEmpty()) {
+            baseThreads = retain.cachedThreads
+            socialSignals = retain.cachedSignals
+            followingCount = retain.cachedFollowingCount
+            isLoading = false
+            if (BuildConfig.DEBUG) { println("⚡ HOME FEED: restored ${retain.cachedThreads.size} cached threads (no reload)") }
+            return@LaunchedEffect
+        }
         try {
             isLoading = true
             errorMessage = null
@@ -149,6 +182,12 @@ fun HomeFeedView(
 
             // Load social signals (megaphone: videos hyped by people you follow)
             socialSignals = SocialSignalService.shared.loadActiveSignals(userID)
+
+            // Cache for instant restore on the next tab re-entry.
+            retain.cachedThreads = feedThreads
+            retain.cachedSignals = socialSignals
+            retain.cachedFollowingCount = followingCount
+            retain.loaded = true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) { println("🚨 HOME FEED: Error - ${e.message}") }
             errorMessage = e.message
