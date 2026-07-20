@@ -17,10 +17,15 @@ if (localPropsFile.exists()) {
     localPropsFile.reader().use { localProps.load(it) }
 }
 
-val keystorePath     = localProps["KEYSTORE_PATH"]?.toString() ?: ""
-val keystorePassword = localProps["KEYSTORE_PASSWORD"]?.toString() ?: ""
-val keyAlias         = localProps["KEY_ALIAS"]?.toString() ?: ""
-val keyPassword      = localProps["KEY_PASSWORD"]?.toString() ?: ""
+// NOTE: these locals must NOT be named `keyAlias`/`keyPassword` — inside the
+// signingConfigs `create("release") { }` block the receiver is a SigningConfig
+// whose own keyAlias/keyPassword properties would shadow them, so `keyAlias =
+// keyAlias` would read the config's own (null) value and sign with a null
+// alias → a bare NPE in signReleaseBundle. Prefixed names avoid the collision.
+val keystorePath       = localProps["KEYSTORE_PATH"]?.toString() ?: ""
+val keystorePassword   = localProps["KEYSTORE_PASSWORD"]?.toString() ?: ""
+val releaseKeyAlias    = localProps["KEY_ALIAS"]?.toString() ?: ""
+val releaseKeyPassword = localProps["KEY_PASSWORD"]?.toString() ?: ""
 
 // Resolve the keystore using Gradle's own file() — but only attempt it if
 // the path is non-empty. We catch the exception so a missing/wrong-platform
@@ -50,8 +55,8 @@ android {
             create("release") {
                 storeFile     = resolvedKeystore
                 storePassword = keystorePassword
-                keyAlias      = keyAlias
-                keyPassword   = keyPassword
+                keyAlias      = releaseKeyAlias
+                keyPassword   = releaseKeyPassword
             }
         }
     }
