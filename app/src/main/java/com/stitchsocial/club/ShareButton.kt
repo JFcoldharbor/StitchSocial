@@ -292,6 +292,9 @@ private fun fireCollageShareIntent(
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, contentUri)
             putExtra(Intent.EXTRA_TEXT, text)
+            // ClipData propagates the read grant to share targets on Android 10+
+            // (Samsung One UI included) — without it the receiver gets no video.
+            clipData = android.content.ClipData.newUri(context.contentResolver, "StitchSocial collage", contentUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(intent, "Share Collage")

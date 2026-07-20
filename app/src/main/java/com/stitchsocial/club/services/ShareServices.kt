@@ -15,6 +15,7 @@
 
 package com.stitchsocial.club.services
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -27,6 +28,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import com.google.firebase.storage.FirebaseStorage
 import android.content.ContentValues
+import android.widget.Toast
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -196,11 +198,19 @@ object ShareService {
                 append("\n\nDownload StitchSocial: https://play.google.com/store/apps/details?id=com.stitchsocial.club")
             }
 
-            // Intent with BOTH video file AND text
+            // Intent with BOTH video file AND text.
+            // CRITICAL: set ClipData with the content URI. Without it, the
+            // FLAG_GRANT_READ_URI_PERMISSION grant for EXTRA_STREAM does not
+            // reliably reach share targets on Android 10+ (esp. Samsung One UI),
+            // so the receiver opens the share with NO accessible video. ClipData
+            // is the documented way to propagate the read grant to whatever the
+            // user picks (chooser + direct-share targets the manual grant loop
+            // below can't enumerate).
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "video/mp4"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
                 putExtra(Intent.EXTRA_TEXT, shareText)
+                clipData = ClipData.newUri(context.contentResolver, "StitchSocial video", contentUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
@@ -460,7 +470,10 @@ object ShareService {
             Intent.createChooser(shareIntent, "Share Link")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
-        Log.d(TAG, "📤 Link-only fallback share")
+        // Surface the degraded path — if the user sees this, the video DOWNLOAD
+        // failed (not the share intent), which points diagnosis at the URL/network.
+        Toast.makeText(context, "Couldn't prepare the video — sharing a link instead", Toast.LENGTH_SHORT).show()
+        Log.d(TAG, "📤 Link-only fallback share (download failed)")
     }
 
     // MARK: - Public Link Share
