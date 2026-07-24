@@ -332,11 +332,24 @@ fun MainScreen() {
             val userId = intent.getStringExtra("user_id")
                 ?: intent.getStringExtra("userID")
                 ?: intent.getStringExtra("senderID")
+            val eventId = intent.getStringExtra("event_id")
+                ?: intent.getStringExtra("eventID")
+                ?: intent.getStringExtra("eventId")
 
-            Log.d("STITCH_MAIN", "📱 Notification intent: type=$notificationType, video=$videoId, thread=$threadId, user=$userId")
+            Log.d("STITCH_MAIN", "📱 Notification intent: type=$notificationType, video=$videoId, thread=$threadId, user=$userId, event=$eventId")
 
             // Wait for authentication to complete
             delay(1000)
+
+            // Event invite — routed on the PAYLOAD, not the type, and ahead of
+            // the when below. Invites are written as SYSTEM notifications, so the
+            // push arrives with type="system" and would fall straight through the
+            // type table; the eventID extra is the dependable signal. (FCMService
+            // copies every data key to an extra verbatim, so it survives the tap.)
+            if (eventId != null) {
+                Log.d("STITCH_MAIN", "📱 Deep-linking to event hub: $eventId")
+                com.stitchsocial.club.events.EventDeepLink.request(eventId)
+            }
 
             when (notificationType) {
                 // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
@@ -379,6 +392,18 @@ fun MainScreen() {
             // Clear pending intent
             MainActivity.pendingNotificationIntent = null
             Log.d("STITCH_MAIN", "✅ Notification intent processed and cleared")
+        }
+    }
+
+    // Event deep-link: the Hub is presented by DiscoveryView (it owns the root
+    // overlay and the shared EventsViewModel), so all this layer does is make
+    // sure that tab is on screen. Serves both sources — the in-app Notifications
+    // tap and the FCM intent above. DiscoveryView consumes the id as it opens.
+    val pendingEventID by com.stitchsocial.club.events.EventDeepLink.pending
+    LaunchedEffect(pendingEventID) {
+        if (pendingEventID != null && selectedTab != MainAppTab.DISCOVERY) {
+            Log.d("STITCH_MAIN", "📅 Event deep-link pending -> switching to Discovery")
+            selectedTab = MainAppTab.DISCOVERY
         }
     }
 

@@ -499,6 +499,41 @@ fun DiscoveryCard(
             }
         }
 
+        // Event-promo skin (iOS parity — DiscoverySwipeCards.eventSkinOverlay): a
+        // magenta border + an EVENT pill so an event promo reads as an event, not a
+        // plain user video. Gated on isEventPromo (set by EventService.setPromo).
+        if (video.isEventPromo) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .background(StitchColors.primary, RoundedCornerShape(50))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CalendarMonth,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = "EVENT",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+            // Border last so it draws on top of the video/thumbnail.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(3.dp, StitchColors.primary, RoundedCornerShape(20.dp))
+            )
+        }
+
         // Reply count badge — top-right (matches iOS)
         if (video.replyCount > 0 && shouldAutoPlay) {
             Box(

@@ -3,6 +3,7 @@ package com.stitchsocial.club.events
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stitchsocial.club.foundation.BasicUserInfo
+import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.StitchNotificationType
 import com.stitchsocial.club.services.UserService
@@ -21,9 +22,9 @@ import java.util.Date
  * Compose screens never touch the DB.
  *
  * Phase 1 scope = the data spine: rows (live/upcoming/my), RSVP, create/edit/
- * delete, agenda, giveaways. Recording-bridge, geofence-presence, invite, and
- * promo/recap video hydration land in later phases (Android has no recording
- * bridge or LocationService yet).
+ * delete, agenda, giveaways. Promo-video hydration ([loadPromo]) and the host
+ * recording bridge ([armGoLive]/[armPromo]/[armRecap] via [EventMomentBridge])
+ * mirror the iOS ViewModel. Geofence presence still lands in a later phase.
  */
 class EventsViewModel : ViewModel() {
 
@@ -32,10 +33,24 @@ class EventsViewModel : ViewModel() {
     private var currentUserID = ""
     private var currentUsername = ""
 
+    /**
+     * Whether [configure] has landed a real user yet. Observable because
+     * [currentUserID] is a plain var — a screen that composes before configure()
+     * completes reads isHost = false and never recomposes when it flips. The
+     * notification deep-link waits on this before opening the Hub, so a host
+     * doesn't get their own event rendered as a guest.
+     *
+     * Declared ABOVE configure() on purpose: this file's sibling VM shipped an
+     * NPE from a property declared after its first use.
+     */
+    private val _isConfigured = MutableStateFlow(false)
+    val isConfigured: StateFlow<Boolean> = _isConfigured.asStateFlow()
+
     /** Supply the signed-in user (screen reads it from the auth layer). */
     fun configure(userID: String, username: String) {
         currentUserID = userID
         currentUsername = username
+        _isConfigured.value = userID.isNotBlank()
     }
 
     // MARK: - State
@@ -67,6 +82,18 @@ class EventsViewModel : ViewModel() {
 
     private val _openEvent = MutableStateFlow<StitchEventEntity?>(null)
     val openEvent: StateFlow<StitchEventEntity?> = _openEvent.asStateFlow()
+
+    /** The hydrated pre-event promo teaser for the open event (null = none set). */
+    private val _promoVideo = MutableStateFlow<CoreVideoMetadata?>(null)
+    val promoVideo: StateFlow<CoreVideoMetadata?> = _promoVideo.asStateFlow()
+
+    /** The hydrated video of the currently-live filled moment (null = none live yet). */
+    private val _liveMoment = MutableStateFlow<CoreVideoMetadata?>(null)
+    val liveMoment: StateFlow<CoreVideoMetadata?> = _liveMoment.asStateFlow()
+
+    /** The hydrated closing recap — the event's public artifact (null = not posted). */
+    private val _recapVideo = MutableStateFlow<CoreVideoMetadata?>(null)
+    val recapVideo: StateFlow<CoreVideoMetadata?> = _recapVideo.asStateFlow()
 
     /** One RSVP write per event at a time — rapid taps dropped, not queued. */
     private val rsvpInFlight = mutableSetOf<String>()
@@ -123,10 +150,18 @@ class EventsViewModel : ViewModel() {
     fun isHost(event: StitchEventEntity): Boolean =
         currentUserID.isNotBlank() && event.hostUserID == currentUserID
 
-    /** The freshest copy of the open event (rows drop ended events). */
+    /**
+     * The freshest copy of the open event (rows drop ended events). Backs the
+     * notification deep-link: the tap only carries an eventID, so the Hub can't
+     * be opened until the entity is hydrated. [openEvent] is a one-shot signal —
+     * the screen presents it and calls [clearOpenEvent].
+     */
     fun loadEvent(id: String) {
         viewModelScope.launch { _openEvent.value = runCatching { service.fetchEvent(id) }.getOrNull() }
     }
+
+    /** Ack the [openEvent] signal once presented, so it can't re-present later. */
+    fun clearOpenEvent() { _openEvent.value = null }
 
     // MARK: - Create / edit / delete
 
@@ -247,20 +282,29 @@ class EventsViewModel : ViewModel() {
      * buffer), and record the caller's onsite flag if they're Going. WhenInUse only.
      */
     fun refreshPresence(event: StitchEventEntity, location: LocationService) {
-        viewModelScope.launch {
-            _isCheckingPresence.value = true
-            try {
-                val fix = location.fetchCurrentLocation()
-                val onsite = fix != null && event.isWithinGeofence(fix.lat, fix.lng, fix.accuracyMeters)
-                _isOnsite.value = onsite
-                if (currentUserID.isNotBlank() && rsvpStatus(event.id) == EventRSVPStatus.GOING) {
-                    runCatching { service.setOnsite(event.id, currentUserID, onsite) }
-                }
-            } catch (e: Exception) {
-                _isOnsite.value = false
-            } finally {
-                _isCheckingPresence.value = false
+        viewModelScope.launch { checkPresence(event, location) }
+    }
+
+    /**
+     * Awaitable presence check — fetches the fix, tests the geofence (with the
+     * GPS-accuracy buffer), records onsite if Going, and returns whether the
+     * caller is on-site. Backs both refreshPresence and the one-tap join+stitch.
+     */
+    private suspend fun checkPresence(event: StitchEventEntity, location: LocationService): Boolean {
+        _isCheckingPresence.value = true
+        return try {
+            val fix = location.fetchCurrentLocation()
+            val onsite = fix != null && event.isWithinGeofence(fix.lat, fix.lng, fix.accuracyMeters)
+            _isOnsite.value = onsite
+            if (currentUserID.isNotBlank() && rsvpStatus(event.id) == EventRSVPStatus.GOING) {
+                runCatching { service.setOnsite(event.id, currentUserID, onsite) }
             }
+            onsite
+        } catch (e: Exception) {
+            _isOnsite.value = false
+            false
+        } finally {
+            _isCheckingPresence.value = false
         }
     }
 
@@ -268,6 +312,20 @@ class EventsViewModel : ViewModel() {
 
     fun loadAgenda(eventID: String) {
         viewModelScope.launch { _agenda.value = runCatching { service.fetchAgenda(eventID) }.getOrDefault(emptyList()) }
+    }
+
+    // MARK: - Promo teaser
+
+    /**
+     * Hydrate the pre-event promo teaser (iOS parity with promoVideo(for:)). The
+     * event only carries a promoVideoID; resolve it to a playable video so the
+     * Hub can show it. Clears immediately when the event has no promo so a stale
+     * teaser never lingers across events.
+     */
+    fun loadPromo(event: StitchEventEntity) {
+        val vid = event.promoVideoID
+        if (vid.isNullOrBlank()) { _promoVideo.value = null; return }
+        viewModelScope.launch { _promoVideo.value = runCatching { service.fetchVideo(vid) }.getOrNull() }
     }
 
     fun addAgendaItem(event: StitchEventEntity, title: String, scheduledTime: Date) {
@@ -292,6 +350,134 @@ class EventsViewModel : ViewModel() {
 
     /** Filled slots (host has posted their video), time-ordered = the Host Threads. */
     fun hostThreads(): List<EventAgendaItem> = _agenda.value.filter { it.isFilled }.byTime()
+
+    // MARK: - Host recording (Go Live / promo) — arm the moment bridge, then the
+    // screen opens the recorder. ThreadComposer consumes the bridge on post.
+
+    /**
+     * Host "Go Live": ensure a recordable agenda slot exists and arm the bridge so
+     * the next recording fills it. Returns true if armed — the caller then opens
+     * the recorder (iOS parity with EventHubView.handlePlus(.hostRecord)).
+     */
+    suspend fun armGoLive(event: StitchEventEntity): Boolean {
+        if (!isHost(event)) return false
+        val slotID = ensureRecordableSlot(event) ?: return false
+        EventMomentBridge.armHostMoment(event.id, slotID, currentUserID, currentUsername)
+        return true
+    }
+
+    /** Arm the promo bridge — the next recording becomes the pre-event teaser. */
+    fun armPromo(event: StitchEventEntity): Boolean {
+        if (!isHost(event)) return false
+        EventMomentBridge.armPromo(event.id, currentUserID, currentUsername)
+        return true
+    }
+
+    /** Arm the recap bridge — the next recording becomes the event's public recap. */
+    fun armRecap(event: StitchEventEntity): Boolean {
+        if (!isHost(event)) return false
+        EventMomentBridge.armRecap(event.id, currentUserID, currentUsername)
+        return true
+    }
+
+    /** Hydrate the closing recap video for display (null if the host hasn't posted one). */
+    fun loadRecap(event: StitchEventEntity) {
+        val vid = event.recapVideoID
+        if (vid.isNullOrBlank()) { _recapVideo.value = null; return }
+        viewModelScope.launch { _recapVideo.value = runCatching { service.fetchVideo(vid) }.getOrNull() }
+    }
+
+    /** The current unfilled agenda slot the host can go live on, if any. */
+    private fun recordableSlot(event: StitchEventEntity): EventAgendaItem? {
+        if (!isHost(event)) return null
+        val live = _agenda.value.liveItem() ?: return null
+        return if (!live.isFilled) live else null
+    }
+
+    /**
+     * The slot the host records to: the current unfilled slot, else a fresh one
+     * created now (first = "Live" opener, later = "Moment"). Lets the host go live
+     * with one tap, no pre-built agenda required.
+     */
+    private suspend fun ensureRecordableSlot(event: StitchEventEntity): String? {
+        recordableSlot(event)?.let { return it.id }
+        val title = if (event.openerVideoID == null) "Live" else "Moment"
+        return runCatching {
+            val item = service.addAgendaItem(event.id, title, Date(), currentUserID)
+            _agenda.value = service.fetchAgenda(event.id)
+            item.id
+        }.getOrNull()
+    }
+
+    // MARK: - Guest POV (on-site stitch onto the live moment's thread)
+
+    /** The live (stitchable) moment = the newest FILLED slot. See [liveMomentItem]. */
+    fun liveSlot(): EventAgendaItem? = _agenda.value.liveMomentItem()
+
+    /**
+     * Hydrate the live moment's video for display in the Hub so a guest can see
+     * what they're about to stitch to. Newest FILLED slot (not the time-based
+     * slot) so an empty Go-Live slot never blanks the hero. Called on agenda change.
+     */
+    fun loadLiveMoment() {
+        val vid = _agenda.value.liveMomentItem()?.momentVideoID
+        if (vid == null) { _liveMoment.value = null; return }
+        viewModelScope.launch { _liveMoment.value = runCatching { service.fetchVideo(vid) }.getOrNull() }
+    }
+
+    /**
+     * Hydrate the live moment's video so the screen can build a stitch context
+     * (iOS parity with liveMomentVideo(for:)). Newest FILLED slot.
+     */
+    suspend fun liveMomentVideo(): CoreVideoMetadata? {
+        val live = _agenda.value.liveMomentItem() ?: return null
+        val vid = live.momentVideoID ?: return null
+        return service.fetchVideo(vid)
+    }
+
+    /** Arm the POV bridge — the next stitch attaches as a POV on the live moment's thread. */
+    fun armPOV(event: StitchEventEntity, agendaItemID: String) {
+        EventMomentBridge.armPOV(event.id, agendaItemID, currentUserID, currentUsername)
+    }
+
+    /** Hydrate a filled agenda slot's video for view-only fullscreen playback. */
+    suspend fun momentVideo(item: EventAgendaItem): CoreVideoMetadata? {
+        val vid = item.momentVideoID ?: return null
+        return service.fetchVideo(vid)
+    }
+
+    /**
+     * Host-only "Make live again": bump a past/locked moment's time to now so it
+     * becomes the newest filled slot → live again (whatever was live drops to
+     * "earlier"). For the accidental-lock recovery case.
+     */
+    fun reopenMoment(event: StitchEventEntity, itemID: String) {
+        if (!isHost(event)) return
+        viewModelScope.launch {
+            try {
+                service.reopenMoment(event.id, itemID)
+                _agenda.value = service.fetchAgenda(event.id)
+            } catch (e: Exception) { _errorMessage.value = e.message }
+        }
+    }
+
+    /**
+     * One-tap Join + stitch (iOS parity with handlePlus(.guestJoinStitch)): set
+     * Going, check presence, and if on-site with a live filled moment, arm the POV
+     * bridge and return its video so the caller opens the stitch recorder. Returns
+     * null when not eligible — the user is left Going and the staged UI takes over.
+     * Requires location permission already granted (caller checks hasPermission).
+     */
+    suspend fun joinAndStitch(event: StitchEventEntity, location: LocationService): CoreVideoMetadata? {
+        if (isHost(event)) return null
+        if (rsvpStatus(event.id) != EventRSVPStatus.GOING) setRSVP(event, EventRSVPStatus.GOING)
+        if (!checkPresence(event, location)) return null
+        val live = _agenda.value.liveMomentItem() ?: return null
+        val vid = live.momentVideoID ?: return null
+        val video = service.fetchVideo(vid) ?: return null
+        armPOV(event, live.id)
+        return video
+    }
 
     // MARK: - Invite
 

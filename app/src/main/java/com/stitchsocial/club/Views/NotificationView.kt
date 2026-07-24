@@ -180,6 +180,14 @@ fun NotificationViewComplete(
                     Log.d("NOTIF_NAV", "🧵 -> Thread only: ${event.threadId}")
                     onShowThreadView(event.threadId, null)
                 }
+                is NotificationNavigationEvent.NavigateToEvent -> {
+                    Log.d("NOTIF_NAV", "📅 -> Event hub: ${event.eventId}")
+                    // No callback for this one: the Hub is presented by
+                    // DiscoveryView, which isn't composed while this tab is up.
+                    // Park the id — MainActivity switches to Discovery, which
+                    // then opens the Hub and consumes it.
+                    com.stitchsocial.club.events.EventDeepLink.request(event.eventId)
+                }
                 NotificationNavigationEvent.None -> { }
             }
         }

@@ -40,6 +40,8 @@ sealed class NotificationNavigationEvent {
     data class NavigateToProfile(val userId: String) : NotificationNavigationEvent()
     data class NavigateToVideo(val videoId: String, val threadId: String? = null) : NotificationNavigationEvent()
     data class NavigateToThread(val threadId: String) : NotificationNavigationEvent()
+    /** Event invite -> that event's Hub (presented by DiscoveryView). */
+    data class NavigateToEvent(val eventId: String) : NotificationNavigationEvent()
     object None : NotificationNavigationEvent()
 }
 
@@ -304,12 +306,28 @@ class NotificationViewModel(
                 ?: notification.actionData["userId"] as? String
                 ?: notification.actionData["senderId"] as? String
 
+            // Event invite. EventsViewModel.inviteUsers writes these as SYSTEM
+            // with a notificationType="event_invite" payload key (there is no
+            // event case in StitchNotificationType — iOS does the same), so the
+            // payload's eventID is the only dependable signal here.
+            val eventId = notification.actionData["eventID"] as? String
+                ?: notification.actionData["eventId"] as? String
+
             // Determine intent from BOTH type AND payload
             val isFollowType = notification.type == NotificationType.NEW_FOLLOWER
                     || notification.actionData["engagementType"]?.toString() == "follow"
             val isTierUpgrade = notification.type == NotificationType.TIER_UPGRADED
 
             when {
+                // Event invite -> the event's Hub. FIRST on purpose: an invite
+                // carries a senderID and no videoID, so the generic sender
+                // fallback below would otherwise swallow it and open the
+                // inviter's profile instead of the event.
+                !eventId.isNullOrEmpty() -> {
+                    Log.d(TAG, "NAV -> Event hub: $eventId")
+                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToEvent(eventId))
+                }
+
                 // Follow notification (no video) -> profile
                 isFollowType && !hasVideo && senderUserId != null -> {
                     Log.d(TAG, "NAV -> Profile (follow): $senderUserId")

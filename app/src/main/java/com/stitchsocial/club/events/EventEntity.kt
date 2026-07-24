@@ -311,12 +311,22 @@ data class EventAgendaItem(
 fun List<EventAgendaItem>.byTime(): List<EventAgendaItem> = sortedBy { it.scheduledTime }
 
 /**
- * The currently-live slot: the latest item whose time has arrived. Only this
- * moment is stitchable — everything before it has passed (view-only), everything
- * after hasn't started. null before the first item's time.
+ * Time-based "now" slot: the latest item whose scheduled time has arrived.
+ * Used for the agenda's schedule marker and for finding where to record next
+ * (recordableSlot) — NOT for live/lock state (see [liveMomentItem]).
  */
 fun List<EventAgendaItem>.liveItem(now: Date = Date()): EventAgendaItem? =
     byTime().lastOrNull { it.scheduledTime <= now }
+
+/**
+ * The LIVE moment = the newest FILLED slot (the most recent moment actually
+ * posted). This — not [liveItem] — drives what's stitchable, the live hero, and
+ * the lock state. An empty slot the host just created by tapping Go Live isn't
+ * filled, so it can't steal liveness or prematurely lock the previous moment;
+ * only recording a new moment in full replaces the live one (and locks the prior).
+ */
+fun List<EventAgendaItem>.liveMomentItem(): EventAgendaItem? =
+    filter { it.isFilled }.byTime().lastOrNull()
 
 // MARK: - Creation draft (collected by the create flow)
 

@@ -863,7 +863,11 @@ class VideoServiceImpl {
                     challengeThreadID = data["challengeThreadID"] as? String,
                     challengeStatus = com.stitchsocial.club.challenge.ChallengeEntryStatus.from(data["challengeStatus"] as? String),
                     // Event posts — nested `event` map on the thread HEAD (null otherwise)
-                    event = com.stitchsocial.club.events.StitchEvent.fromMap(data["event"] as? Map<*, *>)
+                    event = com.stitchsocial.club.events.StitchEvent.fromMap(data["event"] as? Map<*, *>),
+                    // Event promo/recap skin flags (drive the Discovery event-promo border)
+                    eventID = data["eventId"] as? String,
+                    isEventPromo = data["isEventPromo"] as? Boolean ?: false,
+                    isEventRecap = data["isEventRecap"] as? Boolean ?: false
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }

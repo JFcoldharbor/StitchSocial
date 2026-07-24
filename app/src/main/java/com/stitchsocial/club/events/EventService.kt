@@ -309,9 +309,14 @@ object EventService {
         batch.update(videoRef, mapOf("eventId" to eventID, "anchorMomentId" to agendaItemID))
         batch.update(agendaRef(eventID).document(agendaItemID), mapOf("povCount" to FieldValue.increment(1L)))
         if (posterUserID.isNotBlank()) {
-            batch.update(
+            // set(merge), NOT update: the attendee doc may not exist yet (Join&stitch
+            // races the RSVP write, or the guest never RSVP'd through the normal
+            // path). `update` would throw NOT_FOUND and, because the batch is atomic,
+            // sink the video-tag + povCount too — the POV would silently never attach.
+            batch.set(
                 attendeesRef(eventID).document(posterUserID),
-                mapOf("povCount" to FieldValue.increment(1L), "verifiedOnsite" to true)
+                mapOf("povCount" to FieldValue.increment(1L), "verifiedOnsite" to true),
+                com.google.firebase.firestore.SetOptions.merge()
             )
         }
         batch.commit().await()
@@ -347,6 +352,23 @@ object EventService {
         batch.update(db.collection(Col.VIDEOS).document(video.id), videoUpdate)
         batch.update(eventsRef().document(eventID), mapOf("promoVideoID" to video.id, "updatedAt" to Timestamp(Date())))
         batch.commit().await()
+    }
+
+    /**
+     * Host "Make live again": bump a moment's scheduledTime to now so it becomes
+     * the newest filled slot → the live moment. Recovers an accidental lock.
+     */
+    suspend fun reopenMoment(eventID: String, agendaItemID: String) {
+        if (eventID.isBlank() || agendaItemID.isBlank()) throw EventException("Missing event or account details")
+        agendaRef(eventID).document(agendaItemID)
+            .update("scheduledTime", Timestamp(Date()))
+            .await()
+    }
+
+    /** Resolve a single video doc — used to hydrate the promo/recap teaser for display. */
+    suspend fun fetchVideo(id: String): CoreVideoMetadata? {
+        if (id.isBlank()) return null
+        return runCatching { videoService.getVideoById(id) }.getOrNull()
     }
 
     // --- Giveaways (event-level; entries = the verified-onsite attendee pool) ---

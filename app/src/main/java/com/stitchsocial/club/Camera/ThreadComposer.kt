@@ -209,6 +209,11 @@ fun ThreadComposer(
                             val announcementToAttach = announcementDraft
                             val attachEventConfig = isEvent && isNewThread && eventDraft.isValid
                             val eventToAttach = eventDraft
+                            // An Event Hub moment (Go Live / promo / recap): the
+                            // Hub armed EventMomentBridge before opening the
+                            // recorder. Take it exactly once, here at queue time,
+                            // so an unrelated later post can't inherit it.
+                            val eventMoment = com.stitchsocial.club.events.EventMomentBridge.take()
                             val announcementTitle = title.trim()
                             val announcementMessage = description.trim()
                             val creatorEmailSnapshot = capturedUserEmail
@@ -249,6 +254,29 @@ fun ThreadComposer(
                                             }.onFailure { e ->
                                                 if (BuildConfig.DEBUG) {
                                                     println("COMPOSER: attachEvent failed: ${e.message}")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Attach an Event Hub moment (Go Live / promo /
+                                    // recap) onto the real video id once the post
+                                    // lands. Snapshotted at queue time above.
+                                    if (eventMoment != null) {
+                                        kotlinx.coroutines.GlobalScope.launch {
+                                            runCatching {
+                                                when {
+                                                    eventMoment.isPromo ->
+                                                        EventService.setPromo(eventMoment.eventID, createdVideo)
+                                                    eventMoment.isRecap ->
+                                                        EventService.setRecap(eventMoment.eventID, createdVideo)
+                                                    eventMoment.isPOV ->
+                                                        EventService.attachPOV(eventMoment.eventID, eventMoment.agendaItemID, createdVideo.id, createdVideo.creatorID)
+                                                    createdVideo.isThread ->
+                                                        EventService.fillAgendaSlot(eventMoment.eventID, eventMoment.agendaItemID, createdVideo, eventMoment.hostUserID)
+                                                }
+                                            }.onFailure { e ->
+                                                if (BuildConfig.DEBUG) {
+                                                    println("COMPOSER: event moment attach failed: ${e.message}")
                                                 }
                                             }
                                         }

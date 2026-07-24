@@ -33,7 +33,7 @@ private enum class EventsTab { BROWSE, MINE }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Unit) {
-    val blue = StitchColors.secondary
+    val blue = StitchColors.primary  // events accent = brand magenta (was blue #3399FF)
 
     val live by vm.liveEvents.collectAsState()
     val upcoming by vm.upcomingEvents.collectAsState()

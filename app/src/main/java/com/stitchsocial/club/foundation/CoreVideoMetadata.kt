@@ -96,7 +96,13 @@ data class CoreVideoMetadata(
     val challengeStatus: com.stitchsocial.club.challenge.ChallengeEntryStatus? = null,  // entered/qualified/won
 
     // Event posts (iOS parity — see project_stitch_social; nested `event` map on the thread HEAD)
-    val event: com.stitchsocial.club.events.StitchEvent? = null
+    val event: com.stitchsocial.club.events.StitchEvent? = null,
+    // Event promo/recap skin flags (iOS parity). Set on the video doc by
+    // EventService.setPromo/setRecap (fields: eventId / isEventPromo / isEventRecap).
+    // Drive the Discovery event-promo border + EVENT pill.
+    val eventID: String? = null,
+    val isEventPromo: Boolean = false,
+    val isEventRecap: Boolean = false
 ) {
     // Computed properties
 

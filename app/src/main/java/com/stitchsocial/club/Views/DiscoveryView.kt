@@ -122,14 +122,13 @@ enum class DiscoveryCategory(
     val displayName: String,
     val icon: ImageVector
 ) {
-    ALL("All", Icons.Default.Apps),
+    // Trimmed to the 5 tabs we keep (2026-07-20). For You is the default feed
+    // (renamed from All). Recent/Popular/Following removed.
+    FOR_YOU("For You", Icons.Default.Apps),
     EVENTS("Events", Icons.Default.CalendarMonth),
-    COMMUNITIES("Communities", Icons.Default.Groups),
+    COMMUNITIES("Community", Icons.Default.Groups),
     COLLECTIONS("Collections", Icons.Default.VideoLibrary),
-    TRENDING("Trending", Icons.Default.LocalFireDepartment),
-    RECENT("Recent", Icons.Default.Schedule),
-    POPULAR("Popular", Icons.Default.Star),
-    FOLLOWING("Following", Icons.Default.People)
+    TRENDING("Trending", Icons.Default.LocalFireDepartment)
 }
 
 // MARK: - Discovery Mode (matching iOS: swipe, grid)
@@ -179,7 +178,7 @@ class DiscoveryViewModel(
     private val sponsoredSlotService = SponsoredSlotService()
     private var sponsoredCards: List<CoreVideoMetadata> = emptyList()
 
-    private val _currentCategory = MutableStateFlow(DiscoveryCategory.ALL)
+    private val _currentCategory = MutableStateFlow(DiscoveryCategory.FOR_YOU)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
 
     // MARK: - Hashtag State (matches iOS DiscoveryViewModel)
@@ -357,7 +356,10 @@ class DiscoveryViewModel(
             collectionID = data["collectionID"] as? String,
             segmentNumber = (data["segmentNumber"] as? Long)?.toInt(),
             segmentTitle = data["segmentTitle"] as? String,
-            isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false
+            isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false,
+            eventID = data["eventId"] as? String,
+            isEventPromo = data["isEventPromo"] as? Boolean ?: false,
+            isEventRecap = data["isEventRecap"] as? Boolean ?: false
         )
     }
 
@@ -462,15 +464,12 @@ class DiscoveryViewModel(
         val allVideos = _videos.value
 
         val filtered = when (category) {
-            DiscoveryCategory.ALL -> allVideos
+            DiscoveryCategory.FOR_YOU -> allVideos
             DiscoveryCategory.EVENTS -> allVideos // unreachable — handled above
             DiscoveryCategory.COMMUNITIES -> emptyList() // Handled by CommunityListView
             DiscoveryCategory.TRENDING -> allVideos.filter {
                 it.temperature == Temperature.HOT || it.temperature == Temperature.BLAZING
             }
-            DiscoveryCategory.RECENT -> allVideos.sortedByDescending { it.createdAt }
-            DiscoveryCategory.POPULAR -> allVideos.sortedByDescending { it.hypeCount }
-            DiscoveryCategory.FOLLOWING -> allVideos // TODO: Filter by followed creators
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
         }
 
@@ -779,7 +778,7 @@ fun DiscoveryView(
 
     // Discovery Mode - default to SWIPE like iOS
     var discoveryMode by remember { mutableStateOf(DiscoveryMode.SWIPE) }
-    var selectedCategory by remember { mutableStateOf(DiscoveryCategory.ALL) }
+    var selectedCategory by remember { mutableStateOf(DiscoveryCategory.FOR_YOU) }
 
     // Swipe cards state
     var currentSwipeIndex by remember { mutableStateOf(0) }
@@ -834,6 +833,7 @@ fun DiscoveryView(
     val eventsContext = androidx.compose.ui.platform.LocalContext.current
     val eventsVM = remember { com.stitchsocial.club.events.EventsViewModel() }
     var eventHub by remember { mutableStateOf<com.stitchsocial.club.events.StitchEventEntity?>(null) }
+    var eventPlayerVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
     LaunchedEffect(currentUserID) {
         val uid = currentUserID ?: ""
         val username = if (uid.isNotBlank())
@@ -842,6 +842,31 @@ fun DiscoveryView(
     }
     LaunchedEffect(selectedCategory) {
         if (selectedCategory == DiscoveryCategory.EVENTS) eventsVM.load()
+    }
+    // Event deep-link (notification tap, in-app or FCM): only an eventID is
+    // parked, so hydrate it before the Hub can open. Gated on isConfigured —
+    // configure() lands asynchronously (it awaits a username lookup) and
+    // EventsViewModel.currentUserID is a plain var, so a Hub composed before it
+    // arrives would read isHost=false and never recompose: the host would get
+    // their own event rendered as a guest.
+    val deepLinkEventID by com.stitchsocial.club.events.EventDeepLink.pending
+    val eventsConfigured by eventsVM.isConfigured.collectAsState()
+    LaunchedEffect(deepLinkEventID, eventsConfigured) {
+        val id = deepLinkEventID ?: return@LaunchedEffect
+        if (!eventsConfigured) return@LaunchedEffect
+        com.stitchsocial.club.events.EventDeepLink.consume()
+        // Land on Events so dismissing the Hub reveals the events list rather
+        // than whatever feed happened to be behind it.
+        selectedCategory = DiscoveryCategory.EVENTS
+        eventsVM.loadEvent(id)
+    }
+    // loadEvent is async; present once the entity arrives, then ack the signal.
+    val deepLinkedEvent by eventsVM.openEvent.collectAsState()
+    LaunchedEffect(deepLinkedEvent) {
+        deepLinkedEvent?.let {
+            eventHub = it
+            eventsVM.clearOpenEvent()
+        }
     }
     // Hide the custom tab bar whenever ANY fullscreen surface is up — the
     // fullscreen video deck, the collection player, or the event hub — so those
@@ -936,9 +961,37 @@ fun DiscoveryView(
                 com.stitchsocial.club.events.EventHubScreen(
                     event = ev,
                     vm = eventsVM,
-                    onDismiss = { eventHub = null; eventsVM.load() }
+                    onDismiss = { eventHub = null; eventsVM.load() },
+                    // Host Go Live / promo (NewThread) or guest POV (StitchToThread
+                    // + parent video): the Hub arms EventMomentBridge, then we open
+                    // the recorder. ThreadComposer takes the arm at queue time and
+                    // attaches the moment on post.
+                    onRecord = { ctx, parent -> navigationCoordinator?.showRecordingModal(ctx, parent) },
+                    // Play an event video (promo/recap/moment) fullscreen with the
+                    // full engagement overlay — same deck as any other video.
+                    onOpenVideo = { eventPlayerVideo = it }
                 )
             }
+        }
+
+        // Event video fullscreen — the engagement deck, above the Hub (zIndex 300).
+        eventPlayerVideo?.let { ev ->
+            DiscoveryFullscreenDeck(
+                rootVideos = listOf(ev),
+                initialVideoID = ev.id,
+                currentUserID = currentUserID,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                navigationCoordinator = navigationCoordinator,
+                videoService = videoService,
+                isAnnouncementShowing = isAnnouncementShowing,
+                onSettledIndexChange = {},
+                onDismiss = { eventPlayerVideo = null },
+                onNavigateToProfile = { userID, _ -> eventPlayerVideo = null; onNavigateToProfile(userID) },
+                onShowThreadView = { threadID, targetVideoID -> onShowThreadView(threadID, targetVideoID) },
+                modifier = Modifier.zIndex(300f)
+            )
         }
 
         // Collection player fullscreen overlay
@@ -1359,9 +1412,8 @@ private fun DiscoveryCategorySelector(
             .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
-        // Capsule pills (iOS parity): selected = magenta foreground on a magenta
-        // tint + hairline; unselected = white 0.5 on a faint fill. Replaces the
-        // off-brand cyan underline.
+        // Capsule pills: SELECTED = solid magenta fill + white text/icon (filled
+        // highlight indicator); unselected = white 0.5 on a faint fill.
         DiscoveryCategory.values().forEach { category ->
             val selected = selectedCategory == category
             val accent = StitchColors.primary
@@ -1370,11 +1422,7 @@ private fun DiscoveryCategorySelector(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(if (selected) accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.06f))
-                    .then(
-                        if (selected) Modifier.border(1.dp, accent.copy(alpha = 0.4f), CircleShape)
-                        else Modifier
-                    )
+                    .background(if (selected) accent else Color.White.copy(alpha = 0.06f))
                     .clickable { onCategorySelected(category) }
                     .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
             ) {
@@ -1382,13 +1430,13 @@ private fun DiscoveryCategorySelector(
                     imageVector = category.icon,
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
-                    tint = if (selected) accent else Color.White.copy(alpha = 0.5f)
+                    tint = if (selected) Color.White else Color.White.copy(alpha = 0.5f)
                 )
                 Text(
                     text = category.displayName,
                     fontSize = 13.sp,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selected) accent else Color.White.copy(alpha = 0.5f)
+                    color = if (selected) Color.White else Color.White.copy(alpha = 0.5f)
                 )
             }
         }

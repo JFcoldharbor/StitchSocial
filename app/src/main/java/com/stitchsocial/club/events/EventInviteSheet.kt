@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventInviteSheet(vm: EventsViewModel, event: StitchEventEntity, onDismiss: () -> Unit) {
-    val blue = StitchColors.secondary
+    val blue = StitchColors.primary  // events accent = brand magenta (was blue #3399FF)
     val context = LocalContext.current
     val userService = remember { UserService(context) }
     val notificationService = remember { NotificationService() }
