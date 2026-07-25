@@ -334,14 +334,18 @@ object SpecialUsersConfig {
      * Get starting clout for user (with fallback)
      */
     fun getStartingClout(email: String): Int {
-        return getSpecialUser(email)?.startingClout ?: 1500 // Default starting clout
+        // Regular users start at the rookie floor (0); elevated starting clout
+        // is reserved for whitelisted beta/special users.
+        return getSpecialUser(email)?.startingClout ?: 0
     }
     
     /**
      * Get initial badges for user (returns raw values to be converted by existing system)
      */
     fun getInitialBadgeRawValues(email: String): List<String> {
-        return getSpecialUser(email)?.badgeRawValues ?: listOf("early_adopter")
+        // Regular users get NO identity badges. early_adopter / beta_tester are
+        // reserved for whitelisted beta testers (their badgeRawValues).
+        return getSpecialUser(email)?.badgeRawValues ?: emptyList()
     }
     
     /**
