@@ -73,21 +73,11 @@ fun WalletScreen(
     val isLoading            by viewModel.isLoading.collectAsState()
     val showPurchaseSuccess  by viewModel.showPurchaseSuccess.collectAsState()
     val lastPurchaseAmt      by viewModel.lastPurchaseAmount.collectAsState()
-    val showCashOut          by viewModel.showCashOut.collectAsState()
     val errorMessage         by viewModel.errorMessage.collectAsState()
 
     LaunchedEffect(userID) { viewModel.loadData(userID) }
 
     if (showPurchaseSuccess) PurchaseSuccessBanner(lastPurchaseAmt)
-
-    if (showCashOut) {
-        CashOutSheet(
-            userTier       = userTier,
-            availableCoins = balance?.availableCoins ?: 0,
-            viewModel      = viewModel,
-            onDismiss      = { viewModel.hideCashOutSheet() }
-        )
-    }
 
     errorMessage?.let { LaunchedEffect(it) { viewModel.clearError() } }
 
@@ -118,8 +108,7 @@ fun WalletScreen(
                 WalletTab.BALANCE -> BalanceTab(
                     balance      = balance,
                     userTier     = userTier,
-                    onBuyTap     = { viewModel.selectTab(WalletTab.BUY) },
-                    onCashOutTap = { viewModel.showCashOutSheet() }
+                    onBuyTap     = { viewModel.selectTab(WalletTab.BUY) }
                 )
                 WalletTab.BUY -> BuyCoinsTab(
                     packageDetails = viewModel.packageDetails,
@@ -182,8 +171,7 @@ private fun WalletTabBar(selectedTab: WalletTab, onTabSelect: (WalletTab) -> Uni
 private fun BalanceTab(
     balance: HypeCoinBalance?,
     userTier: UserTier,
-    onBuyTap: () -> Unit,
-    onCashOutTap: () -> Unit
+    onBuyTap: () -> Unit
 ) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -192,7 +180,6 @@ private fun BalanceTab(
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 QuickActionButton("💳", "Buy",      Green,      onBuyTap,     Modifier.weight(1f))
-                QuickActionButton("💵", "Cash Out", StitchGold, onCashOutTap, Modifier.weight(1f))
             }
         }
         item {
@@ -309,74 +296,6 @@ private fun TransactionRow(tx: CoinTransaction) {
         }
         Text("${if (isCredit) "+" else ""}${tx.amount}",
             fontSize = 15.sp, fontWeight = FontWeight.Bold, color = amountColor)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CashOutSheet(
-    userTier: UserTier,
-    availableCoins: Int,
-    viewModel: WalletViewModel,
-    onDismiss: () -> Unit
-) {
-    val cashOutAmount  by viewModel.cashOutAmount.collectAsState()
-    val isProcessing   by viewModel.cashOutProcessing.collectAsState()
-    val isSuccess      by viewModel.cashOutSuccess.collectAsState()
-    val errorMessage   by viewModel.errorMessage.collectAsState()
-
-    val amount     = viewModel.coinAmountInt(cashOutAmount)
-    val isValid    = viewModel.isValidCashOut(cashOutAmount, availableCoins)
-    val (creatorAmt, _) = viewModel.cashOutBreakdown(cashOutAmount, userTier)
-
-    if (isSuccess) { LaunchedEffect(Unit) { onDismiss() } }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF111111)) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
-            Text("Cash Out", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Spacer(Modifier.height(16.dp))
-            Text("Available: $availableCoins coins", color = TextMuted, fontSize = 14.sp)
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value         = cashOutAmount,
-                onValueChange = { viewModel.updateCashOutAmount(it) },
-                placeholder   = { Text("Enter amount", color = TextMuted) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine    = true,
-                colors        = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = StitchCyan, unfocusedBorderColor = DividerGray,
-                    focusedTextColor     = TextPrimary, unfocusedTextColor   = TextPrimary),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text("Minimum: ${CashOutLimits.MINIMUM_COINS} coins", fontSize = 12.sp, color = TextMuted,
-                modifier = Modifier.align(Alignment.Start).padding(top = 4.dp))
-            if (amount > 0) {
-                Spacer(Modifier.height(16.dp))
-                Card(colors = CardDefaults.cardColors(containerColor = CardBg),
-                    shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        StatRow("Your tier",  userTier.displayName, valueColor = Purple)
-                        Spacer(Modifier.height(8.dp))
-                        StatRow("Your share", "${(SubscriptionRevenueShare.creatorShare(userTier)*100).toInt()}%", valueColor = Green)
-                        Divider(color = DividerGray, modifier = Modifier.padding(vertical = 10.dp))
-                        StatRow("You'll receive", "$${String.format("%.2f", creatorAmt)}", valueColor = Green, boldValue = true)
-                    }
-                }
-            }
-            Spacer(Modifier.height(24.dp))
-            Button(onClick = { viewModel.processCashOut(userTier) }, enabled = isValid && !isProcessing,
-                colors = ButtonDefaults.buttonColors(containerColor = if (isValid) Green else Color.Gray),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                if (isProcessing) CircularProgressIndicator(color = Black, modifier = Modifier.size(20.dp))
-                else Text("Cash Out", fontWeight = FontWeight.Bold, color = Black, fontSize = 16.sp)
-            }
-            errorMessage?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, color = Red, fontSize = 13.sp, textAlign = TextAlign.Center)
-            }
-        }
     }
 }
 

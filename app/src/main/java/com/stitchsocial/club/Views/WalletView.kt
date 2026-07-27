@@ -76,7 +76,6 @@ fun WalletView(
     val purchaseState by vm.purchaseState.collectAsState()
     val showPurchaseSuccess by vm.showPurchaseSuccess.collectAsState()
     val lastPurchaseAmount by vm.lastPurchaseAmount.collectAsState()
-    val showCashOut by vm.showCashOut.collectAsState()
 
     // Load data on open — mirrors iOS .task { await loadData() }
     LaunchedEffect(userID) {
@@ -121,8 +120,7 @@ fun WalletView(
                 WalletTab.BALANCE -> BalanceTab(
                     balance = balance,
                     userTier = userTier,
-                    onBuyTap = { vm.selectTab(WalletTab.BUY) },
-                    onCashOutTap = { vm.showCashOutSheet() }
+                    onBuyTap = { vm.selectTab(WalletTab.BUY) }
                 )
                 WalletTab.BUY -> BuyCoinsTab(
                     packageDetails = vm.packageDetails,
@@ -155,15 +153,6 @@ fun WalletView(
         )
     }
 
-    // Cash out sheet
-    if (showCashOut) {
-        CashOutSheet(
-            userTier = userTier,
-            availableCoins = balance?.availableCoins ?: 0,
-            vm = vm,
-            onDismiss = { vm.hideCashOutSheet() }
-        )
-    }
 }
 
 // MARK: - Top Bar
@@ -267,8 +256,7 @@ private fun WalletTabBar(selectedTab: WalletTab, onTabSelected: (WalletTab) -> U
 private fun BalanceTab(
     balance: com.stitchsocial.club.foundation.HypeCoinBalance?,
     userTier: UserTier,
-    onBuyTap: () -> Unit,
-    onCashOutTap: () -> Unit
+    onBuyTap: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -280,9 +268,6 @@ private fun BalanceTab(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             QuickActionButton("Buy", Icons.Default.AddCircle, Color.Green, Modifier.weight(1f), onBuyTap)
-            if (canCashOut(userTier)) {
-                QuickActionButton("Cash Out", Icons.Default.AccountBalance, Color.Yellow, Modifier.weight(1f), onCashOutTap)
-            }
         }
 
         // Stats card — mirrors iOS statRow section
@@ -560,101 +545,3 @@ private fun PurchaseSuccessBanner(coinAmount: Int) {
     }
 }
 
-// MARK: - Cash Out Sheet
-
-@Composable
-private fun CashOutSheet(
-    userTier: UserTier,
-    availableCoins: Int,
-    vm: WalletViewModel,
-    onDismiss: () -> Unit
-) {
-    val cashOutAmount by vm.cashOutAmount.collectAsState()
-    val isProcessing by vm.cashOutProcessing.collectAsState()
-    val cashOutSuccess by vm.cashOutSuccess.collectAsState()
-
-    val amountInt = vm.coinAmountInt(cashOutAmount)
-    val isValid = vm.isValidCashOut(cashOutAmount, availableCoins)
-    val breakdown = if (isValid) vm.cashOutBreakdown(cashOutAmount, userTier) else Pair(0.0, 0.0)
-
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF1A1A1A)) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("Cash Out", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
-
-            if (cashOutSuccess) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("🎉", fontSize = 48.sp)
-                    Text("Request Submitted!", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Green)
-                    Text("Processing in 3-5 business days", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Green),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Done", color = Color.Black, fontWeight = FontWeight.Bold) }
-                }
-            } else {
-                Text("Available: $availableCoins coins", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
-
-                OutlinedTextField(
-                    value = cashOutAmount,
-                    onValueChange = { vm.updateCashOutAmount(it) },
-                    label = { Text("Coins to cash out", color = AppTheme.colors.textSecondary) },
-                    placeholder = { Text("Min 1,000", color = AppTheme.colors.textSecondary.copy(alpha = 0.5f)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Cyan,
-                        unfocusedBorderColor = AppTheme.colors.textSecondary,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    )
-                )
-
-                if (isValid) {
-                    Surface(shape = RoundedCornerShape(10.dp), color = AppTheme.colors.surface) {
-                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            StatRow("You receive", "$${String.format("%.2f", breakdown.first)}", Color.Green)
-                            StatRow("Platform fee", "$${String.format("%.2f", breakdown.second)}", AppTheme.colors.textSecondary)
-                            StatRow("Rate", "${(SubscriptionRevenueShare.creatorShare(userTier) * 100).toInt()}%", Color(0xFF9C27B0))
-                        }
-                    }
-                }
-
-                Button(
-                    onClick = { vm.processCashOut(userTier) },
-                    enabled = isValid && !isProcessing,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Green,
-                        disabledContainerColor = AppTheme.colors.textSecondary.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    if (isProcessing) {
-                        CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("Submit Cash Out Request", fontWeight = FontWeight.Bold, color = Color.Black)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-    }
-}
-
-// MARK: - Helpers
-
-private fun canCashOut(tier: UserTier): Boolean = when (tier) {
-    UserTier.ELITE, UserTier.PARTNER, UserTier.LEGENDARY,
-    UserTier.TOP_CREATOR, UserTier.FOUNDER, UserTier.CO_FOUNDER,
-    UserTier.AMBASSADOR -> true
-    else -> false
-}

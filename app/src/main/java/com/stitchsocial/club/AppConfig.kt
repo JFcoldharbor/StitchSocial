@@ -72,7 +72,6 @@ object AppConfig {
 
         const val enableHypeCoin          = true
         const val enableCommunities       = true
-        const val enableCashOut           = true
         const val enablePushNotifications = true
     }
 

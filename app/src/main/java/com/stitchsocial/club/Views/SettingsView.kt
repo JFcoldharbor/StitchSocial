@@ -136,7 +136,6 @@ fun SettingsView(
     var showMySubscriptions by remember { mutableStateOf(false) }
     var showMySubscribers by remember { mutableStateOf(false) }
     var showAdOpportunities by remember { mutableStateOf(false) }
-    var showCashOut by remember { mutableStateOf(false) }
     var showSubscriptionSettings by remember { mutableStateOf(false) }
     var showCommunitySettings by remember { mutableStateOf(false) }
     var showPrivacySettings by remember { mutableStateOf(false) }
@@ -220,7 +219,6 @@ fun SettingsView(
                             Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(14.dp))
                         }
                         SNavRow(Icons.Default.Language, Color.Cyan, "Manage Account", "Profile, billing & security") { showManageAccount = true }
-                        if (isCreator) SNavRow(Icons.Default.AttachMoney, Color(0xFF30D158), "Cash Out", "Withdraw your earnings") { showCashOut = true }
                     }
                 }
 
@@ -465,17 +463,6 @@ fun SettingsView(
                         catch (_: Exception) { }
                     }
                 })
-            }
-        }
-
-        if (showCashOut) {
-            Box(Modifier.fillMaxSize().zIndex(10f)) {
-                CashOutSheet(
-                    userID = liveUser.id,
-                    userTier = liveUser.tier,
-                    availableCoins = coinBalance,
-                    onDismiss = { showCashOut = false }
-                )
             }
         }
 

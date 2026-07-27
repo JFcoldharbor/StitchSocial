@@ -87,13 +87,9 @@ enum class HypeCoinPackage(val rawValue: String) {
 // MARK: - Coin Value Conversion
 // ─────────────────────────────────────────────
 
-/** 100 coins = $1.00 cash value — matches iOS HypeCoinValue exactly */
-object HypeCoinValue {
-    const val COINS_PER_DOLLAR: Int = 100
-
-    fun toDollars(coins: Int): Double = coins.toDouble() / COINS_PER_DOLLAR.toDouble()
-    fun toCoins(dollars: Double): Int = (dollars * COINS_PER_DOLLAR).toInt()
-}
+// (Removed) HypeCoinValue coin↔dollar converter — mirrors the iOS purge. The
+// $0.01 peg lives server-side in the payout engine; the app never shows a
+// per-coin dollar value, and there is no user cash-out.
 
 // ─────────────────────────────────────────────
 // MARK: - User Coin Balance
@@ -113,7 +109,6 @@ data class HypeCoinBalance(
     val lastUpdated: Date = Date()
 ) {
     val totalCoins: Int get() = availableCoins + pendingCoins
-    val cashValue: Double get() = HypeCoinValue.toDollars(availableCoins)
 
     companion object {
         /** Empty balance for new users — avoids a Firestore read on first open */
@@ -306,23 +301,6 @@ object SubscriptionRevenueShare {
 
     fun platformShare(tier: UserTier): Double = 1.0 - creatorShare(tier)
 
-    /** Returns (creatorCut, platformCut) */
-    fun calculateCashOut(
-        coins: Int,
-        tier: UserTier,
-        customSubShare: Double? = null,
-        customSubShareExpiresAt: Date? = null,
-        customSubSharePermanent: Boolean = false,
-        referralCount: Int = 0,
-        referralGoal: Int? = null
-    ): Pair<Double, Double> {
-        val totalValue = HypeCoinValue.toDollars(coins)
-        val share = effectiveCreatorShare(
-            tier, customSubShare, customSubShareExpiresAt,
-            customSubSharePermanent, referralCount, referralGoal
-        )
-        return Pair(totalValue * share, totalValue * (1.0 - share))
-    }
 }
 
 // ─────────────────────────────────────────────

@@ -4,13 +4,9 @@ import android.app.Activity
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.stitchsocial.club.foundation.CashOutLimits
 import com.stitchsocial.club.foundation.CoinTransaction
 import com.stitchsocial.club.foundation.HypeCoinBalance
 import com.stitchsocial.club.foundation.HypeCoinPackage
-import com.stitchsocial.club.foundation.PayoutMethod
-import com.stitchsocial.club.foundation.SubscriptionRevenueShare
-import com.stitchsocial.club.foundation.UserTier
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -33,20 +29,8 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     private val _transactions      = MutableStateFlow<List<CoinTransaction>>(emptyList())
     val transactions: StateFlow<List<CoinTransaction>> = _transactions.asStateFlow()
 
-    private val _showCashOut       = MutableStateFlow(false)
-    val showCashOut: StateFlow<Boolean> = _showCashOut.asStateFlow()
-
     private val _errorMessage      = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
-
-    private val _cashOutAmount     = MutableStateFlow("")
-    val cashOutAmount: StateFlow<String> = _cashOutAmount.asStateFlow()
-
-    private val _cashOutSuccess    = MutableStateFlow(false)
-    val cashOutSuccess: StateFlow<Boolean> = _cashOutSuccess.asStateFlow()
-
-    private val _cashOutProcessing = MutableStateFlow(false)
-    val cashOutProcessing: StateFlow<Boolean> = _cashOutProcessing.asStateFlow()
 
     private val _transactionsLoaded = MutableStateFlow(false)
     val transactionsLoaded: StateFlow<Boolean> = _transactionsLoaded.asStateFlow()
@@ -67,14 +51,6 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         }
 
     fun coinAmountInt(input: String): Int = input.toIntOrNull() ?: 0
-
-    fun isValidCashOut(input: String, availableCoins: Int): Boolean {
-        val amount = coinAmountInt(input)
-        return amount >= CashOutLimits.MINIMUM_COINS && amount <= availableCoins
-    }
-
-    fun cashOutBreakdown(input: String, tier: UserTier): Pair<Double, Double> =
-        SubscriptionRevenueShare.calculateCashOut(coinAmountInt(input), tier)
 
     fun loadData(userID: String) {
         viewModelScope.launch {
@@ -99,25 +75,11 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectTab(tab: WalletTab)   { _selectedTab.value = tab }
-    fun showCashOutSheet()          { _showCashOut.value = true }
-    fun hideCashOutSheet()          { _showCashOut.value = false; _cashOutAmount.value = ""; _cashOutSuccess.value = false }
-    fun updateCashOutAmount(input: String) { if (input.all { it.isDigit() }) _cashOutAmount.value = input }
     fun clearError()                { _errorMessage.value = null }
 
     fun launchPurchase(activity: Activity, pkg: HypeCoinPackage) {
         if (!coordinator.launchPurchase(activity, pkg))
             _errorMessage.value = "Purchase unavailable. Please try again."
-    }
-
-    fun processCashOut(tier: UserTier) {
-        _cashOutProcessing.value = true
-        viewModelScope.launch {
-            try {
-                coordinator.requestCashOut(coinAmountInt(_cashOutAmount.value), tier, PayoutMethod.BANK_TRANSFER)
-                _cashOutSuccess.value  = true
-            } catch (e: Exception) { _errorMessage.value = e.message }
-            finally { _cashOutProcessing.value = false }
-        }
     }
 }
 

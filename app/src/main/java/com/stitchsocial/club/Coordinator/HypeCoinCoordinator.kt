@@ -13,10 +13,8 @@ import com.stitchsocial.club.foundation.CoinError
 import com.stitchsocial.club.foundation.CoinTransactionType
 import com.stitchsocial.club.foundation.HypeCoinBalance
 import com.stitchsocial.club.foundation.HypeCoinPackage
-import com.stitchsocial.club.foundation.PayoutMethod
 import com.stitchsocial.club.foundation.TipPreset
 import com.stitchsocial.club.foundation.UserTier
-import com.stitchsocial.club.foundation.CashOutRequest
 import com.stitchsocial.club.foundation.CoinPriceTier
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -249,15 +247,5 @@ class HypeCoinCoordinator private constructor(context: Context) {
     suspend fun cancelSubscription(creatorID: String) {
         val userID = currentUserID ?: return
         subscriptionService.cancelSubscription(userID, creatorID)
-    }
-
-    suspend fun requestCashOut(amount: Int, tier: UserTier, method: PayoutMethod): CashOutRequest {
-        val userID = currentUserID ?: throw CoinError.TransferFailed
-        _isLoading.value = true
-        try {
-            val request = coinService.requestCashOut(userID, amount, tier, method)
-            syncBalance()
-            return request
-        } finally { _isLoading.value = false }
     }
 }
