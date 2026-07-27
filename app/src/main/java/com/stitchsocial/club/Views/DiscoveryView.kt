@@ -974,6 +974,23 @@ fun DiscoveryView(
             }
         }
 
+        // Community — full-screen takeover above the Discovery chrome (iOS
+        // fullScreenCover parity). CommunityListView pauses the deck on open and
+        // its ✕ resets the category back to the feed.
+        if (selectedCategory == DiscoveryCategory.COMMUNITIES) {
+            val communityUID = currentUserID
+            if (communityUID != null) {
+                Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                    CommunityListView(
+                        userID = communityUID,
+                        onShowCommunity = onShowCommunity,
+                        onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+
         // Event video fullscreen — the engagement deck, above the Hub (zIndex 300).
         eventPlayerVideo?.let { ev ->
             DiscoveryFullscreenDeck(
@@ -1094,14 +1111,10 @@ fun DiscoveryView(
                 val currentErrorMessage = errorMessage
                 when {
                     selectedCategory == DiscoveryCategory.COMMUNITIES -> {
-                        val uid = currentUserID
-                        if (uid != null) {
-                            CommunityListView(
-                                userID = uid,
-                                onShowCommunity = onShowCommunity,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
+                        // Rendered as a full-screen takeover overlay above the chrome
+                        // (see the Community overlay near the Event Hub). Only the
+                        // signed-out fallback shows inline.
+                        if (currentUserID == null) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Sign in to view communities", color = Color.Gray, fontSize = 15.sp)
                             }
