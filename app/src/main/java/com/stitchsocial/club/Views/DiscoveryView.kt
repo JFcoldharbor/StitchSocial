@@ -799,6 +799,8 @@ fun DiscoveryView(
     // Collection state
     var discoveryCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
     var showCollectionPlayer by remember { mutableStateOf(false) }
+    // Segment index to resume at when the Collections takeover plays something.
+    var collectionStartIndex by remember { mutableStateOf(0) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
 
     // (Tab-bar visibility is driven by a single combined effect below, after all
@@ -886,7 +888,8 @@ fun DiscoveryView(
     //    the content area below, so it kept the bar.
     // Keying off the category covers every screen within each surface.
     val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
-        selectedCategory == DiscoveryCategory.EVENTS
+        selectedCategory == DiscoveryCategory.EVENTS ||
+        selectedCategory == DiscoveryCategory.COLLECTIONS
     LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub, fullScreenCategoryUp) {
         onTabBarVisibilityChange?.invoke(
             !showVideoPlayer && !showCollectionPlayer && eventHub == null && !fullScreenCategoryUp
@@ -991,6 +994,25 @@ fun DiscoveryView(
             }
         }
 
+        // Collections — full-screen takeover above the Discovery chrome, same
+        // rule as Community/Events. Rendered BEFORE the collection player block
+        // below so a tap on a card puts the player on top of the takeover
+        // (equal zIndex → later sibling wins), which is what makes play instant.
+        if (selectedCategory == DiscoveryCategory.COLLECTIONS) {
+            Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                CollectionsBrowseView(
+                    collections = discoveryCollections,
+                    userID = currentUserID ?: "",
+                    onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
+                    onPlay = { coll, startIndex ->
+                        selectedCollection = coll
+                        collectionStartIndex = startIndex
+                        showCollectionPlayer = true
+                    },
+                )
+            }
+        }
+
         // Community — full-screen takeover above the Discovery chrome (iOS
         // fullScreenCover parity). CommunityListView pauses the deck on open and
         // its ✕ resets the category back to the feed.
@@ -1038,6 +1060,7 @@ fun DiscoveryView(
             ) {
                 CollectionPlayerView(
                     collection = coll,
+                    startingIndex = collectionStartIndex,
                     userID = currentUserID ?: "",
                     videoService = videoService,
                     authService = authService,
@@ -1138,15 +1161,12 @@ fun DiscoveryView(
                         }
                     }
                     selectedCategory == DiscoveryCategory.COLLECTIONS -> {
-                        CollectionsDiscoveryRow(
-                            collections = discoveryCollections,
-                            title = "Collections",
-                            userID = currentUserID ?: "",
-                            onCollectionTap = { collection: VideoCollection ->
-                                selectedCollection = collection
-                                showCollectionPlayer = true
-                            }
-                        )
+                        // Rendered as a full-screen takeover overlay above the
+                        // chrome (see the Collections overlay near the Community
+                        // one). Nothing renders inline any more — the old
+                        // single-lane CollectionsDiscoveryRow is superseded by
+                        // CollectionsBrowseView. It stays in the codebase because
+                        // the profile/creator surfaces still use that lane.
                     }
                     // Events tab = the Concept B rows/hub, not the v1 video feed.
                     selectedCategory == DiscoveryCategory.EVENTS -> {

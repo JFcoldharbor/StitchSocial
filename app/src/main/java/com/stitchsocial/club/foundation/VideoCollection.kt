@@ -54,6 +54,10 @@ enum class CollectionContentType(val rawValue: String) {
     COURSE("course"),
     EVENT("event");
 
+    /** Title-case label for badges and the BY TYPE chips. */
+    val displayName: String
+        get() = rawValue.replaceFirstChar { it.uppercase() }
+
     companion object {
         fun from(raw: String?): CollectionContentType =
             values().firstOrNull { it.rawValue == raw } ?: GENERAL

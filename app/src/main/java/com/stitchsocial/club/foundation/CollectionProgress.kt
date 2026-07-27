@@ -44,11 +44,12 @@ data class CollectionProgress(
     val isNotStarted: Boolean get() = percentComplete == 0.0 && totalWatchTime == 0.0
     val completedSegmentCount: Int get() = completedSegmentIDs.size
 
+    /** Whole days since the last watch — drives the "2 days ago" resume meta. */
+    val daysSinceLastWatch: Int
+        get() = ((Date().time - lastWatchedAt.time) / 86_400_000L).toInt().coerceAtLeast(0)
+
     val shouldShowResumePrompt: Boolean
-        get() {
-            val daysSince = ((Date().time - lastWatchedAt.time) / 86_400_000L).toInt()
-            return isInProgress && daysSince < 30
-        }
+        get() = isInProgress && daysSinceLastWatch < 30
 
     val formattedCurrentTimestamp: String
         get() {
