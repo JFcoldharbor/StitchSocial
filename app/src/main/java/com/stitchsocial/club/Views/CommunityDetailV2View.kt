@@ -14,14 +14,14 @@
  *  - CommunityDetailV2View (root composable, replaces V1)
  *  - CommunityHomeTab (LiveBanner/GoLiveCTA + StatsRow + 4 preview cards
  *    + QuickLinks)
- *  - CommunityThreadsTab (posts list, reusing V1's PostCard)
+ *  - CommunityThreadsTab + CommunityThreadRow (compact feed rows per the
+ *    handoff spec, screen 1e — no longer V1's boxed PostCard)
  *  - GoLiveCTACard / LiveBannerCard / StatsRow / LeaderboardPreviewCard /
  *    TopSupportersPreviewCard / BadgesPreviewCard / HighlightReelPreviewCard
  *    / QuickLinksRow
  *
  * Reuses from V1:
  *  - CreatorHeaderCard (sticky header)
- *  - PostCard (threads tab item)
  *  - ComposePostSheet (compose flow)
  *  - parseMembership / parsePost helpers
  */
@@ -41,7 +41,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,12 +51,20 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.PlayCircleFilled
 import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.lazy.itemsIndexed
+import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -498,18 +505,167 @@ private fun CommunityThreadsTab(
         }
         return
     }
+    // Feed rows per the handoff spec (screen 1e): compact rows separated by
+    // hairline rules, not V1's boxed PostCard with a full-width 9:16 thumbnail.
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 6.dp),
+        contentPadding = PaddingValues(top = 6.dp, bottom = 20.dp),
     ) {
-        items(posts, key = { it.id }) { post ->
-            PostCard(
+        itemsIndexed(posts, key = { _, p -> p.id }) { index, post ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp)
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.06f))
+                )
+            }
+            CommunityThreadRow(
                 post = post,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
                 onHype = { onHype(post) },
                 onTap = { onSelectPost(post) },
             )
         }
+    }
+}
+
+/**
+ * One thread in the channel feed. Spec (1e): 72x96 rounded-12 thumbnail, 20pt
+ * author avatar, handle + age, title, then a metric row of hype + stitches.
+ * Rows older than a day render at 60% opacity so today's activity reads first.
+ */
+@Composable
+private fun CommunityThreadRow(
+    post: CommunityPost,
+    onHype: () -> Unit,
+    onTap: () -> Unit,
+) {
+    val isOlder = System.currentTimeMillis() - post.createdAt.time > 86_400_000L
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (isOlder) 0.6f else 1f)
+            .clickable { onTap() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Thumbnail
+        Box(
+            modifier = Modifier
+                .size(width = 72.dp, height = 96.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.07f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!post.videoThumbnailURL.isNullOrEmpty()) {
+                AsyncImage(
+                    model = post.videoThumbnailURL,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (post.postType == CommunityPostType.VIDEO_CLIP) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+            }
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                MemberAvatar(name = post.authorDisplayName, size = 20)
+                Text(
+                    "@${post.authorUsername}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+                Text(
+                    timeAgoShort(post.createdAt),
+                    fontSize = 10.5.sp,
+                    color = Color.White.copy(alpha = 0.35f),
+                )
+                if (post.isPinned) Text("📌", fontSize = 11.sp)
+            }
+
+            if (post.body.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    post.body,
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.78f),
+                    lineHeight = 18.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                MetricChip(
+                    icon = Icons.Default.LocalFireDepartment,
+                    label = "${post.hypeCount}",
+                    onTap = onHype,
+                )
+                MetricChip(
+                    icon = Icons.Default.ContentCut,
+                    label = if (post.replyCount == 1) "1 stitch" else "${post.replyCount} stitches",
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricChip(
+    icon: ImageVector,
+    label: String,
+    onTap: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = if (onTap != null) Modifier.clickable { onTap() } else Modifier,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.size(13.dp),
+        )
+        Text(
+            label,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White.copy(alpha = 0.5f),
+        )
+    }
+}
+
+/** "now" / "5m" / "3h" / "2d" — the compact age the spec's feed rows use. */
+private fun timeAgoShort(date: Date): String {
+    val diff = ((System.currentTimeMillis() - date.time) / 1000).coerceAtLeast(0)
+    return when {
+        diff < 60 -> "now"
+        diff < 3600 -> "${diff / 60}m"
+        diff < 86_400 -> "${diff / 3600}h"
+        else -> "${diff / 86_400}d"
     }
 }
 

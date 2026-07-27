@@ -937,7 +937,7 @@ private fun CardHeader(emoji: String, title: String, color: Color) {
 }
 
 @Composable
-private fun MemberAvatar(name: String, size: Int) {
+internal fun MemberAvatar(name: String, size: Int) {
     val gradients = listOf(listOf(accentCyan, accentPurple), listOf(accentPink, accentOrange), listOf(accentPurple, accentPink), listOf(accentOrange, accentGold))
     val parts = name.trim().split(" ")
     val initials = ((parts.firstOrNull()?.firstOrNull()?.toString() ?: "") + (if (parts.size > 1) parts[1].firstOrNull()?.toString() ?: "" else "")).uppercase()
