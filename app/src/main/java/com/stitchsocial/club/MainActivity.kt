@@ -917,6 +917,18 @@ fun MainScreen() {
                             onDismiss = {
                                 isShowingCommunity = false
                                 selectedCommunityItem = null
+                            },
+                            // Community record + stitch open the SAME recorder as
+                            // the main + button (iOS parity, e6f51f6). The router
+                            // makes the finished edit come back here instead of
+                            // becoming a global thread.
+                            onRecordClip = { communityID, postID ->
+                                com.stitchsocial.club.community.CommunityClipRouter
+                                    .request(communityID, postID)
+                                navigationCoordinator.showModal(
+                                    ModalState.RECORDING,
+                                    mapOf("context" to RecordingContext.NewThread)
+                                )
                             }
                         )
                     }
@@ -1025,6 +1037,7 @@ private fun ModalOverlay(
                         },
                         onCancel = {
                             if (BuildConfig.DEBUG) { println("❌ MAINACT: Camera CANCELLED - dismissing modal") }
+                            com.stitchsocial.club.community.CommunityClipRouter.cancel()
                             navigationCoordinator.dismissModal()
                         },
                         onStopAllVideos = {},
@@ -1129,6 +1142,19 @@ private fun ModalOverlay(
                                 }
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: Using finalVideoPath=$finalVideoPath") }
 
+                                // Community capture (iOS parity, e6f51f6): a community
+                                // surface armed the router before opening the recorder,
+                                // so hand the finished edit straight back to it. No
+                                // parallel processing, no global video doc, no
+                                // ThreadComposer — the clip becomes a community-only
+                                // post/reply instead.
+                                if (com.stitchsocial.club.community.CommunityClipRouter.isArmed) {
+                                    if (BuildConfig.DEBUG) { println("🏘️ MAINACT: routing finished edit to community") }
+                                    com.stitchsocial.club.community.CommunityClipRouter.deliver(finalVideoPath)
+                                    navigationCoordinator.dismissModal()
+                                    return@VideoReviewView
+                                }
+
                                 navigationCoordinator.showModal(ModalState.PARALLEL_PROCESSING)
 
                                 kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -1187,6 +1213,7 @@ private fun ModalOverlay(
                             },
                             onCancel = {
                                 if (BuildConfig.DEBUG) { println("❌ MAINACT: Video editing CANCELLED") }
+                                com.stitchsocial.club.community.CommunityClipRouter.cancel()
                                 navigationCoordinator.dismissModal()
                             },
                             modifier = Modifier.fillMaxSize()

@@ -412,6 +412,16 @@ data class CommunityReply(
     val isCreatorReply: Boolean,
     var body: String,
     var hypeCount: Int = 0,
+    /**
+     * Video reply ("stitch") fields — iOS parity (89ceba4). Defaulted so replies
+     * written before video replies existed decode unchanged. When [videoURL] is
+     * non-null the reply renders with the inline player + a "Stitch" tag instead
+     * of as plain text. Storage path matches posts:
+     * `community-posts/{communityID}/{replyID}.mp4`.
+     */
+    var videoURL: String? = null,
+    var videoThumbnailURL: String? = null,
+    var videoDurationSeconds: Int = 0,
     val createdAt: Date = Date()
 ) {
     companion object {
@@ -427,6 +437,9 @@ data class CommunityReply(
                 isCreatorReply = data["isCreatorReply"] as? Boolean ?: false,
                 body = data["body"] as? String ?: "",
                 hypeCount = (data["hypeCount"] as? Number)?.toInt() ?: 0,
+                videoURL = data["videoURL"] as? String,
+                videoThumbnailURL = data["videoThumbnailURL"] as? String,
+                videoDurationSeconds = (data["videoDurationSeconds"] as? Number)?.toInt() ?: 0,
                 createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
             )
         }
@@ -437,6 +450,9 @@ data class CommunityReply(
         put("authorID", authorID); put("authorUsername", authorUsername)
         put("authorDisplayName", authorDisplayName); put("authorLevel", authorLevel)
         put("isCreatorReply", isCreatorReply); put("body", body); put("hypeCount", hypeCount)
+        videoURL?.let { put("videoURL", it) }
+        videoThumbnailURL?.let { put("videoThumbnailURL", it) }
+        if (videoDurationSeconds > 0) put("videoDurationSeconds", videoDurationSeconds)
         put("createdAt", com.google.firebase.Timestamp(createdAt))
     }
 }

@@ -267,12 +267,19 @@ class CommunityFeedService private constructor() {
     suspend fun createReply(
         postID: String, communityID: String, authorID: String,
         authorUsername: String, authorDisplayName: String, authorLevel: Int,
-        isCreatorReply: Boolean, body: String
+        isCreatorReply: Boolean, body: String,
+        // Video reply ("stitch") — iOS parity (89ceba4). Null for text replies.
+        replyID: String? = null,
+        videoURL: String? = null, videoThumbnailURL: String? = null,
+        videoDurationSeconds: Int = 0
     ): CommunityReply {
         val reply = CommunityReply(
+            id = replyID ?: java.util.UUID.randomUUID().toString(),
             postID = postID, communityID = communityID, authorID = authorID,
             authorUsername = authorUsername, authorDisplayName = authorDisplayName,
-            authorLevel = authorLevel, isCreatorReply = isCreatorReply, body = body
+            authorLevel = authorLevel, isCreatorReply = isCreatorReply, body = body,
+            videoURL = videoURL, videoThumbnailURL = videoThumbnailURL,
+            videoDurationSeconds = videoDurationSeconds
         )
 
         val batch = db.batch()

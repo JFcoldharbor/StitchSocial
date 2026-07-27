@@ -121,6 +121,14 @@ fun CommunityDetailV2View(
     communityID: String,
     communityItem: CommunityListItem,
     onDismiss: () -> Unit,
+    /**
+     * Opens the real app recorder (iOS parity, e6f51f6) — the same cinematic
+     * recorder + editor the main + button uses. `postID` is null for a new
+     * community thread, or the post being stitched to for a video reply. The
+     * finished clip comes back through [CommunityClipRouter], not as a global
+     * video.
+     */
+    onRecordClip: (communityID: String, postID: String?) -> Unit = { _, _ -> },
 ) {
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
     val scope = rememberCoroutineScope()
@@ -131,6 +139,8 @@ fun CommunityDetailV2View(
     var isLoading by remember { mutableStateOf(true) }
     var tab by remember { mutableStateOf(V2Tab.HOME) }
     var showingComposer by remember { mutableStateOf(false) }
+    // The clip the app recorder handed back for a NEW thread in this channel.
+    var recordedClipUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedPost by remember { mutableStateOf<CommunityPost?>(null) }
     var showingGoLive by remember { mutableStateOf(false) }
     var showingLiveStream by remember { mutableStateOf(false) }
@@ -145,6 +155,27 @@ fun CommunityDetailV2View(
     var liveStreamID by remember { mutableStateOf<String?>(null) }
 
     val isCreator = userID == communityID
+
+    // Recorder result for a new thread here (postID == null). Stitches to a
+    // specific post are collected by CommunityPostDetailView instead.
+    val finishedClip by com.stitchsocial.club.community.CommunityClipRouter
+        .finishedClip.collectAsState()
+    LaunchedEffect(finishedClip) {
+        val clip = finishedClip ?: return@LaunchedEffect
+        if (clip.target.communityID != communityID || clip.target.postID != null) return@LaunchedEffect
+        com.stitchsocial.club.community.CommunityClipRouter.consume()
+        // Let the recording modal finish tearing down before the caption sheet
+        // comes up — same reason iOS waits 0.45s (cover -> sheet drop).
+        kotlinx.coroutines.delay(400)
+        recordedClipUri = android.net.Uri.parse(
+            if (clip.videoPath.startsWith("content://") || clip.videoPath.startsWith("file://")) {
+                clip.videoPath
+            } else {
+                "file://${clip.videoPath}"
+            }
+        )
+        showingComposer = true
+    }
 
     // One-shot ghost recovery — see CommunityDetailView.kt for the rationale.
     LaunchedEffect(communityID) {
@@ -270,14 +301,20 @@ fun CommunityDetailV2View(
                                     }
                                 }
                             },
-                            onCompose = { showingComposer = true },
+                            onCompose = { onRecordClip(communityID, null) },
                         )
                     }
                 }
 
                 // Channel nav — Home/Threads pills + record FAB beside them
                 // (tightening pass; replaces the full-width tab bar + floating FAB).
-                V2ChannelNav(active = tab, onSelect = { tab = it }, onRecord = { showingComposer = true })
+                // The record FAB now opens the SAME recorder as the main + button
+                // (iOS parity, e6f51f6) — not a Record/Pick menu.
+                V2ChannelNav(
+                    active = tab,
+                    onSelect = { tab = it },
+                    onRecord = { onRecordClip(communityID, null) },
+                )
             }
         }
 
@@ -332,20 +369,38 @@ fun CommunityDetailV2View(
         }
     }
 
-    // FAB now opens the video-thread composer — text posts are deprecated
-    // here. The user records/picks a clip, optional caption, posts.
+    // Caption + Post step. Reached with the clip the app recorder just produced
+    // (recordedClipUri); the library picker inside is only a fallback.
     if (showingComposer) {
         CommunityVideoComposerSheet(
             userID = userID,
             communityID = communityID,
             membership = membership,
             isCreator = isCreator,
+            initialUri = recordedClipUri,
             onPosted = { newPost ->
                 // Optimistic: prepend so the new thread shows up immediately
                 // on the Threads tab without needing a reload.
                 posts = listOf(newPost) + posts
             },
-            onDismiss = { showingComposer = false },
+            onDismiss = {
+                showingComposer = false
+                recordedClipUri = null
+            },
+        )
+    }
+
+    // Post detail — play the video, stitch to it, delete it (iOS parity, 89ceba4).
+    selectedPost?.let { post ->
+        CommunityPostDetailView(
+            userID = userID,
+            communityID = communityID,
+            post = post,
+            membership = membership,
+            isCommunityCreator = isCreator,
+            onDismiss = { selectedPost = null },
+            onDeleted = { deleted -> posts = posts.filter { it.id != deleted.id } },
+            onRecordClip = { cid, postID -> onRecordClip(cid, postID) },
         )
     }
 }

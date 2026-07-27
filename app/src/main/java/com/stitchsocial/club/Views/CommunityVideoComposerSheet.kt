@@ -4,10 +4,15 @@
  *
  * Layer 8: Views - Video-thread composer for community posts
  *
- * Replaces the text-only ComposePostSheet on the community detail FAB. Picks
- * a video from the user's library, uploads it to community-posts Storage,
- * writes a CommunityPost with postType=VIDEO_CLIP. Matches iOS V2 intent —
- * community threads are video-first.
+ * Replaces the text-only ComposePostSheet on the community detail FAB. Takes
+ * the clip the real app recorder just produced (via CommunityClipRouter),
+ * uploads it to community-posts Storage, and writes a CommunityPost with
+ * postType=VIDEO_CLIP. Matches iOS V2 intent — community threads are
+ * video-first.
+ *
+ * iOS parity (e6f51f6): when [initialUri] is set the sheet opens straight to
+ * caption + Post. The library picker is only a fallback for the case where the
+ * sheet is opened without a recorded clip.
  *
  * Submission states (mirrors VideoCommentRecordSheet for the live queue):
  *   - Idle: empty picker
@@ -19,9 +24,7 @@
 
 package com.stitchsocial.club.views
 
-import android.content.ContentValues
 import android.net.Uri
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,7 +39,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -91,12 +93,13 @@ fun CommunityVideoComposerSheet(
     isCreator: Boolean,
     onPosted: (CommunityPost) -> Unit,
     onDismiss: () -> Unit,
+    initialUri: Uri? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
 
-    var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var pickedUri by remember { mutableStateOf(initialUri) }
     var caption by remember { mutableStateOf("") }
     var state by remember { mutableStateOf<Submit>(Submit.Idle) }
     var progress by remember { mutableStateOf(0f) }
@@ -105,24 +108,9 @@ fun CommunityVideoComposerSheet(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri -> if (uri != null) pickedUri = uri }
 
-    // In-app RECORD (iOS parity, 4a71f71): Android had no in-app recorder
-    // (VideoCommentRecordSheet is pick-only), so record via the system camera
-    // (CaptureVideo → a MediaStore Uri) and feed the result into the same upload
-    // flow as a picked clip. Full CameraX capture is a follow-up.
-    var captureTargetUri by remember { mutableStateOf<Uri?>(null) }
-    val recorder = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CaptureVideo(),
-    ) { success -> if (success) captureTargetUri?.let { pickedUri = it } }
-    val startRecording = {
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "community_${System.currentTimeMillis()}.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-        }
-        val target = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-        captureTargetUri = target
-        target?.let { recorder.launch(it) }
-        Unit
-    }
+    // The interim system-camera recorder (CaptureVideo → MediaStore) is gone:
+    // recording now happens in the real app recorder before this sheet opens
+    // and arrives as [initialUri] (iOS parity, e6f51f6).
 
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.96f)),
@@ -137,7 +125,7 @@ fun CommunityVideoComposerSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Start a video thread", color = VC.txt, fontSize = 17.sp, fontWeight = FontWeight.Black)
                     Text(
-                        "Threads in this community are video-first. Pick a clip to start one.",
+                        "Add a caption, then post it to this channel.",
                         color = VC.txt2,
                         fontSize = 11.sp,
                     )
@@ -160,7 +148,6 @@ fun CommunityVideoComposerSheet(
                 is Submit.Idle -> {
                     if (pickedUri == null) {
                         EmptyPanel(
-                            onRecord = startRecording,
                             onPick = {
                                 picker.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -241,29 +228,17 @@ private sealed interface Submit {
 }
 
 @Composable
-private fun EmptyPanel(onRecord: () -> Unit, onPick: () -> Unit) {
-    // Two options (iOS parity): Record a video / Pick a clip.
-    Row(
+private fun EmptyPanel(onPick: () -> Unit) {
+    // Fallback only — the Record/Pick two-card menu is gone (iOS parity,
+    // e6f51f6). Recording happens in the app recorder before this sheet opens.
+    EmptyOptionCard(
+        icon = Icons.Default.PhotoLibrary,
+        title = "Pick a clip",
+        subtitle = "From your library",
+        tint = VC.cyan,
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        EmptyOptionCard(
-            icon = Icons.Default.Videocam,
-            title = "Record",
-            subtitle = "Shoot a new clip",
-            tint = VC.pink,
-            modifier = Modifier.weight(1f),
-            onTap = onRecord,
-        )
-        EmptyOptionCard(
-            icon = Icons.Default.PhotoLibrary,
-            title = "Pick a clip",
-            subtitle = "From your library",
-            tint = VC.cyan,
-            modifier = Modifier.weight(1f),
-            onTap = onPick,
-        )
-    }
+        onTap = onPick,
+    )
 }
 
 @Composable
