@@ -102,7 +102,13 @@ data class CoreVideoMetadata(
     // Drive the Discovery event-promo border + EVENT pill.
     val eventID: String? = null,
     val isEventPromo: Boolean = false,
-    val isEventRecap: Boolean = false
+    val isEventRecap: Boolean = false,
+
+    // Moderation visibility (iOS parity — see foundation/PublicVisibility.swift):
+    // "public" (passed) | "pending" (awaiting scan) | "hidden_from_public"
+    // (flagged/blocked/error) | null (legacy -> public). Gate public surfaces
+    // with `isPubliclyVisible`.
+    val publicVisibility: String? = null
 ) {
     // Computed properties
 

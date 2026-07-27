@@ -210,6 +210,10 @@ class HashtagService {
         for (document in documents) {
             val data = document.data ?: continue
 
+            // Moderation gate: only publicly-visible (passed) videos on a public
+            // hashtag surface. Excludes pending/flagged/blocked.
+            if (!com.stitchsocial.club.foundation.isVideoPubliclyVisible(data)) continue
+
             try {
                 val temperatureString = data["temperature"] as? String ?: "WARM"
                 val temperature = try {

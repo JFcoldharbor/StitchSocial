@@ -174,7 +174,10 @@ class CollectionService {
             .get().await()
 
         var segments = snap.documents.mapNotNull { doc ->
-            decodeSegment(doc.data ?: return@mapNotNull null, doc.id)
+            val d = doc.data ?: return@mapNotNull null
+            // Moderation gate: exclude pending/flagged/blocked segments.
+            if (!com.stitchsocial.club.foundation.isVideoPubliclyVisible(d)) return@mapNotNull null
+            decodeSegment(d, doc.id)
         }
 
         // Fallback 1: videoCollections/{id}/segments subcollection.

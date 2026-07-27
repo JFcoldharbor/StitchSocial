@@ -413,7 +413,12 @@ fun ProfileView(
         try {
             // Fetch newest 150 (ordered server-side) so Threads/Stitches/Replies
             // all populate — the old arbitrary 50 starved the depth-1/2 tabs.
-            userVideos = videoService.getUserVideos(userID, limit = 150)
+            val fetched = videoService.getUserVideos(userID, limit = 150)
+            // Owner-aware moderation gate: the owner sees all their own videos
+            // (incl. pending/flagged with the "under review" banner); visitors see
+            // public + pending but NOT hidden_from_public (flagged/blocked/error).
+            userVideos = if (isOwnProfile) fetched
+                         else fetched.filter { (it.publicVisibility ?: "public") != "hidden_from_public" }
             hasMoreVideos = userVideos.size >= 150
         } catch (_: Exception) { } finally {
             isLoadingVideos = false

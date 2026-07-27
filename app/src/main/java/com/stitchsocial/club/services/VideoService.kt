@@ -25,6 +25,7 @@ import java.util.*
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.threadOrdered
+import com.stitchsocial.club.foundation.isPubliclyVisible
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.BuildConfig
@@ -247,7 +248,7 @@ class VideoServiceImpl {
                             .await()
                         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents") }
                         convertFirebaseToVideoMetadata(snapshot.documents)
-                            .filter { it.conversationDepth == 0 && !it.isDeleted }
+                            .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk query failed: ${e.message}") }
                         emptyList()
@@ -273,7 +274,7 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted }
+                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
                 .sortedByDescending { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Loaded ${videos.size} feed videos") }
@@ -298,7 +299,7 @@ class VideoServiceImpl {
                 .await()
 
             val replies = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { !it.isDeleted }
+                .filter { !it.isDeleted && it.isPubliclyVisible }
                 .sortedBy { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Found ${replies.size} timestamped replies") }
@@ -352,7 +353,7 @@ class VideoServiceImpl {
             // Spine-first ordering: the thread head is in this query (its threadID is
             // its own id), so derive the creator for the legacy-continuation fallback.
             val threadCreatorID = allVideos.firstOrNull { it.conversationDepth == 0 }?.creatorID ?: ""
-            val children = allVideos.filter { it.conversationDepth > 0 && !it.isDeleted }
+            val children = allVideos.filter { it.conversationDepth > 0 && !it.isDeleted && it.isPubliclyVisible }
                 .threadOrdered(threadCreatorID)
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children (depth > 0, not deleted) for thread $threadID") }
@@ -380,7 +381,7 @@ class VideoServiceImpl {
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š ReplyTo query returned ${snapshot.documents.size} documents") }
 
             val allVideos = convertFirebaseToVideoMetadata(snapshot.documents)
-            val children = allVideos.filter { !it.isDeleted }
+            val children = allVideos.filter { !it.isDeleted && it.isPubliclyVisible }
                 .sortedBy { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children by replyToVideoID") }
@@ -526,6 +527,7 @@ class VideoServiceImpl {
                 .await()
 
             val spinOffs = convertFirebaseToVideoMetadata(snapshot.documents)
+                .filter { it.isPubliclyVisible }
                 .sortedByDescending { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${spinOffs.size} spin-offs") }
@@ -573,7 +575,7 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted }
+                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
                 .sortedByDescending { it.trendingScore }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} discovery videos") }
@@ -596,7 +598,7 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted }
+                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
                 .sortedByDescending { it.engagementRatio }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} personalized videos") }
@@ -622,7 +624,7 @@ class VideoServiceImpl {
             val queryLower = query.lowercase()
 
             val matching = allVideos.filter { video ->
-                !video.isDeleted && (
+                video.isPubliclyVisible && !video.isDeleted && (
                         video.title.lowercase().contains(queryLower) ||
                                 video.description.lowercase().contains(queryLower) ||
                                 video.creatorName.lowercase().contains(queryLower)
@@ -867,7 +869,8 @@ class VideoServiceImpl {
                     // Event promo/recap skin flags (drive the Discovery event-promo border)
                     eventID = data["eventId"] as? String,
                     isEventPromo = data["isEventPromo"] as? Boolean ?: false,
-                    isEventRecap = data["isEventRecap"] as? Boolean ?: false
+                    isEventRecap = data["isEventRecap"] as? Boolean ?: false,
+                    publicVisibility = data["publicVisibility"] as? String
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
