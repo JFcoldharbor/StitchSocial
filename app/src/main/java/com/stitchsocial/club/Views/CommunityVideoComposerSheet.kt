@@ -19,7 +19,9 @@
 
 package com.stitchsocial.club.views
 
+import android.content.ContentValues
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +36,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,6 +76,7 @@ private object VC {
     val cardBorder = Color.White.copy(alpha = 0.10f)
     val cyan = Color(0xFF00D4FF)
     val purple = Color(0xFF8B5CF6)
+    val pink = Color(0xFFF0245F)
     val red = Color(0xFFEF4444)
     val txt = Color(0xFFF1F5F9)
     val txt2 = Color(0xFF94A3B8)
@@ -99,6 +104,25 @@ fun CommunityVideoComposerSheet(
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri -> if (uri != null) pickedUri = uri }
+
+    // In-app RECORD (iOS parity, 4a71f71): Android had no in-app recorder
+    // (VideoCommentRecordSheet is pick-only), so record via the system camera
+    // (CaptureVideo → a MediaStore Uri) and feed the result into the same upload
+    // flow as a picked clip. Full CameraX capture is a follow-up.
+    var captureTargetUri by remember { mutableStateOf<Uri?>(null) }
+    val recorder = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo(),
+    ) { success -> if (success) captureTargetUri?.let { pickedUri = it } }
+    val startRecording = {
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, "community_${System.currentTimeMillis()}.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+        }
+        val target = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+        captureTargetUri = target
+        target?.let { recorder.launch(it) }
+        Unit
+    }
 
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.96f)),
@@ -135,11 +159,14 @@ fun CommunityVideoComposerSheet(
             when (val s = state) {
                 is Submit.Idle -> {
                     if (pickedUri == null) {
-                        EmptyPanel(onPick = {
-                            picker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                            )
-                        })
+                        EmptyPanel(
+                            onRecord = startRecording,
+                            onPick = {
+                                picker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                )
+                            },
+                        )
                     } else {
                         PreviewPanel(
                             uri = pickedUri!!,
@@ -214,22 +241,54 @@ private sealed interface Submit {
 }
 
 @Composable
-private fun EmptyPanel(onPick: () -> Unit) {
+private fun EmptyPanel(onRecord: () -> Unit, onPick: () -> Unit) {
+    // Two options (iOS parity): Record a video / Pick a clip.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        EmptyOptionCard(
+            icon = Icons.Default.Videocam,
+            title = "Record",
+            subtitle = "Shoot a new clip",
+            tint = VC.pink,
+            modifier = Modifier.weight(1f),
+            onTap = onRecord,
+        )
+        EmptyOptionCard(
+            icon = Icons.Default.PhotoLibrary,
+            title = "Pick a clip",
+            subtitle = "From your library",
+            tint = VC.cyan,
+            modifier = Modifier.weight(1f),
+            onTap = onPick,
+        )
+    }
+}
+
+@Composable
+private fun EmptyOptionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit,
+) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(VC.card)
             .border(0.5.dp, VC.cardBorder, RoundedCornerShape(18.dp))
-            .clickable { onPick() }
-            .padding(28.dp),
+            .clickable { onTap() }
+            .padding(vertical = 28.dp, horizontal = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(Icons.Default.PhotoLibrary, null, tint = VC.cyan, modifier = Modifier.size(40.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(36.dp))
         Spacer(Modifier.height(10.dp))
-        Text("Pick a clip", color = VC.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = VC.txt, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
-        Text("Choose a video from your library", color = VC.txt2, fontSize = 12.sp)
+        Text(subtitle, color = VC.txt2, fontSize = 11.sp)
     }
 }
 

@@ -91,11 +91,11 @@ private object V2 {
     val bg = Color(0xFF0F0B1E)
     val card = Color(0xFF1A1432)
     val cardBorder = Color.White.copy(alpha = 0.08f)
-    val cyan = Color(0xFF00D4FF)
-    val purple = Color(0xFF8B5CF6)
-    val pink = Color(0xFFEC4899)
+    val cyan = Color(0xFF22D3EE)   // handoff cyan
+    val purple = Color(0xFFA78BFA) // handoff purple
+    val pink = Color(0xFFF0245F)   // handoff brand pink
     val orange = Color(0xFFF59E0B)
-    val gold = Color(0xFFFFD700)
+    val gold = Color(0xFFFACC15)   // handoff gold
     val red = Color(0xFFEF4444)
     val green = Color(0xFF10B981)
     val txt = Color(0xFFF1F5F9)
@@ -275,25 +275,9 @@ fun CommunityDetailV2View(
                     }
                 }
 
-                // Bottom tab bar
-                V2TabBar(active = tab, onSelect = { tab = it })
-            }
-
-            // FAB — anchored above tab bar
-            Box(
-                modifier = Modifier.fillMaxSize().padding(end = 16.dp, bottom = 76.dp),
-                contentAlignment = Alignment.BottomEnd,
-            ) {
-                V2FAB(
-                    icon = tab.fabIcon,
-                    onClick = {
-                        // Both tabs open the composer. Go Live is gated to
-                        // the GoLiveCTACard, NOT the FAB — putting it on the
-                        // FAB meant a creator couldn't draft a post without
-                        // accidentally going on-air.
-                        showingComposer = true
-                    },
-                )
+                // Channel nav — Home/Threads pills + record FAB beside them
+                // (tightening pass; replaces the full-width tab bar + floating FAB).
+                V2ChannelNav(active = tab, onSelect = { tab = it }, onRecord = { showingComposer = true })
             }
         }
 
@@ -403,30 +387,30 @@ private fun CommunityHomeTab(
             membership = membership,
         )
 
-        LeaderboardPreviewCard(topMembers = topMembers, onTap = onShowLeaderboard)
-        TopSupportersPreviewCard(topMembers = topMembers, onTap = onShowSupporters)
+        LeaderboardPreviewCard(topMembers = topMembers, membership = membership, onTap = onShowLeaderboard)
+        // Collapse empty cards (tightening pass) — don't render Supporters/Badges when empty.
+        if (topMembers.any { it.totalHypesGiven > 0 }) {
+            TopSupportersPreviewCard(topMembers = topMembers, onTap = onShowSupporters)
+        }
 
+        val badgeCount = membership?.earnedBadgeIDs?.size ?: 0
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BadgesPreviewCard(
-                earnedCount = membership?.earnedBadgeIDs?.size ?: 0,
-                modifier = Modifier.weight(1f),
-                onTap = onShowBadges,
-            )
+            if (badgeCount > 0) {
+                BadgesPreviewCard(
+                    earnedCount = badgeCount,
+                    modifier = Modifier.weight(1f),
+                    onTap = onShowBadges,
+                )
+            }
             HighlightReelPreviewCard(
                 modifier = Modifier.weight(1f),
                 onTap = onShowHighlight,
             )
         }
-
-        QuickLinksRow(
-            onLeaderboard = onShowLeaderboard,
-            onBadges = onShowBadges,
-            onSupporters = onShowSupporters,
-            onHighlight = onShowHighlight,
-        )
+        // QuickLinksRow removed in the tightening pass (duplicate chips).
     }
 }
 
@@ -610,10 +594,12 @@ private fun StatsRow(
             color = V2.cyan,
             modifier = Modifier.weight(1f),
         )
+        // "YOUR LEVEL" → "TODAY": level already shows in the leaderboard, so the
+        // tile was redundant. APPROX: no real posts-today signal yet (client proxy).
         StatBox(
-            num = "Lv ${membership?.level ?: 1}",
-            label = "YOUR LEVEL",
-            color = V2.orange,
+            num = "0",
+            label = "TODAY",
+            color = V2.gold,
             modifier = Modifier.weight(1f),
         )
         StatBox(
@@ -687,6 +673,7 @@ private fun Chip(icon: ImageVector, label: String, onTap: () -> Unit) {
 @Composable
 private fun LeaderboardPreviewCard(
     topMembers: List<CommunityMembership>,
+    membership: CommunityMembership?,
     onTap: () -> Unit,
 ) {
     Column(
@@ -718,6 +705,19 @@ private fun LeaderboardPreviewCard(
                     Spacer(Modifier.weight(1f))
                     Text("Lv ${m.level}", color = V2.cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+        }
+        // Your own standing — always shown, in brand pink, separated by a rule, so
+        // you see where you rank even outside the top 3 (tightening pass).
+        membership?.let { me ->
+            val myRank = topMembers.indexOfFirst { it.userID == me.userID }.takeIf { it >= 0 }?.plus(1)
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.07f)))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(myRank?.toString() ?: "—", color = V2.pink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("You", color = V2.pink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("Lv ${me.level}", color = V2.pink, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -821,37 +821,37 @@ private fun HighlightReelPreviewCard(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun V2TabBar(active: V2Tab, onSelect: (V2Tab) -> Unit) {
+private fun V2ChannelNav(active: V2Tab, onSelect: (V2Tab) -> Unit, onRecord: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(V2.bg.copy(alpha = 0.95f))
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(0.dp)),
+            .background(V2.bg.copy(alpha = 0.98f))
+            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(0.dp))
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        V2Tab.entries.forEach { t ->
+        listOf(V2Tab.HOME, V2Tab.THREADS).forEach { t ->
             val isActive = active == t
-            Column(
+            Box(
                 modifier = Modifier
                     .weight(1f)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (isActive) Color.White else Color.White.copy(alpha = 0.09f))
                     .clickable { onSelect(t) }
-                    .padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    t.icon,
-                    null,
-                    tint = if (isActive) V2.cyan else V2.txt3,
-                    modifier = Modifier.size(18.dp),
-                )
                 Text(
                     t.label,
-                    color = if (isActive) V2.cyan else V2.txt3,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = if (isActive) Color(0xFF0A0A0D) else Color.White.copy(alpha = 0.55f),
+                    fontSize = 13.sp,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
                 )
             }
         }
+        // Record FAB (pink) beside the pills.
+        V2FAB(icon = active.fabIcon, onClick = onRecord)
     }
 }
 
@@ -859,11 +859,11 @@ private fun V2TabBar(active: V2Tab, onSelect: (V2Tab) -> Unit) {
 private fun V2FAB(icon: ImageVector, onClick: () -> Unit) {
     FloatingActionButton(
         onClick = onClick,
-        containerColor = V2.cyan,
+        containerColor = V2.pink,   // record FAB recolored cyan → pink (tightening pass)
         shape = CircleShape,
         modifier = Modifier.size(48.dp),
     ) {
-        Icon(icon, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
