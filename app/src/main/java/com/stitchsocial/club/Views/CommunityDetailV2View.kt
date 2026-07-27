@@ -882,6 +882,10 @@ private fun V2ChannelNav(active: V2Tab, onSelect: (V2Tab) -> Unit, onRecord: () 
             .fillMaxWidth()
             .background(V2.bg.copy(alpha = 0.98f))
             .border(0.5.dp, V2.cardBorder, RoundedCornerShape(0.dp))
+            // The app tab bar used to sit on top of this row, so it never needed
+            // insets. Now that Community is genuinely full screen the nav is the
+            // bottom-most chrome and has to clear the system nav / gesture bar.
+            .navigationBarsPadding()
             .padding(horizontal = 14.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,

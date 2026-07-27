@@ -869,11 +869,21 @@ fun DiscoveryView(
         }
     }
     // Hide the custom tab bar whenever ANY fullscreen surface is up — the
-    // fullscreen video deck, the collection player, or the event hub — so those
-    // are truly full screen (matches iOS fullScreenCover). Single combined effect
-    // so the surfaces can't race each other on tab-bar visibility.
-    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub) {
-        onTabBarVisibilityChange?.invoke(!showVideoPlayer && !showCollectionPlayer && eventHub == null)
+    // fullscreen video deck, the collection player, the event hub, or the
+    // community list takeover — so those are truly full screen (matches iOS
+    // fullScreenCover). Single combined effect so the surfaces can't race each
+    // other on tab-bar visibility.
+    //
+    // Community and Events share this rule: the takeover owns the whole screen
+    // and the app tab bar must not show through. The takeover renders at
+    // zIndex 200 *inside* DiscoveryView, but the tab bar is a sibling of
+    // DiscoveryView in MainActivity — zIndex can't reach across that boundary,
+    // so the bar would otherwise sit on top of the takeover.
+    val communityTakeoverUp = selectedCategory == DiscoveryCategory.COMMUNITIES
+    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub, communityTakeoverUp) {
+        onTabBarVisibilityChange?.invoke(
+            !showVideoPlayer && !showCollectionPlayer && eventHub == null && !communityTakeoverUp
+        )
     }
 
     // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart

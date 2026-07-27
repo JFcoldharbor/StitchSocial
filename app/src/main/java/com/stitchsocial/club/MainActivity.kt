@@ -726,7 +726,7 @@ fun MainScreen() {
                     // (streakCurrent is read here so this recomposes once load()
                     // populates the streak — isAtRisk alone reads the raw value.)
                     if (streakCurrent >= 1 && currentModal == ModalState.NONE && !isShowingThreadView &&
-                        !isShowingAnnouncement && !isShowingCollectionPlayer &&
+                        !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
                         StreakBanner(
                             hoursLeft = StreakService.shared.hoursUntilBreak,
@@ -751,7 +751,16 @@ fun MainScreen() {
                     // this Box that live outside it.
 
                     // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
-                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement && !isShowingThreadView && !isShowingCollectionPlayer
+                    //
+                    // isShowingCommunity covers the channel interior
+                    // (CommunityDetailV2View). Community and Events are
+                    // full-screen surfaces — the app tab bar must not be visible
+                    // while either is up. The community list takeover reports in
+                    // through isShowingCollectionPlayer (DiscoveryView's combined
+                    // tab-bar effect); the interior is hosted here instead, so it
+                    // has to be named explicitly.
+                    val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement &&
+                        !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity
                     LaunchedEffect(currentModal, isShowingAnnouncement, isShowingThreadView) {
                         Log.d("STITCH_MAIN", "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | announcement: $isShowingAnnouncement | threadView: $isShowingThreadView")
                     }

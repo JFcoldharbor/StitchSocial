@@ -173,7 +173,10 @@ fun CommunityListView(
                         items(suggested, key = { it.id }) { ChannelRow(it, joinable = true, onOpen = { onShowCommunity(it) }, onJoin = { doJoin(it) }) }
                     } else item { EmptyState(listMode) }
                 }
-                item { Spacer(Modifier.height(30.dp)) }
+                // Bottom breathing room. This used to just clear the app tab bar;
+                // Community is full screen now, so the last row instead has to
+                // clear the system nav / gesture bar.
+                item { Spacer(Modifier.height(20.dp).navigationBarsPadding()) }
             }
         }
     }
