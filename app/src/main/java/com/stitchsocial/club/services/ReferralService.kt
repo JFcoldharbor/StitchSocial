@@ -272,7 +272,7 @@ class ReferralService {
     private fun generateShareText(code: String) = """
 🎬 Welcome to Stitch Social! 🎬
 
-🍎 iPhone: Download TestFlight then https://testflight.apple.com/join/cXbWreGc
+🍎 iPhone: https://apps.apple.com/us/app/stitch-social-me-video-reply/id6751523778
 🤖 Android: https://play.google.com/store/apps/details?id=com.stitchsocial.club
 
 🎁 Enter invite code at signup: $code
