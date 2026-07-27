@@ -67,7 +67,10 @@ fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Uni
                     } else if (live.isEmpty() && upcoming.isEmpty()) {
                         Empty("No events yet", "Live and upcoming events show up here.")
                     } else {
-                        LazyColumn(Modifier.weight(1f)) {
+                        LazyColumn(
+                            Modifier.weight(1f),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                        ) {
                             if (live.isNotEmpty()) {
                                 item { sectionHeader("Today") }
                                 items(live, key = { it.id }) { EventRow(it, myRSVPs[it.id], blue, { onOpenEvent(it) }, { vm.toggleGoing(it) }) }
@@ -85,7 +88,10 @@ fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Uni
                     } else if (mine.isEmpty()) {
                         Empty("You haven't hosted any events", "Tap Host to create one.")
                     } else {
-                        LazyColumn(Modifier.weight(1f)) {
+                        LazyColumn(
+                            Modifier.weight(1f),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                        ) {
                             items(mine, key = { it.id }) { ev ->
                                 MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
                             }
@@ -95,10 +101,11 @@ fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Uni
             }
         }
 
-        // Host FAB
+        // Host FAB. The app tab bar used to cover this corner; Events is full
+        // screen now, so the FAB has to clear the system nav / gesture bar itself.
         Button(
             onClick = { showCreate = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(18.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color.White)
         ) { Text("+ Host", color = Color.Black, fontWeight = FontWeight.Bold) }
     }

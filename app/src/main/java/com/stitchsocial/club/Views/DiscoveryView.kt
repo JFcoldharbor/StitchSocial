@@ -874,15 +874,22 @@ fun DiscoveryView(
     // fullScreenCover). Single combined effect so the surfaces can't race each
     // other on tab-bar visibility.
     //
-    // Community and Events share this rule: the takeover owns the whole screen
-    // and the app tab bar must not show through. The takeover renders at
-    // zIndex 200 *inside* DiscoveryView, but the tab bar is a sibling of
-    // DiscoveryView in MainActivity — zIndex can't reach across that boundary,
-    // so the bar would otherwise sit on top of the takeover.
-    val communityTakeoverUp = selectedCategory == DiscoveryCategory.COMMUNITIES
-    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub, communityTakeoverUp) {
+    // Community and Events are full-screen surfaces: the app tab bar must not be
+    // visible on EITHER of them, on any of their screens.
+    //
+    // Two separate reasons the bar used to show through:
+    //  - Community renders its takeover at zIndex 200 *inside* DiscoveryView, but
+    //    the tab bar is a sibling of DiscoveryView in MainActivity — zIndex can't
+    //    reach across that boundary, so the bar drew on top of the takeover.
+    //  - Events was only handled for `eventHub` (the single-event detail). The
+    //    Events *browse* surface is the EVENTS category, which renders inline in
+    //    the content area below, so it kept the bar.
+    // Keying off the category covers every screen within each surface.
+    val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
+        selectedCategory == DiscoveryCategory.EVENTS
+    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub, fullScreenCategoryUp) {
         onTabBarVisibilityChange?.invoke(
-            !showVideoPlayer && !showCollectionPlayer && eventHub == null && !communityTakeoverUp
+            !showVideoPlayer && !showCollectionPlayer && eventHub == null && !fullScreenCategoryUp
         )
     }
 
