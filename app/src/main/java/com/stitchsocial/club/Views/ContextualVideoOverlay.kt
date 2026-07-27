@@ -2085,7 +2085,7 @@ internal fun SwappableEngagementSlot(
 // Mirrors TipButton.swift: tap=1 coin, long press=5 coins
 // isSelfTip disabled with PersonOff icon
 // Optimistic sessionTotal over persisted coinTotal (matches iOS field name)
-// Writes: debit tipper coin_balances, credit creator pendingCoins,
+// Writes: debit tipper coin_balances, credit creator availableCoins,
 //         increment videos.coinTotal, write tip notification, update
 //         creator's supporters subcollection + topSupporters array.
 // ============================================================================
@@ -2120,7 +2120,7 @@ internal fun TipButton(
                 db.collection("coin_balances").document(currentUserID)
                     .update("availableCoins", FieldValue.increment(-amount.toLong())).await()
                 db.collection("coin_balances").document(creatorID)
-                    .update("pendingCoins", FieldValue.increment(amount.toLong())).await()
+                    .update("availableCoins", FieldValue.increment(amount.toLong())).await()
                 db.collection("videos").document(videoID)
                     .update(
                         "coinTotal", FieldValue.increment(amount.toLong()),

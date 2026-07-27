@@ -435,7 +435,6 @@ private fun CoinPackageCard(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(pkg.displayName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
                 Text("${pkg.coins} coins", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
-                Text("≈ \$${String.format("%.2f", pkg.cashValue)} value", fontSize = 11.sp, color = AppTheme.colors.textSecondary.copy(alpha = 0.7f))
             }
 
             // Buy button

@@ -45,10 +45,10 @@ enum class HypeCoinPackage(val rawValue: String) {
     val coins: Int
         get() = when (this) {
             STARTER -> 100
-            BASIC   -> 250
-            PLUS    -> 500
-            PRO     -> 1_000
-            MAX     -> 2_500
+            BASIC   -> 275
+            PLUS    -> 600
+            PRO     -> 1_300
+            MAX     -> 3_500
         }
 
     /** USD price — matches iOS exactly */
@@ -58,11 +58,8 @@ enum class HypeCoinPackage(val rawValue: String) {
             BASIC   -> 4.99
             PLUS    -> 9.99
             PRO     -> 19.99
-            MAX     -> 49.99
+            MAX     -> 59.99
         }
-
-    /** Cash value of coins at $0.01/coin — matches iOS exactly */
-    val cashValue: Double get() = coins / 100.0
 
     val displayName: String
         get() = when (this) {

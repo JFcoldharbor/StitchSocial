@@ -9,17 +9,16 @@ import java.util.UUID
  * `hypeEvents` subcollection, so a creator on iOS sees hypes sent from Android
  * viewers and vice versa.
  *
- * Coin costs and revenue splits are fixed at the protocol layer — changing
- * them on one platform would mean both apps disagree on what a "Super Hype"
- * costs. Keep this in sync with `LiveStream.swift:526` (StreamHypeType).
+ * Coin costs are fixed at the protocol layer — changing them on one platform
+ * would mean both apps disagree on what a "Super Hype" costs. Keep this in sync
+ * with `LiveStream.swift:526` (StreamHypeType). (Revenue splits are server-side
+ * only — no client-side platform-cut here.)
  */
 enum class StreamHypeType(
     val raw: String,
     val displayName: String,
     val emoji: String,
     val coinCost: Int,
-    /// Creator's cut of the coin cost (0.0–1.0). Platform keeps the rest.
-    val creatorRevenuePercent: Double,
     /// XP multiplier applied to viewer for `multiplierDurationSeconds`.
     val xpMultiplier: Int,
     val multiplierDurationSeconds: Int,
@@ -29,7 +28,6 @@ enum class StreamHypeType(
         displayName = "Super Hype",
         emoji = "🔥",
         coinCost = 5,
-        creatorRevenuePercent = 0.70,
         xpMultiplier = 2,
         multiplierDurationSeconds = 600,
     ),
@@ -38,7 +36,6 @@ enum class StreamHypeType(
         displayName = "Mega Hype",
         emoji = "⚡",
         coinCost = 15,
-        creatorRevenuePercent = 0.70,
         xpMultiplier = 5,
         multiplierDurationSeconds = 600,
     ),
@@ -47,7 +44,6 @@ enum class StreamHypeType(
         displayName = "Ultra Hype",
         emoji = "💎",
         coinCost = 50,
-        creatorRevenuePercent = 0.75,
         xpMultiplier = 10,
         multiplierDurationSeconds = 900,
     ),
@@ -56,7 +52,6 @@ enum class StreamHypeType(
         displayName = "Gift Sub",
         emoji = "🎁",
         coinCost = 25,
-        creatorRevenuePercent = 0.70,
         xpMultiplier = 1,
         multiplierDurationSeconds = 0,
     ),
@@ -65,7 +60,6 @@ enum class StreamHypeType(
         displayName = "Spotlight",
         emoji = "📌",
         coinCost = 10,
-        creatorRevenuePercent = 0.70,
         xpMultiplier = 1,
         multiplierDurationSeconds = 0,
     ),
@@ -74,13 +68,9 @@ enum class StreamHypeType(
         displayName = "Boost Stream",
         emoji = "🚀",
         coinCost = 100,
-        // Platform keeps more here to fund the discovery push that "boost" buys.
-        creatorRevenuePercent = 0.50,
         xpMultiplier = 1,
         multiplierDurationSeconds = 0,
     );
-
-    val creatorRevenue: Int get() = (coinCost * creatorRevenuePercent).toInt()
 
     companion object {
         const val XP_PER_COIN_SPENT: Int = 20

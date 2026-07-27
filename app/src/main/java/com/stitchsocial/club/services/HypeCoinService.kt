@@ -228,10 +228,12 @@ class HypeCoinService private constructor() {
             )
         ).await()
 
-        // Credit receiver as pending — matches iOS behavior
+        // Credit receiver — immediately spendable. Earnings used to land in
+        // pendingCoins "until cash-out", but that was never released so they were
+        // stranded. Now credit availableCoins directly (matches iOS fix).
         receiverRef.update(
             mapOf(
-                FirebaseSchema.CoinBalanceDocument.PENDING_COINS   to FieldValue.increment(amount.toLong()),
+                FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to FieldValue.increment(amount.toLong()),
                 FirebaseSchema.CoinBalanceDocument.LIFETIME_EARNED to FieldValue.increment(amount.toLong()),
                 FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp.now()
             )
