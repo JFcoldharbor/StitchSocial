@@ -455,6 +455,9 @@ private fun seedToLong(seed: String): Long {
 }
 
 private fun StitchEventEntity.toFirestoreMap(): Map<String, Any?> = mapOf(
+    // iOS decodes events with a plain (non-@DocumentID) `id` Codable property, so
+    // it needs `id` present in the doc data or it drops the event. Write it.
+    "id" to id,
     "hostUserID" to hostUserID, "hostUsername" to hostUsername, "name" to name,
     "venueName" to venueName, "city" to city,
     "venueLat" to venueLat, "venueLng" to venueLng, "geofenceRadiusMeters" to geofenceRadiusMeters,
