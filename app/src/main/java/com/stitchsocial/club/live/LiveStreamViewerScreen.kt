@@ -105,6 +105,7 @@ fun LiveStreamViewerScreen(
     // ── Lifecycle: join + leave ─────────────────────────────────────────────
 
     LaunchedEffect(streamID) {
+        com.stitchsocial.club.services.AnalyticsService.liveStreamJoined(streamID)
         runCatching {
             // Verify the stream is actually live before paying the Agora init
             // tax. Stream may be ghost (community flag stuck on after a crash)

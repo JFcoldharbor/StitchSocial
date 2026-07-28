@@ -155,6 +155,7 @@ fun CommunityPostDetailView(
                 videoDurationSeconds = upload.durationSeconds,
             )
         }.onSuccess { reply ->
+            com.stitchsocial.club.services.AnalyticsService.stitchCreated(communityID)
             replies = replies + reply
             stitchProgress = null
         }.onFailure { err ->

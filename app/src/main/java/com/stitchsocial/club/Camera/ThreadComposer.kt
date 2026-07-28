@@ -332,6 +332,10 @@ fun ThreadComposer(
                                     }
                                 }
                             )
+                            com.stitchsocial.club.services.AnalyticsService.videoPosted(
+                                context = recordingContext.getBadgeText(),
+                                durationSeconds = 0,
+                            )
                             // Dismiss the composer immediately — user lands
                             // back on the feed while the upload runs.
                             onVideoCreated()

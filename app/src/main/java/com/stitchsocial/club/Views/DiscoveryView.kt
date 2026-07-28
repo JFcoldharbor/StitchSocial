@@ -1005,6 +1005,14 @@ fun DiscoveryView(
                     userID = currentUserID ?: "",
                     onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
                     onPlay = { coll, startIndex ->
+                        // startIndex > 0 means the user came in via resume — the
+                        // whole point of surfacing watch progress, so it's split
+                        // out as its own dimension rather than a plain play.
+                        com.stitchsocial.club.services.AnalyticsService.collectionPlayed(
+                            collectionID = coll.id,
+                            contentType = coll.contentType.rawValue,
+                            resumed = startIndex > 0,
+                        )
                         selectedCollection = coll
                         collectionStartIndex = startIndex
                         showCollectionPlayer = true

@@ -200,6 +200,8 @@ fun CommunityVideoComposerSheet(
                                             .await()
                                         post
                                     }.onSuccess { post ->
+                                        com.stitchsocial.club.services.AnalyticsService
+                                            .communityPostCreated(communityID, caption.isNotBlank())
                                         state = Submit.Done
                                         onPosted(post)
                                         delay(900)

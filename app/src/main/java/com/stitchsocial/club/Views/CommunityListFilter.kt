@@ -513,5 +513,6 @@ private suspend fun joinCommunity(db: FirebaseFirestore, userID: String, communi
     )).await()
     db.collection("communities").document(communityID)
         .update("memberCount", com.google.firebase.firestore.FieldValue.increment(1L)).await()
+    com.stitchsocial.club.services.AnalyticsService.communityJoined(communityID)
     if (BuildConfig.DEBUG) println("✅ COMMUNITY: Joined $communityID")
 }

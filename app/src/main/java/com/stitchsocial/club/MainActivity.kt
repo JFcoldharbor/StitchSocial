@@ -66,6 +66,7 @@ import com.stitchsocial.club.ui.theme.StitchSocialClubTheme
 import com.stitchsocial.club.ui.theme.ThemeState
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.camera.RecordingContext
+import com.stitchsocial.club.camera.getBadgeText
 import com.stitchsocial.club.camera.ThreadComposer
 import com.stitchsocial.club.VideoReviewView
 import com.stitchsocial.club.VideoEditState
@@ -101,6 +102,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         suppressCameraLogging()
+
+        // Firebase Analytics auto-collection was already on; this arms the
+        // custom-event layer (AnalyticsService) for the rest of the app.
+        com.stitchsocial.club.services.AnalyticsService.init(this)
 
         Log.d("STITCH_MAIN", "App starting up...")
 
@@ -487,6 +492,11 @@ fun MainScreen() {
     //   "teen"      — show TeenLockedView until the teen lane is built
     //   "ok"        — adult, render the main app
     var ageGateState by remember { mutableStateOf("checking") }
+    // Bind analytics identity to the signed-in user (cleared on sign-out) so
+    // funnels can be followed across sessions.
+    LaunchedEffect(currentUser?.id) {
+        com.stitchsocial.club.services.AnalyticsService.setUser(currentUser?.id)
+    }
     LaunchedEffect(currentUser?.id) {
         val uid = currentUser?.id ?: run { ageGateState = "checking"; return@LaunchedEffect }
         try {
@@ -1026,6 +1036,8 @@ private fun ModalOverlay(
                         parentVideo = parentVideo,
                         onVideoRecorded = { recordedVideo ->
                             try {
+                                com.stitchsocial.club.services.AnalyticsService
+                                    .videoRecorded(recordingContext.getBadgeText())
                                 if (BuildConfig.DEBUG) { println("📹 MAINACT: Video recorded, going to VIDEO_REVIEW") }
                                 if (BuildConfig.DEBUG) { println("📹 MAINACT: Video path: ${recordedVideo.videoURL}") }
 

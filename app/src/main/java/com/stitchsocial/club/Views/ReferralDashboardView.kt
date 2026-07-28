@@ -88,6 +88,9 @@ fun ReferralDashboardView(
                     putExtra(Intent.EXTRA_TEXT, link.shareText)
                 }
                 context.startActivity(Intent.createChooser(shareIntent, "Share your invite code"))
+                // The OS chooser hides which app was picked, so the channel is
+                // just the surface the share started from.
+                com.stitchsocial.club.services.AnalyticsService.referralShared("referral_dashboard")
 
                 // Refresh stats after share — mirrors iOS handleShare()
                 stats = referralService.getUserReferralStats(userID)
