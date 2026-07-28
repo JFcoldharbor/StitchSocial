@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +34,16 @@ private enum class EventsTab { BROWSE, MINE }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Unit) {
+fun EventRowsScreen(
+    vm: EventsViewModel,
+    onOpenEvent: (StitchEventEntity) -> Unit,
+    /**
+     * Dismiss the takeover. Events is full screen now — the Discovery category
+     * chips are covered, so this is the only way back to the feed. Null keeps
+     * the old inline behaviour (no close button) for any embedded use.
+     */
+    onClose: (() -> Unit)? = null,
+) {
     val blue = StitchColors.primary  // events accent = brand magenta (was blue #3399FF)
 
     val live by vm.liveEvents.collectAsState()
@@ -54,8 +65,34 @@ fun EventRowsScreen(vm: EventsViewModel, onOpenEvent: (StitchEventEntity) -> Uni
 
     Box(Modifier.fillMaxSize().background(StitchColors.background)) {
         Column(Modifier.fillMaxSize()) {
-            // Tab bar
-            Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Header: close + the Events / My Events pills. The close button
+            // matches the Community and Collections takeovers (32dp circle,
+            // white @ 9%) so the three surfaces dismiss the same way.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (onClose != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.09f))
+                            .clickable { onClose() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
                 tabButton("Events", tab == EventsTab.BROWSE) { tab = EventsTab.BROWSE }
                 tabButton("My Events", tab == EventsTab.MINE) { tab = EventsTab.MINE }
             }

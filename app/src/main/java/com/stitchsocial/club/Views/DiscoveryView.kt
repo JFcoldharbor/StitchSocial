@@ -1003,6 +1003,22 @@ fun DiscoveryView(
             }
         }
 
+        // Events — full-screen takeover above the Discovery chrome. Previously
+        // this rendered inline in the content area, so the search bar and
+        // category chips still sat above it and it was never really full screen
+        // the way Community is. Hoisted here it owns the whole surface, which
+        // means it also has to own the way back out (the chips are no longer
+        // reachable) — hence onClose.
+        if (selectedCategory == DiscoveryCategory.EVENTS) {
+            Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                com.stitchsocial.club.events.EventRowsScreen(
+                    vm = eventsVM,
+                    onOpenEvent = { eventHub = it },
+                    onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
+                )
+            }
+        }
+
         // Collections — full-screen takeover above the Discovery chrome, same
         // rule as Community/Events. Rendered BEFORE the collection player block
         // below so a tap on a card puts the player on top of the takeover
@@ -1195,8 +1211,10 @@ fun DiscoveryView(
                         // the profile/creator surfaces still use that lane.
                     }
                     // Events tab = the Concept B rows/hub, not the v1 video feed.
+                    // Rendered as a full-screen takeover overlay above the chrome
+                    // (see the Events overlay near the Community/Collections ones)
+                    // so it matches them structurally, not just in tab-bar rules.
                     selectedCategory == DiscoveryCategory.EVENTS -> {
-                        com.stitchsocial.club.events.EventRowsScreen(vm = eventsVM, onOpenEvent = { eventHub = it })
                     }
                     // Show the loading view whenever the feed is empty AND
                     // either we're actively loading OR there's no error.
