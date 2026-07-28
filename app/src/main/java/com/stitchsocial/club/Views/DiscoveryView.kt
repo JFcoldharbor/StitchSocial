@@ -981,11 +981,15 @@ fun DiscoveryView(
     ) {
 
         // Event Hub — full-screen overlay above the Discovery chrome (iOS fullScreenCover parity).
+        // MUST sit ABOVE the EventRowsScreen takeover (also zIndex 200, declared
+        // after this block). Tapping a row sets `eventHub` and the Hub composes,
+        // but at equal z-index the later-declared rows drew on top and hid it —
+        // so events looked "not tappable". Higher z-index puts the Hub on top.
         eventHub?.let { ev ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(200f)
+                    .zIndex(300f)
             ) {
                 com.stitchsocial.club.events.EventHubScreen(
                     event = ev,
