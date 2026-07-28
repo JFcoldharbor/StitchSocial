@@ -139,6 +139,25 @@ object EventService {
         ).await()
     }
 
+    /**
+     * Host taps "End event" — ends it immediately (iOS parity). Pulls closeAt to
+     * now so lifecycle → ENDED and the event drops out of the `closeAt > now`
+     * rows query. Also stamps endedAt for cross-platform doc parity (iOS reads it;
+     * Android's lifecycle keys off closeAt).
+     */
+    suspend fun endEvent(eventID: String, hostUserID: String) {
+        if (hostUserID.isBlank()) throw EventException("You need to be signed in to host an event")
+        if (eventID.isBlank()) throw EventException("Missing event or account details")
+        val now = Date()
+        eventsRef().document(eventID).update(
+            mapOf(
+                "endedAt" to Timestamp(now),
+                "closeAt" to Timestamp(now),
+                "updatedAt" to Timestamp(now)
+            )
+        ).await()
+    }
+
     /** Host-only delete of the event doc. onEventDeleted CF recursively cleans subcollections. */
     suspend fun deleteEvent(eventID: String, hostUserID: String) {
         if (hostUserID.isBlank()) throw EventException("You need to be signed in to host an event")

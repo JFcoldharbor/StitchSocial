@@ -79,6 +79,7 @@ fun EventHubScreen(
     var showEdit by remember { mutableStateOf(false) }
     var showInvite by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmEnd by remember { mutableStateOf(false) }
 
     LaunchedEffect(event.id) {
         // Clear any arm left over from an abandoned recorder in a prior session
@@ -117,6 +118,9 @@ fun EventHubScreen(
                     if (isHost) {
                         DropdownMenuItem(text = { Text("Edit event") }, onClick = { menuOpen = false; showEdit = true })
                         DropdownMenuItem(text = { Text("Invite people") }, onClick = { menuOpen = false; showInvite = true })
+                        if (!event.hasEnded) {
+                            DropdownMenuItem(text = { Text("End event") }, onClick = { menuOpen = false; confirmEnd = true })
+                        }
                         DropdownMenuItem(text = { Text("Delete event", color = Color.Red) }, onClick = { menuOpen = false; confirmDelete = true })
                     } else {
                         DropdownMenuItem(text = { Text("Not interested", color = Color.Red) }, onClick = {
@@ -271,6 +275,21 @@ fun EventHubScreen(
                 }) { Text("Delete", color = Color.Red) }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (confirmEnd) {
+        AlertDialog(
+            onDismissRequest = { confirmEnd = false },
+            title = { Text("End this event?") },
+            text = { Text("This closes the event now. It moves to ended and the recap stays available. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmEnd = false
+                    scope.launch { vm.endEvent(event); onDismiss() }
+                }) { Text("End event") }
+            },
+            dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancel") } }
         )
     }
 }

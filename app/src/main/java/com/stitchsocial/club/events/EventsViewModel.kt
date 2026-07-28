@@ -187,6 +187,15 @@ class EventsViewModel : ViewModel() {
         } catch (e: Exception) { _errorMessage.value = e.message; false }
     }
 
+    suspend fun endEvent(event: StitchEventEntity): Boolean {
+        if (currentUserID.isBlank()) { _errorMessage.value = "Sign in to manage this event"; return false }
+        return try {
+            service.endEvent(event.id, currentUserID)
+            loadAndAwait()
+            true
+        } catch (e: Exception) { _errorMessage.value = e.message; false }
+    }
+
     suspend fun deleteEvent(event: StitchEventEntity): Boolean {
         if (currentUserID.isBlank()) { _errorMessage.value = "Sign in to delete an event"; return false }
         return try {
