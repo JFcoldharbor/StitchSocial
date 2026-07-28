@@ -762,17 +762,35 @@ fun MainScreen() {
 
                     // Only show tab bar when no modal is active AND no announcement showing AND no ThreadView
                     //
-                    // isShowingCommunity covers the channel interior
-                    // (CommunityDetailV2View). Community and Events are
-                    // full-screen surfaces — the app tab bar must not be visible
-                    // while either is up. The community list takeover reports in
-                    // through isShowingCollectionPlayer (DiscoveryView's combined
-                    // tab-bar effect); the interior is hosted here instead, so it
-                    // has to be named explicitly.
+                    // Community, Events and Collections are full-screen surfaces —
+                    // the tab bar must not be visible on ANY of them. It can't be
+                    // covered by layering: the takeovers render at zIndex 200
+                    // inside DiscoveryView, but this bar is a LATER sibling of
+                    // DiscoveryView's parent Box at an equal zIndex(0f), and
+                    // between equal-zIndex siblings the later one wins. So the
+                    // boolean below is the only thing hiding it, and it has to be
+                    // right on the very first frame.
+                    //
+                    // Sources, deliberately redundant because a single miss shows
+                    // the bar on top of a takeover:
+                    //  - fullScreenSurfaceUp: written synchronously by the category
+                    //    tap in DiscoveryView (no effect delay, no callback chain).
+                    //  - isShowingCollectionPlayer: the older callback route, kept
+                    //    as a backstop for the fullscreen deck / collection player.
+                    //  - isShowingCommunity: the channel interior, hosted here
+                    //    rather than inside DiscoveryView.
+                    val fullScreenSurfaceUp by com.stitchsocial.club.foundation
+                        .FullScreenSurfaceState.isUp.collectAsState()
                     val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement &&
-                        !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity
-                    LaunchedEffect(currentModal, isShowingAnnouncement, isShowingThreadView) {
-                        Log.d("STITCH_MAIN", "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | announcement: $isShowingAnnouncement | threadView: $isShowingThreadView")
+                        !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity &&
+                        !fullScreenSurfaceUp
+                    LaunchedEffect(shouldShowTabBar, fullScreenSurfaceUp, isShowingCommunity) {
+                        Log.d(
+                            "STITCH_MAIN",
+                            "📊 Tab bar decision - shouldShow: $shouldShowTabBar | modal: $currentModal | " +
+                                "fullscreenSurface: $fullScreenSurfaceUp | community: $isShowingCommunity | " +
+                                "collectionPlayer: $isShowingCollectionPlayer | threadView: $isShowingThreadView"
+                        )
                     }
 
                     if (shouldShowTabBar) {

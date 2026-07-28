@@ -890,10 +890,19 @@ fun DiscoveryView(
     val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
         selectedCategory == DiscoveryCategory.EVENTS ||
         selectedCategory == DiscoveryCategory.COLLECTIONS
-    LaunchedEffect(showVideoPlayer, showCollectionPlayer, eventHub, fullScreenCategoryUp) {
-        onTabBarVisibilityChange?.invoke(
-            !showVideoPlayer && !showCollectionPlayer && eventHub == null && !fullScreenCategoryUp
-        )
+    val anyFullScreenUp = showVideoPlayer || showCollectionPlayer || eventHub != null ||
+        fullScreenCategoryUp
+    LaunchedEffect(anyFullScreenUp) {
+        onTabBarVisibilityChange?.invoke(!anyFullScreenUp)
+        // Backstop for the paths that don't go through the category tap:
+        // deep links (which set the category directly), the fullscreen video
+        // deck and the collection player.
+        com.stitchsocial.club.foundation.FullScreenSurfaceState.set(anyFullScreenUp)
+    }
+    // Never leave the bar hidden after Discovery goes away — MainActivity
+    // unmounts TabContent whenever a modal opens, which disposes this view.
+    DisposableEffect(Unit) {
+        onDispose { com.stitchsocial.club.foundation.FullScreenSurfaceState.clear() }
     }
 
     // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
@@ -1126,6 +1135,15 @@ fun DiscoveryView(
                     selectedCategory = selectedCategory,
                     onCategorySelected = { category ->
                         selectedCategory = category
+                        // Set the full-screen flag SYNCHRONOUSLY here, in the tap
+                        // that opens the surface. Doing it in a LaunchedEffect
+                        // means the first frame of the takeover can render with
+                        // the tab bar still on top.
+                        com.stitchsocial.club.foundation.FullScreenSurfaceState.set(
+                            category == DiscoveryCategory.COMMUNITIES ||
+                                category == DiscoveryCategory.EVENTS ||
+                                category == DiscoveryCategory.COLLECTIONS
+                        )
                         viewModel.filterBy(category)
                         currentSwipeIndex = 0 // Reset swipe position
                     }
