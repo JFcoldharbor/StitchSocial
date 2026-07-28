@@ -96,6 +96,12 @@ data class StitchEventEntity(
     val promoVideoID: String? = null,
     val openerVideoID: String? = null,
     val recapVideoID: String? = null,
+    // Denormalized media for the hero card. iOS already writes all three
+    // (EventService.swift) — Android just never decoded them, which is why the
+    // events list had no cover art to show.
+    val promoThumbnailURL: String? = null,  // promo thumb for the hero still
+    val promoVideoURL: String? = null,      // promo playback URL (card autoplay)
+    val coverImageURL: String? = null,      // chosen cover photo, preferred over promo
     val attendeeAnchorsAllowed: Boolean = false,
     val goingCount: Int = 0,
     val postCount: Int = 0,
@@ -170,6 +176,9 @@ data class StitchEventEntity(
                 promoVideoID = (map["promoVideoID"] as? String)?.takeIf { it.isNotBlank() },
                 openerVideoID = (map["openerVideoID"] as? String)?.takeIf { it.isNotBlank() },
                 recapVideoID = (map["recapVideoID"] as? String)?.takeIf { it.isNotBlank() },
+                promoThumbnailURL = (map["promoThumbnailURL"] as? String)?.takeIf { it.isNotBlank() },
+                promoVideoURL = (map["promoVideoURL"] as? String)?.takeIf { it.isNotBlank() },
+                coverImageURL = (map["coverImageURL"] as? String)?.takeIf { it.isNotBlank() },
                 attendeeAnchorsAllowed = map["attendeeAnchorsAllowed"] as? Boolean ?: false,
                 goingCount = (map["goingCount"] as? Number)?.toInt() ?: 0,
                 postCount = (map["postCount"] as? Number)?.toInt() ?: 0,
