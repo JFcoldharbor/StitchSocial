@@ -55,6 +55,7 @@ fun EventRowsScreen(
     val live by vm.liveEvents.collectAsState()
     val upcoming by vm.upcomingEvents.collectAsState()
     val mine by vm.myEvents.collectAsState()
+    val attended by vm.attendedEvents.collectAsState()
     val myRSVPs by vm.myRSVPs.collectAsState()
     val isLoading by vm.isLoading.collectAsState()
 
@@ -154,10 +155,14 @@ fun EventRowsScreen(
                     // iOS splits My Events three ways rather than one flat list.
                     val now = live.filter { vm.isHost(it) || myRSVPs[it.id] == EventRSVPStatus.GOING }
                     val going = upcoming.filter { myRSVPs[it.id] == EventRSVPStatus.GOING && !vm.isHost(it) }
-                    val hosting = mine.filter { !it.isLive }
-                    if (isLoading && now.isEmpty() && going.isEmpty() && hosting.isEmpty()) {
+                    // Upcoming hosted only — ended hosted events move to "Past".
+                    val hosting = mine.filter { it.isUpcoming }
+                    // Past = ended events hosted OR attended, deduped, newest first.
+                    val past = (mine + attended).filter { it.hasEnded }.distinctBy { it.id }
+                        .sortedByDescending { it.doorsAt }
+                    if (isLoading && now.isEmpty() && going.isEmpty() && hosting.isEmpty() && past.isEmpty()) {
                         Loading()
-                    } else if (now.isEmpty() && going.isEmpty() && hosting.isEmpty()) {
+                    } else if (now.isEmpty() && going.isEmpty() && hosting.isEmpty() && past.isEmpty()) {
                         Empty("You haven't hosted any events", "Tap Host to create one.")
                     } else {
                         LazyColumn(
@@ -180,6 +185,16 @@ fun EventRowsScreen(
                                 item { sectionHeader("Hosting") }
                                 items(hosting, key = { "host_" + it.id }) { ev ->
                                     MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
+                                }
+                            }
+                            if (past.isNotEmpty()) {
+                                item { sectionHeader("Past") }
+                                items(past, key = { "past_" + it.id }) { ev ->
+                                    if (vm.isHost(ev)) {
+                                        MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
+                                    } else {
+                                        EventListRow(ev, blue, onOpen = { onOpenEvent(ev) })
+                                    }
                                 }
                             }
                             item { HostBigButton { showCreate = true } }

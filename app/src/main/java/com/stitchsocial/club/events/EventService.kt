@@ -192,6 +192,24 @@ object EventService {
             .sortedByDescending { it.doorsAt }
     }
 
+    /**
+     * Events the caller RSVP'd Going to (all states) — collectionGroup over every
+     * event's attendees subcollection, so an attendee can reopen a past event for
+     * its recap. REQUIRES a collectionGroup index on attendees (userID, status) +
+     * the rules entry allowing the collectionGroup read (see firestore.rules).
+     */
+    suspend fun fetchAttendedEvents(userID: String, limit: Long = 50): List<StitchEventEntity> {
+        if (userID.isBlank()) return emptyList()
+        val snap = db.collectionGroup(Col.ATTENDEES)
+            .whereEqualTo("userID", userID)
+            .whereEqualTo("status", EventRSVPStatus.GOING.raw)
+            .limit(limit)
+            .get().await()
+        // events/{eventID}/attendees/{userID} → grandparent doc id is the event id.
+        val eventIDs = snap.documents.mapNotNull { it.reference.parent.parent?.id }.toSet()
+        return eventIDs.mapNotNull { fetchEvent(it) }.sortedByDescending { it.doorsAt }
+    }
+
     // --- RSVP ---
 
     suspend fun fetchMyRSVP(eventID: String, userID: String): EventAttendee? {

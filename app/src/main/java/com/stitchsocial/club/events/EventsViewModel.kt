@@ -64,6 +64,10 @@ class EventsViewModel : ViewModel() {
     private val _myEvents = MutableStateFlow<List<StitchEventEntity>>(emptyList())
     val myEvents: StateFlow<List<StitchEventEntity>> = _myEvents.asStateFlow()
 
+    /** Events the caller RSVP'd Going to (all states) — for revisiting past events. */
+    private val _attendedEvents = MutableStateFlow<List<StitchEventEntity>>(emptyList())
+    val attendedEvents: StateFlow<List<StitchEventEntity>> = _attendedEvents.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -122,6 +126,8 @@ class EventsViewModel : ViewModel() {
         viewModelScope.launch {
             if (currentUserID.isBlank()) return@launch
             _myEvents.value = try { service.fetchMyEvents(currentUserID) } catch (e: Exception) { emptyList() }
+            // Attended — best-effort; needs the attendees collectionGroup index + rules.
+            _attendedEvents.value = try { service.fetchAttendedEvents(currentUserID) } catch (e: Exception) { emptyList() }
         }
     }
 
@@ -214,7 +220,10 @@ class EventsViewModel : ViewModel() {
             val rows = service.fetchEventRows()
             prefetchRSVPs(rows)
             applyRows(rows)
-            if (currentUserID.isNotBlank()) _myEvents.value = service.fetchMyEvents(currentUserID)
+            if (currentUserID.isNotBlank()) {
+                _myEvents.value = service.fetchMyEvents(currentUserID)
+                _attendedEvents.value = try { service.fetchAttendedEvents(currentUserID) } catch (e: Exception) { _attendedEvents.value }
+            }
         } catch (e: Exception) { _errorMessage.value = e.message }
     }
 
