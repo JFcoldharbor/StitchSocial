@@ -15,3 +15,10 @@
 local.properties
 
 app/release/*.apk
+
+# Claude Code local state — settings, and worktrees under .claude/worktrees
+# (an embedded git repo; committing it adds a stray gitlink).
+.claude/
+
+# Kotlin compiler error dumps — build noise, regenerated on every failure.
+.kotlin/
