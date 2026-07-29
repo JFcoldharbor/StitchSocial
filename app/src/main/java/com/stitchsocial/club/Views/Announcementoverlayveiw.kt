@@ -599,6 +599,9 @@ private fun getTypeIcon(type: AnnouncementType): ImageVector {
         AnnouncementType.PROMOTION -> Icons.Default.CardGiftcard
         AnnouncementType.COMMUNITY -> Icons.Default.Groups
         AnnouncementType.SAFETY -> Icons.Default.Security
+        // Admin-picked spotlight ("Video of the Day" / "Stitch Moment") — the
+        // star reads as an accolade rather than an app notice.
+        AnnouncementType.HIGHLIGHT -> Icons.Default.Star
     }
 }
 

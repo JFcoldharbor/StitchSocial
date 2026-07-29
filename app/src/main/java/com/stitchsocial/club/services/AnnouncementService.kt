@@ -679,6 +679,82 @@ class AnnouncementService private constructor() {
         return announcement
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Admin highlight — "Video of the Day" / "Stitch Moment"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Can this account publish announcements/highlights?
+     *
+     * This list MIRRORS the server rule in functions/firestore.rules
+     * (`match /announcements/{id}` → allow create/update/delete). The server is
+     * the real gate; this exists so the UI never offers an action that would
+     * come back PERMISSION_DENIED. Adding an admin means editing BOTH.
+     */
+    fun isAuthorizedCreator(email: String?): Boolean =
+        email != null && authorizedCreatorEmails.contains(email.lowercase())
+
+    /** Preset labels an admin can stamp on a highlight. */
+    enum class HighlightPreset(val label: String) {
+        VIDEO_OF_THE_DAY("Video of the Day"),
+        STITCH_MOMENT("Stitch Moment"),
+    }
+
+    /**
+     * Spotlight any video as the highlight users see when they open the app.
+     *
+     * Only ONE highlight is live at a time — publishing deactivates whatever was
+     * highlighted before, so an admin can't accidentally stack two and leave
+     * users with a queue of takeovers.
+     *
+     * Defaults chosen for a "video of the day": expires after [durationHours],
+     * shows at most once per day per user, and is dismissable. Nothing here is
+     * acknowledgment-gated — a highlight is a spotlight, not a policy notice.
+     */
+    suspend fun createHighlight(
+        videoId: String,
+        creatorEmail: String,
+        creatorId: String,
+        label: String,
+        message: String? = null,
+        durationHours: Int = 24,
+    ): Announcement {
+        if (!isAuthorizedCreator(creatorEmail)) throw AnnouncementError.UnauthorizedCreator
+
+        // Retire the previous highlight first so only one is ever live.
+        runCatching { clearActiveHighlights(creatorEmail) }
+
+        val endDate = Date(System.currentTimeMillis() + durationHours * 3_600_000L)
+        return createAnnouncement(
+            videoId = videoId,
+            creatorEmail = creatorEmail,
+            creatorId = creatorId,
+            title = label,
+            message = message,
+            priority = AnnouncementPriority.STANDARD,
+            type = AnnouncementType.HIGHLIGHT,
+            targetAudience = AnnouncementAudience.All,
+            startDate = Date(),
+            endDate = endDate,
+            minimumWatchSeconds = 0,
+            isDismissable = true,
+            requiresAcknowledgment = false,
+            repeatMode = AnnouncementRepeatMode.ONCE,
+            maxDailyShows = 1,
+        )
+    }
+
+    /** Deactivate every live highlight. Used before publishing a new one. */
+    suspend fun clearActiveHighlights(creatorEmail: String) {
+        if (!isAuthorizedCreator(creatorEmail)) throw AnnouncementError.UnauthorizedCreator
+        val live = getAllAnnouncements().filter {
+            it.isActive && it.typeEnum == AnnouncementType.HIGHLIGHT
+        }
+        for (a in live) {
+            runCatching { deactivateAnnouncement(a.id, creatorEmail) }
+        }
+    }
+
     /**
      * Deactivate an announcement
      */

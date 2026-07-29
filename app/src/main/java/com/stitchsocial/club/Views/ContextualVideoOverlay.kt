@@ -28,6 +28,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -804,6 +805,14 @@ private fun MoreOptionsMenu(
         .savedVideoIds.collectAsStateWithLifecycle()
     val isSaved = savedIds.contains(video.id)
 
+    // Admin highlight — spotlight ANY video as the launch announcement.
+    // Gated on the same email allowlist the Firestore rule enforces, so a
+    // normal user never sees this item and the server refuses it regardless.
+    val adminEmail = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
+    val canHighlight = com.stitchsocial.club.services.AnnouncementService.shared
+        .isAuthorizedCreator(adminEmail)
+    var showHighlightSheet by remember { mutableStateOf(false) }
+
     Box {
         // 32dp circle to match the share + exit buttons in the vertical top stack.
         Box(
@@ -842,6 +851,16 @@ private fun MoreOptionsMenu(
                     }
                 }
             )
+            if (canHighlight) {
+                DropdownMenuItem(
+                    text = { Text("Highlight this video") },
+                    leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        showHighlightSheet = true
+                    }
+                )
+            }
             if (!isUserVideo) {
             DropdownMenuItem(
                 text = { Text("Report video") },
@@ -885,6 +904,16 @@ private fun MoreOptionsMenu(
             }
             }  // if (!isUserVideo)
         }
+    }
+
+    if (showHighlightSheet) {
+        AdminHighlightSheet(
+            videoId = video.id,
+            videoTitle = video.title,
+            adminEmail = adminEmail ?: "",
+            adminUserId = currentUserID ?: "",
+            onDismiss = { showHighlightSheet = false },
+        )
     }
 
     if (showReportSheet) {

@@ -223,7 +223,13 @@ enum class AnnouncementType(val value: String) {
     MAINTENANCE("maintenance"),
     PROMOTION("promotion"),
     COMMUNITY("community"),
-    SAFETY("safety");
+    SAFETY("safety"),
+    /**
+     * Admin-picked spotlight video — "Video of the Day" / "Stitch Moment".
+     * Same announcement machinery (it already carried a videoId), but typed so
+     * the overlay can present it as a highlight instead of an app notice.
+     */
+    HIGHLIGHT("highlight");
 
     val displayName: String
         get() = when (this) {
@@ -235,6 +241,7 @@ enum class AnnouncementType(val value: String) {
             PROMOTION -> "Promotion"
             COMMUNITY -> "Community"
             SAFETY -> "Safety Alert"
+            HIGHLIGHT -> "Stitch Highlight"
         }
 
     /** Material Icon name */
@@ -248,6 +255,7 @@ enum class AnnouncementType(val value: String) {
             PROMOTION -> "card_giftcard"
             COMMUNITY -> "groups"
             SAFETY -> "security"
+            HIGHLIGHT -> "star"
         }
 
     companion object {
