@@ -41,10 +41,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
+
         applicationId = "com.stitchsocial.club"
         minSdk = 28
         targetSdk = 35
-        versionCode = 30
+        versionCode = 32
         versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -165,17 +166,26 @@ dependencies {
     // Agora RTC SDK — live streaming engine. Matches the iOS app's `AgoraRtcKit`
     // dependency; same channel/role semantics so creators broadcast to the same
     // channel viewers join.
-    implementation("io.agora.rtc:full-sdk:4.3.2")
+    // 4.5.1+ ships 16 KB-aligned .so files; 4.3.2 was 4 KB and Play blocks it for
+    // targetSdk 35 uploads.
+    // Exclude the screen-sharing extension: it injects FOREGROUND_SERVICE_MEDIA_PROJECTION
+    // + a MediaProjection service/activity, which triggers a Play "media projection"
+    // declaration for a feature we don't have (live streaming is camera-only, we never
+    // call startScreenCapture). Excluding it drops the permission and the extension .so.
+    implementation("io.agora.rtc:full-sdk:4.6.3") {
+        exclude(group = "io.agora.rtc", module = "full-screen-sharing")
+    }
     // Used by VideoExportService (caption burn-in) and ReactionCompositor
     // (split-screen / PiP). 1.4+ exposes VideoCompositorSettings.
     implementation("androidx.media3:media3-transformer:1.4.1")
     implementation("androidx.media3:media3-effect:1.4.1")
 
-    implementation("androidx.camera:camera-camera2:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    implementation("androidx.camera:camera-view:1.3.1")
-    implementation("androidx.camera:camera-video:1.3.1")
-    implementation("androidx.camera:camera-extensions:1.3.1")
+    // 1.4.0+ fixes 16 KB alignment in libimage_processing_util_jni.so.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("androidx.camera:camera-video:1.4.2")
+    implementation("androidx.camera:camera-extensions:1.4.2")
 
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
     implementation("androidx.compose.foundation:foundation:1.6.1")

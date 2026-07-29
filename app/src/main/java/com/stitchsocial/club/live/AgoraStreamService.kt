@@ -229,9 +229,11 @@ class AgoraStreamService private constructor() {
         )
     }
 
+    // Agora 4.5+ dropped RtcEngine.CreateRendererView. VideoCanvas takes any
+    // android.view.View, so a plain SurfaceView is the supported replacement —
+    // same thing the old fallback branch handed back.
     fun createRendererView(context: Context): SurfaceView =
-        runCatching { RtcEngine.CreateRendererView(context.applicationContext) }
-            .getOrElse { SurfaceView(context.applicationContext) }
+        SurfaceView(context.applicationContext)
 
     // ── Event handler ───────────────────────────────────────────────────────
 
