@@ -6,6 +6,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.foundation.CoreVideoMetadata
+import com.stitchsocial.club.foundation.isPubliclyVisible
 import com.stitchsocial.club.services.VideoServiceImpl
 import kotlinx.coroutines.tasks.await
 import java.util.Date
@@ -70,7 +71,11 @@ object EventService {
             val events = videoService.convertFirebaseToVideoMetadata(snapshot.documents)
                 .filter { video ->
                     val ev = video.event ?: return@filter false
-                    !ev.hasEnded && video.videoURL.isNotBlank() && !video.isDeleted
+                    // Event promos play in Discovery, so this is a public
+                    // cross-user surface and needs the moderation gate like any
+                    // other feed. It only checked isDeleted.
+                    !ev.hasEnded && video.videoURL.isNotBlank() && !video.isDeleted &&
+                        video.isPubliclyVisible
                 }
 
             if (BuildConfig.DEBUG) {
@@ -142,8 +147,9 @@ object EventService {
     /**
      * Host taps "End event" — ends it immediately (iOS parity). Pulls closeAt to
      * now so lifecycle → ENDED and the event drops out of the `closeAt > now`
-     * rows query. Also stamps endedAt for cross-platform doc parity (iOS reads it;
-     * Android's lifecycle keys off closeAt).
+     * rows query. Also stamps endedAt, which BOTH platforms now read — Android's
+     * lifecycle used to key off closeAt alone, which only agreed with iOS
+     * because this method happens to pull closeAt too.
      */
     suspend fun endEvent(eventID: String, hostUserID: String) {
         if (hostUserID.isBlank()) throw EventException("You need to be signed in to host an event")

@@ -3,6 +3,7 @@ package com.stitchsocial.club.challenge
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.foundation.isVideoPubliclyVisible
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 
@@ -60,6 +61,10 @@ object ChallengeService {
                 .whereEqualTo("challengeStatus", ChallengeEntryStatus.WON.raw)
                 .get().await().documents.mapNotNull { doc ->
                     val data = doc.data ?: return@mapNotNull null
+                    // Winners are shown to everyone in the challenge, thumbnail
+                    // and all — public surface, same gate. Winning doesn't
+                    // exempt a video from moderation.
+                    if (!isVideoPubliclyVisible(data)) return@mapNotNull null
                     ChallengeWinner(
                         videoID = doc.id,
                         creatorID = data["creatorID"] as? String ?: "",

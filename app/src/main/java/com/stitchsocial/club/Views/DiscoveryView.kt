@@ -265,6 +265,12 @@ class DiscoveryViewModel(
                         if (depth > 0) return@mapNotNull null
                         val vis = data["visibility"] as? String ?: "public"
                         if (vis == "private" || vis == "followersOnly") return@mapNotNull null
+                        // `visibility` is the CREATOR's audience choice. Moderation
+                        // is a SEPARATE field, and this builder never checked it —
+                        // so flagged content the scan had already caught still
+                        // reached Discovery here. Missing = "public" so legacy
+                        // docs are unaffected. See foundation/PublicVisibility.kt.
+                        if (!isVideoPubliclyVisible(data)) return@mapNotNull null
                         val url = data["videoURL"] as? String ?: return@mapNotNull null
                         if (url.isBlank()) return@mapNotNull null
                         decodeVideo(data, doc.id)

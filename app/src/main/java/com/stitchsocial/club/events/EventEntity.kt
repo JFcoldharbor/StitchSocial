@@ -103,23 +103,39 @@ data class StitchEventEntity(
     val promoVideoURL: String? = null,      // promo playback URL (card autoplay)
     val coverImageURL: String? = null,      // chosen cover photo, preferred over promo
     val attendeeAnchorsAllowed: Boolean = false,
+    // Explicit host actions on the clock. iOS writes BOTH and keys its lifecycle
+    // off them; Android decoded neither, which is the cross-platform break —
+    // see `lifecycle` below.
+    val startedAt: Date? = null,
+    val endedAt: Date? = null,
     val goingCount: Int = 0,
     val postCount: Int = 0,
     val createdAt: Date = Date(),
     val updatedAt: Date = Date()
 ) {
     /**
-     * Live only once the opener exists AND we're inside the window — a passed
-     * door time with no opener stays UPCOMING (no empty live rooms).
+     * Must match iOS `StitchEventEntity.lifecycle` exactly — the two platforms
+     * read the same documents, so any disagreement means the same event is live
+     * on one phone and upcoming on the other.
+     *
+     * It did disagree. iOS's "Start the event" stamps `startedAt` and NOTHING
+     * else — there's no opener video yet, that's the whole point of the button —
+     * so an event an iPhone host had started stayed UPCOMING on every Android
+     * device, and attendees couldn't join or stitch it.
+     *
+     * ENDED was right only by luck: iOS's endEvent also pulls `closeAt` to now,
+     * so the clock backstop caught it. Reading `endedAt` makes that intentional
+     * rather than a coincidence we'd lose the next time iOS changes.
      */
     val lifecycle: EventLifecycle
         get() {
             val now = System.currentTimeMillis()
-            return when {
-                now >= closeAt.time -> EventLifecycle.ENDED
-                openerVideoID != null && now >= doorsAt.time -> EventLifecycle.LIVE
-                else -> EventLifecycle.UPCOMING
-            }
+            // Explicit end (host tapped "End event") OR the clock backstop.
+            if (endedAt != null || now >= closeAt.time) return EventLifecycle.ENDED
+            // Explicit start OR an opener exists (auto mode / back-compat).
+            val hasStarted = startedAt != null || openerVideoID != null
+            return if (hasStarted && now >= doorsAt.time) EventLifecycle.LIVE
+                   else EventLifecycle.UPCOMING
         }
 
     val isLive: Boolean get() = lifecycle == EventLifecycle.LIVE
@@ -180,6 +196,8 @@ data class StitchEventEntity(
                 promoVideoURL = (map["promoVideoURL"] as? String)?.takeIf { it.isNotBlank() },
                 coverImageURL = (map["coverImageURL"] as? String)?.takeIf { it.isNotBlank() },
                 attendeeAnchorsAllowed = map["attendeeAnchorsAllowed"] as? Boolean ?: false,
+                startedAt = (map["startedAt"] as? Timestamp)?.toDate(),
+                endedAt = (map["endedAt"] as? Timestamp)?.toDate(),
                 goingCount = (map["goingCount"] as? Number)?.toInt() ?: 0,
                 postCount = (map["postCount"] as? Number)?.toInt() ?: 0,
                 createdAt = (map["createdAt"] as? Timestamp)?.toDate() ?: Date(),

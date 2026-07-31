@@ -931,7 +931,18 @@ class VideoCoordinator(
             "hlsURL" to (metadata.hlsURL ?: ""),
             "mp4URL" to (metadata.mp4URL ?: ""),
             "status" to (metadata.status ?: "processing"),
-            "cdnVideoId" to (cdnVideoId ?: "")
+            "cdnVideoId" to (cdnVideoId ?: ""),
+
+            // Moderate-before-publish (iOS parity, VideoService.swift:238). New
+            // videos start hidden from public surfaces until the moderation
+            // Cloud Function flips this to "public" on pass.
+            //
+            // Android was writing NOTHING here, and the gate reads a missing
+            // field as "public" — deliberately, so legacy docs still show. So
+            // every Android post went straight to Discover and stayed there for
+            // the whole length of the scan. That's the window the explicit
+            // content came through. See foundation/PublicVisibility.kt.
+            "publicVisibility" to "pending"
         )
 
         return try {
