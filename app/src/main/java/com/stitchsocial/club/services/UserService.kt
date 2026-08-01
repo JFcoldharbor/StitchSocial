@@ -438,6 +438,30 @@ class UserService(private val context: Context) {
     }
 
     /**
+     * Resolve a username from a share link to the userID every profile surface
+     * expects (iOS parity with UserService.userID(forUsername:)).
+     *
+     * Returns null rather than throwing: a bad link is a normal thing to receive
+     * from the outside world — renamed account, typo, someone editing the URL —
+     * not an error worth surfacing to whoever tapped it.
+     */
+    suspend fun userIDForUsername(username: String): String? {
+        return try {
+            db.collection("users")
+                .whereEqualTo("username", username)
+                .limit(1)
+                .get()
+                .await()
+                .documents
+                .firstOrNull()
+                ?.id
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("USER SERVICE: username lookup failed — ${e.message}") }
+            null
+        }
+    }
+
+    /**
      * Check if username is available (excluding current user)
      * NOW PUBLIC for ProfileViewModel access
      */

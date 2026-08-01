@@ -63,6 +63,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.stitchsocial.club.foundation.AccountType
+import com.stitchsocial.club.foundation.PendingReferral
 import com.stitchsocial.club.services.AdCategory
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.ReferralService
@@ -133,6 +134,10 @@ fun LoginView(
     var websiteURL by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(AdCategory.OTHER) }
     var referralCode by remember { mutableStateOf("") }
+    // True when the code was prefilled from a tapped referral link rather
+    // than typed. Only affects the sourceType the signup is attributed to —
+    // a referrer should be able to tell a working link from a copied code.
+    var referralCameFromLink by remember { mutableStateOf(false) }
 
     // Terms
     var acceptedTerms by remember { mutableStateOf(false) }
@@ -156,6 +161,18 @@ fun LoginView(
     val fCpw = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { delay(100); animated = true }
+
+    // Someone who arrived from a referral link shouldn't have to find the code
+    // and type it back in — it was already in the URL they tapped. Never
+    // overwrite something they typed themselves.
+    LaunchedEffect(Unit) {
+        if (referralCode.isEmpty()) {
+            PendingReferral.code(context)?.let {
+                referralCode = it
+                referralCameFromLink = true
+            }
+        }
+    }
 
     val validEmail = email.contains("@") && email.contains(".")
     val validPw = password.length >= 6
@@ -220,7 +237,13 @@ fun LoginView(
                         try {
                             val rs = ReferralService()
                             if (code.isNotEmpty()) {
-                                val ref = rs.processReferralSignup(code, r.userId, "android", "manual")
+                                val ref = rs.processReferralSignup(
+                                    code, r.userId, "android",
+                                    if (referralCameFromLink) "link" else "manual"
+                                )
+                                // Redeemed — don't prefill it into the next signup
+                                // on this device.
+                                if (ref.success) PendingReferral.clear(context)
                                 if (BuildConfig.DEBUG) { println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}") }
                             } else {
                                 rs.processOrganicSignup(newUserID = r.userId, platform = "android")

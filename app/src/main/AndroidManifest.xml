@@ -59,6 +59,41 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Android App Links. autoVerify makes the system fetch
+                https://stitchsocial.me/.well-known/assetlinks.json at install
+                and, on a match, open these links in the app with NO chooser
+                dialog. Without the verification file it silently degrades to a
+                "open with" prompt, which is the usual way this looks broken.
+
+                Data attributes within one filter combine as a cross product, so
+                this is both hosts x all three paths. Scoped to the paths the app
+                can actually route — claiming the whole domain would swallow the
+                marketing site, /ambassador and the legal pages, exactly as the
+                iOS AASA was about to.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="stitchsocial.me" />
+                <data android:host="www.stitchsocial.me" />
+                <data android:pathPrefix="/e/" />
+                <data android:pathPrefix="/u/" />
+                <data android:pathPrefix="/invite/" />
+            </intent-filter>
+
+            <!-- stitchsocial://e/{id} etc. Declared in ReferralService as
+                 `deepLinkScheme` and never registered, so the custom-scheme half
+                 of every generated link pointed at nothing. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="stitchsocial" />
+            </intent-filter>
         </activity>
 
         <!-- FILE PROVIDER: Required for sharing video files via Intent -->

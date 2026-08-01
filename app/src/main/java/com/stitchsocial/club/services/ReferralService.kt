@@ -1,6 +1,7 @@
 package com.stitchsocial.club.services
 
 import com.google.firebase.Timestamp
+import com.stitchsocial.club.AppConfig
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -48,7 +49,15 @@ class ReferralService {
     private val maxCloutFromReferrals = 1000
     private val hypeRatingBonusPerReferral = 0.001
     private val referralExpirationDays = 30
-    private val baseURL = "https://stitchsocial.app"
+    // stitchsocial.ME. This was hardcoded to `stitchsocial.app`, a live site
+    // belonging to an unrelated product, so every referral link Android ever
+    // generated sent the invitee to someone else's homepage — and could never
+    // open this app, since we don't control that domain's assetlinks. iOS had
+    // the identical bug.
+    //
+    // Reads AppConfig rather than keeping its own copy; the app already had the
+    // right value one file away.
+    private val baseURL = AppConfig.URLs.BASE
     private val deepLinkScheme = "stitchsocial"
     private val validationCache = mutableMapOf<String, Boolean>()
 
@@ -269,13 +278,23 @@ class ReferralService {
     private fun fail(message: String, error: String): ReferralProcessingResult =
         ReferralProcessingResult(false, null, 0, 0.0, false, message, error, null)
 
+    /**
+     * The text that actually gets shared (iOS parity).
+     *
+     * This used to list both store URLs and ask the invitee to remember a code
+     * and type it at signup, while `universalLink` — computed right above — went
+     * unused. Nobody ever received a referral link; they received homework, and
+     * anyone who forgot the code signed up as organic with the referrer never
+     * credited.
+     *
+     * One link now. With the app installed it opens straight to signup with the
+     * code filled in; without it, the invite page carries both store links and
+     * shows the code. The code stays in the text for anyone doing it by hand.
+     */
     private fun generateShareText(code: String) = """
-🎬 Welcome to Stitch Social! 🎬
+Come join me on Stitch Social.
 
-🍎 iPhone: https://apps.apple.com/us/app/stitch-social-me-video-reply/id6751523778
-🤖 Android: https://play.google.com/store/apps/details?id=com.stitchsocial.club
+$baseURL/invite/$code
 
-🎁 Enter invite code at signup: $code
-
-Happy Stitching! 🚀""".trimIndent()
+That link sets you up automatically. If you'd rather do it the long way, sign up and enter the invite code $code.""".trimIndent()
 }

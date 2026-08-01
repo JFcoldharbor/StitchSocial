@@ -49,6 +49,7 @@ import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
@@ -150,6 +151,8 @@ class MainActivity : ComponentActivity() {
 
         // ✅ Handle notification intent if app opened from notification
         handleNotificationIntent(intent)
+        // Cold start from a tapped stitchsocial.me link.
+        handleDeepLinkIntent(intent)
     }
 
     // ✅ Handle new intents when app is already running
@@ -157,6 +160,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+        // Warm start: singleTop means onCreate does NOT re-run, so a link tapped
+        // while the app is alive only arrives here.
+        handleDeepLinkIntent(intent)
         // ✅ FIX: Signal Compose to re-run the routing LaunchedEffect
         notificationTrigger.intValue++
     }
@@ -244,6 +250,66 @@ class MainActivity : ComponentActivity() {
     /**
      * ✅ FIXED: Store notification intent for processing by Compose
      */
+    /**
+     * Routes an incoming stitchsocial.me link (or a stitchsocial:// scheme link)
+     * — iOS parity with StitchSocialApp.routeIncomingURL.
+     *
+     * Called from BOTH onCreate and onNewIntent. The launcher is singleTop, so a
+     * link tapped while the app is already running arrives at onNewIntent and
+     * NEVER re-runs onCreate; handling only one of the two is the standard way
+     * this ends up working cold and silently failing warm.
+     *
+     * The custom scheme puts the segment in the host (stitchsocial://e/{id})
+     * while the https form puts it in the path, so both shapes are normalised
+     * here rather than per link type.
+     */
+    private fun handleDeepLinkIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (intent.action != Intent.ACTION_VIEW) return
+
+        val segments = uri.pathSegments.orEmpty().filter { it.isNotBlank() }
+
+        fun segmentAfter(key: String): String? {
+            if (uri.host == key) return segments.firstOrNull()?.takeIf { it.isNotBlank() }
+            val i = segments.indexOf(key)
+            return if (i >= 0 && i + 1 < segments.size) segments[i + 1] else null
+        }
+
+        segmentAfter("e")?.let { eventID ->
+            Log.d("STITCH_MAIN", "🔗 LINK: event $eventID")
+            com.stitchsocial.club.events.EventDeepLink.request(eventID)
+            return
+        }
+
+        // /invite/{code}: whoever tapped this has no account yet, so there's
+        // nothing to navigate to — the code is held until they reach signup,
+        // which may be several screens and a process death away.
+        segmentAfter("invite")?.let { code ->
+            Log.d("STITCH_MAIN", "🎟️ LINK: captured referral ${code.uppercase()}")
+            com.stitchsocial.club.foundation.PendingReferral.capture(this, code)
+            return
+        }
+
+        // /u/{username}: the link the profile share sheet hands out. It carries a
+        // USERNAME and every profile surface takes a userID, so resolve first.
+        segmentAfter("u")?.let { username ->
+            lifecycleScope.launch {
+                // Usernames are stored lowercase; links get title-cased in
+                // transit by some clients.
+                val userID = UserService(applicationContext)
+                    .userIDForUsername(username.lowercase())
+                if (userID == null) {
+                    Log.d("STITCH_MAIN", "🔗 LINK: no user for @$username")
+                    return@launch
+                }
+                com.stitchsocial.club.foundation.ProfileDeepLink.request(userID)
+            }
+            return
+        }
+
+        Log.d("STITCH_MAIN", "🔗 LINK: unrouted $uri")
+    }
+
     private fun handleNotificationIntent(intent: Intent?) {
         intent?.let {
             val fromNotification = it.getBooleanExtra("fromNotification", false)
@@ -409,6 +475,19 @@ fun MainScreen() {
         if (pendingEventID != null && selectedTab != MainAppTab.DISCOVERY) {
             Log.d("STITCH_MAIN", "📅 Event deep-link pending -> switching to Discovery")
             selectedTab = MainAppTab.DISCOVERY
+        }
+    }
+
+    // Same hand-off for a tapped stitchsocial.me/u/{username} link. The Activity
+    // resolves the username to an id and parks it; this is the first point where
+    // the profile overlay's state actually exists, which on a cold start is well
+    // after the tap.
+    val pendingProfileUserID by ProfileDeepLink.pending
+    LaunchedEffect(pendingProfileUserID) {
+        ProfileDeepLink.consume()?.let { id ->
+            Log.d("STITCH_MAIN", "🔗 Profile deep-link -> $id")
+            profileViewUserID = id
+            isShowingProfileView = true
         }
     }
 
