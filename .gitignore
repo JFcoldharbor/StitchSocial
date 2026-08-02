@@ -15,6 +15,9 @@
 local.properties
 
 app/release/*.apk
+# Release bundles too. A 146MB AAB in git exceeds GitHub's 100MB limit and
+# blocks the push outright, so this is not just tidiness.
+app/release/*.aab
 
 # Claude Code local state — settings, and worktrees under .claude/worktrees
 # (an embedded git repo; committing it adds a stray gitlink).
