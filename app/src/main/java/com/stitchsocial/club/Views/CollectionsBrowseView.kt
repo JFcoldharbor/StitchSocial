@@ -126,6 +126,33 @@ fun CollectionsBrowseView(
         progressByID = result
     }
 
+    // Hero teasers. Capped at 5 because each one costs a segment read, and a
+    // rotator nobody watches past the third card doesn't justify more. Cached by
+    // CollectionService, so re-opening the tab is free.
+    var heroItems by remember {
+        mutableStateOf<List<Pair<CollectionHighlight, VideoCollection>>>(emptyList())
+    }
+    LaunchedEffect(collections.map { it.id }) {
+        val service = CollectionService()
+        val built = mutableListOf<Pair<CollectionHighlight, VideoCollection>>()
+        for (ep in collections.take(5)) {
+            val segs = runCatching { service.getCollectionSegments(ep.id) }.getOrNull().orEmpty()
+            // The MIDDLE segment, not the first: episode one opens on titles and
+            // setup, and the point of the hero is to show what the show is.
+            val seg = segs.getOrNull(segs.size / 2) ?: segs.firstOrNull() ?: continue
+            val url = seg.playbackURL
+            if (url.isBlank()) continue
+            built += CollectionHighlight(
+                id = seg.id,
+                collectionID = ep.id,
+                videoURL = url,
+                thumbnailURL = seg.thumbnailURL ?: ep.coverImageURL,
+                durationSeconds = seg.duration
+            ) to ep
+        }
+        heroItems = built
+    }
+
     val inProgress = remember(collections, progressByID) {
         collections.mapNotNull { ep ->
             progressByID[ep.id]?.takeIf { it.isInProgress }?.let { ProgressPair(ep, it) }
@@ -190,6 +217,17 @@ fun CollectionsBrowseView(
                     .verticalScroll(rememberScrollState()),
             ) {
                 if (mode == BrowseMode.BROWSE) {
+                    // The hero: something moving, for a viewer who hasn't picked
+                    // a show yet. Continue Watching stays below it — resume is
+                    // for people who already chose.
+                    if (heroItems.isNotEmpty() && query.isBlank()) {
+                        CollectionsHeroRotator(
+                            highlights = heroItems,
+                            onOpen = { onPlay(it, 0) },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
+
                     if (resumeItem != null && query.isBlank()) {
                         SectionLabel(
                             "CONTINUE WATCHING",
