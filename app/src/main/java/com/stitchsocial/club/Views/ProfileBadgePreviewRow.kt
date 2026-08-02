@@ -87,7 +87,10 @@ fun ProfileBadgePreviewRow(
                             .border(2.dp, Color.Black, CircleShape),  // neutral separator, no rarity color
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(def.emoji, fontSize = 16.sp)
+                        com.stitchsocial.club.community.CommunityLevelBadgeArt(
+                            badgeID = def.id, size = 22.dp, locked = false,
+                            fallbackEmoji = def.emoji,
+                        )
                     }
                 }
             }
@@ -184,7 +187,10 @@ fun ProfileBadgeStack(
                             .border(2.dp, Color.Black, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(def.emoji, fontSize = 13.sp)
+                        com.stitchsocial.club.community.CommunityLevelBadgeArt(
+                            badgeID = def.id, size = 18.dp, locked = false,
+                            fallbackEmoji = def.emoji,
+                        )
                     }
                 }
             }

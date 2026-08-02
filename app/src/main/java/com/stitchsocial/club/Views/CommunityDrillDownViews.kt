@@ -366,11 +366,14 @@ private fun BadgeCell(badge: CommunityBadgeDefinition, isEarned: Boolean) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            badge.emoji,
-            fontSize = 28.sp,
-            modifier = Modifier
-                .alpha(if (isEarned) 1f else 0.25f),
+        // Real artwork, not the placeholder emoji. Locked badges get the
+        // handoff's dimmed + desaturated + dashed-ring treatment so they still
+        // read as a specific thing you haven't earned.
+        com.stitchsocial.club.community.CommunityLevelBadgeArt(
+            badgeID = badge.id,
+            size = 44.dp,
+            locked = !isEarned,
+            fallbackEmoji = badge.emoji,
         )
         Text(
             badge.name,

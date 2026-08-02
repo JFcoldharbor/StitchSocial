@@ -1,0 +1,118 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:fillColor="#FF1C0A00"
+        android:pathData="M50 7l41 30-16 49H25L9 37z"/>
+    <path
+        android:pathData="M50 7l41 30-16 49H25L9 37z">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="12"
+                android:endX="74"
+                android:endY="90">
+                <item
+                    android:color="#FFFEF3C7"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFF59E0B"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF78350F"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M35 24h30v14a15 15 0 0 1-30 0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="12"
+                android:endX="74"
+                android:endY="90">
+                <item
+                    android:color="#FFFEF3C7"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFF59E0B"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF78350F"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M35 28h-8v5a12 12 0 0 0 9 11M65 28h8v5a12 12 0 0 1-9 11">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="12"
+                android:endX="74"
+                android:endY="90">
+                <item
+                    android:color="#FFFEF3C7"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFF59E0B"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF78350F"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M50 55v10">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="12"
+                android:endX="74"
+                android:endY="90">
+                <item
+                    android:color="#FFFEF3C7"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFF59E0B"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF78350F"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M41 65h18l2 9H39z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="18"
+                android:startY="12"
+                android:endX="74"
+                android:endY="90">
+                <item
+                    android:color="#FFFEF3C7"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFF59E0B"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF78350F"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FF1C0A00"
+        android:pathData="M50 30.5A4.5 4.5 0 1 0 50 39.5 4.5 4.5 0 1 0 50 30.5z"/>
+</vector>
