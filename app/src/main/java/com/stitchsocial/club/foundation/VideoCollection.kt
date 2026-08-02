@@ -100,6 +100,21 @@ data class VideoCollection(
     val totalReplies: Int = 0,
     val totalShares: Int = 0,
 
+    /**
+     * Segments playable without a subscription (iOS parity).
+     *
+     * Android decoded neither this nor [isFree], so a collection a creator
+     * paywalled on iPhone played in FULL on Android — the free-preview setting
+     * had no effect on half the audience.
+     *
+     * Client-side gating stops the UI, not a determined reader of the video doc.
+     * Real enforcement needs signed playback URLs, which is a server job and is
+     * open on both platforms.
+     */
+    val freeSegmentCount: Int = 0,
+    /** Whole collection is free — overrides [freeSegmentCount]. */
+    val isFree: Boolean = false,
+
     // Timestamps
     val publishedAt: Date? = null,
     val createdAt: Date = Date(),

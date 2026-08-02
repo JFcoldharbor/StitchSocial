@@ -118,6 +118,7 @@ fun CollectionPlayerView(
     val segments by viewModel.segments.collectAsState()
     val currentIndex by viewModel.currentIndex.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val paywallHit by viewModel.paywallHit.collectAsState()
     val error by viewModel.error.collectAsState()
     val segmentCount = segments.size
     val currentSegment = segments.getOrNull(currentIndex)
@@ -161,6 +162,18 @@ fun CollectionPlayerView(
     LaunchedEffect(collection.id) {
         viewModel.loadCollection(collection, userID, startingIndex.takeIf { it > 0 })
         viewModel.recordView()
+
+        // Resolve the paywall inputs. Both default to the LOCKED side, so a slow
+        // or failed lookup withholds paid content rather than giving it away.
+        viewModel.setCurrentUserEmail(
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
+        )
+        viewModel.setSubscribed(
+            runCatching {
+                com.stitchsocial.club.services.SubscriptionService.shared
+                    .isSubscribed(userID, collection.creatorID)
+            }.getOrDefault(false)
+        )
     }
     LaunchedEffect(currentIndex) {
         // Pull fresh hype/cool/view/reply for the active segment so the overlay
@@ -354,6 +367,25 @@ fun CollectionPlayerView(
                         .fillMaxWidth()
                         .zIndex(10f)
                 )
+
+                // ── Paywall ───────────────────────────────────────────
+                // Playback stopping with no explanation reads as a broken
+                // player, so say what happened and what unlocks it.
+                if (paywallHit) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissPaywall() },
+                        title = { Text("Subscriber content") },
+                        text = {
+                            Text(
+                                "You've watched the free preview of \"${collection.title}\". " +
+                                "Subscribe to ${collection.creatorName} to keep watching."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { viewModel.dismissPaywall() }) { Text("Got it") }
+                        }
+                    )
+                }
 
                 // ── ThreadDetailSheet ─────────────────────────────────
                 if (showThreadView) {

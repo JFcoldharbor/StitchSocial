@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.foundation.SpecialUsersConfig
 
 class CollectionPlayerViewModel(
     private val collectionService: CollectionService = CollectionService()
@@ -125,11 +126,58 @@ class CollectionPlayerViewModel(
         currentTimestamp = positionSeconds
     }
 
+    /**
+     * Whether the viewer holds a subscription to this creator. Set by the view
+     * once resolved; defaults to false so a slow lookup errs toward the paywall
+     * rather than giving paid content away while it loads.
+     */
+    private val _isSubscribed = MutableStateFlow(false)
+    val isSubscribed: StateFlow<Boolean> = _isSubscribed.asStateFlow()
+
+    fun setSubscribed(value: Boolean) { _isSubscribed.value = value }
+
+    /** Set when playback stops at the paywall, so the view can say why. */
+    private val _paywallHit = MutableStateFlow(false)
+    val paywallHit: StateFlow<Boolean> = _paywallHit.asStateFlow()
+
+    fun dismissPaywall() { _paywallHit.value = false }
+
+    /**
+     * True when this segment sits behind the paywall FOR THIS VIEWER.
+     *
+     * Android decoded neither freeSegmentCount nor isFree, so a collection
+     * paywalled on iPhone played end to end here — the creator's free-preview
+     * setting simply didn't exist for half the audience.
+     *
+     * Client-side gating stops the UI, not a determined reader of the video doc.
+     * Real enforcement needs signed playback URLs; that's a server job and it's
+     * open on iOS too.
+     */
+    fun isLocked(index: Int): Boolean {
+        val col = _collection.value ?: return false
+        if (col.isFree || _isSubscribed.value) return false
+        if (currentUserID.isNotEmpty() && currentUserID == col.creatorID) return false  // creators see their own
+        // Founders review paid content they'd otherwise be locked out of.
+        if (SpecialUsersConfig.detectSpecialUser(currentUserEmail)?.isFounder == true) return false
+        return index >= col.freeSegmentCount
+    }
+
+    /** Set alongside the userID so the founder bypass can be evaluated. */
+    private var currentUserEmail: String = ""
+    fun setCurrentUserEmail(email: String?) { currentUserEmail = email ?: "" }
+
     /** Advance to next segment. Marks current as complete, saves progress. */
     fun advanceToNext() {
         val segs = _segments.value
         val idx = _currentIndex.value
         if (idx >= segs.size - 1) return
+        // Stop AT the paywall rather than playing through it.
+        if (isLocked(idx + 1)) {
+            // Surfaced, not silent — a player that just stops looks broken.
+            _paywallHit.value = true
+            if (BuildConfig.DEBUG) { println("🔒 COLLECTION PLAYER: segment ${idx + 1} is behind the paywall") }
+            return
+        }
 
         val currentSeg = segs.getOrNull(idx) ?: return
         val nextSeg = segs[idx + 1]
@@ -161,6 +209,12 @@ class CollectionPlayerViewModel(
     fun seekToSegment(index: Int) {
         val segs = _segments.value
         if (index !in segs.indices) return
+        // The segment LIST is the other way past the paywall — gating only
+        // advanceToNext would let a viewer tap straight to a locked part.
+        if (isLocked(index)) {
+            _paywallHit.value = true
+            return
+        }
         saveCurrentPositionToProgress()
         _currentIndex.value = index
         currentTimestamp = 0.0

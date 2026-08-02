@@ -73,11 +73,24 @@ class CollectionService {
      * Public published collections for discovery lane.
      * COST: 1 read per 5 min — TTL cached.
      */
-    suspend fun getDiscoveryCollections(limit: Int = 30): List<VideoCollection> {
+    suspend fun getDiscoveryCollections(limit: Int = 30): List<VideoCollection> =
+        publishedCollections().take(limit)
+
+    /**
+     * Every published, public collection — the set every discovery lane slices.
+     *
+     * The CACHE HOLDS THE FULL SET, deliberately. Caching a limited list means
+     * whoever calls first decides what everyone else can see: ask for 20, and a
+     * later request for 30 silently gets 20 back, because the cache is returned
+     * without re-applying the limit. Taking the limit at the call site instead
+     * makes that impossible.
+     *
+     * Single whereEqualTo only — visibility is filtered client-side so no
+     * composite index is required.
+     */
+    private suspend fun publishedCollections(): List<VideoCollection> {
         discoveryCache?.let { if (it.isValid(DISCOVERY_TTL)) return it.data }
 
-        // Single whereEqualTo only — no composite index needed.
-        // Second filter (visibility) applied client-side.
         val snap = db.collection("videoCollections")
             .whereEqualTo("status", CollectionStatus.PUBLISHED.rawValue)
             .get().await()
@@ -86,10 +99,9 @@ class CollectionService {
             .mapNotNull { decodeCollection(it.data ?: return@mapNotNull null, it.id) }
             .filter { it.visibility == CollectionVisibility.PUBLIC }
             .sortedByDescending { it.publishedAt }
-            .take(limit)
 
         discoveryCache = CacheEntry(collections, System.currentTimeMillis())
-        if (BuildConfig.DEBUG) { println("📚 COLLECTION SERVICE: Loaded ${collections.size} discovery collections") }
+        if (BuildConfig.DEBUG) { println("📚 COLLECTION SERVICE: Loaded ${collections.size} published collections") }
         return collections
     }
 
@@ -97,30 +109,39 @@ class CollectionService {
      * Podcasts only — for podcast discovery lane.
      * Not separately cached; subset of discovery results.
      */
-    suspend fun getPodcastCollections(limit: Int = 20): List<VideoCollection> {
-        val snap = db.collection("videoCollections")
-            .whereEqualTo("status", CollectionStatus.PUBLISHED.rawValue)
-            .whereEqualTo("visibility", CollectionVisibility.PUBLIC.rawValue)
-            .whereEqualTo("contentType", CollectionContentType.PODCAST.rawValue)
-            .orderBy("publishedAt", Query.Direction.DESCENDING)
-            .limit(limit.toLong())
-            .get().await()
-        return snap.documents.mapNotNull { decodeCollection(it.data ?: return@mapNotNull null, it.id) }
-    }
+    suspend fun getPodcastCollections(limit: Int = 20): List<VideoCollection> =
+        collectionsOfType(CollectionContentType.PODCAST, limit)
 
     /**
      * Films only — for film discovery lane.
      */
-    suspend fun getFilmCollections(limit: Int = 20): List<VideoCollection> {
-        val snap = db.collection("videoCollections")
-            .whereEqualTo("status", CollectionStatus.PUBLISHED.rawValue)
-            .whereEqualTo("visibility", CollectionVisibility.PUBLIC.rawValue)
-            .whereEqualTo("contentType", CollectionContentType.FILM.rawValue)
-            .orderBy("publishedAt", Query.Direction.DESCENDING)
-            .limit(limit.toLong())
-            .get().await()
-        return snap.documents.mapNotNull { decodeCollection(it.data ?: return@mapNotNull null, it.id) }
-    }
+    suspend fun getFilmCollections(limit: Int = 20): List<VideoCollection> =
+        collectionsOfType(CollectionContentType.FILM, limit)
+
+    /**
+     * One lane of the discovery set, filtered by type.
+     *
+     * Both lanes used to run their own query ending in
+     * `.orderBy("publishedAt", DESCENDING)`, which hid collections two ways:
+     *
+     * 1. Firestore EXCLUDES documents missing the orderBy field entirely. A
+     *    collection published without publishedAt wasn't ranked low, it was
+     *    unreachable — which reads to a creator as "the app lost my show".
+     * 2. Three equality filters plus an orderBy on a fourth field needs a
+     *    COMPOSITE INDEX that doesn't exist for videoCollections. A missing
+     *    index makes the query THROW, which reads as an empty lane.
+     *
+     * Reusing the discovery set also means these lanes hit its cache instead of
+     * issuing two more reads per open. Same fix already applied to
+     * getDiscoveryCollections and the per-creator query.
+     */
+    private suspend fun collectionsOfType(
+        type: CollectionContentType,
+        limit: Int
+    ): List<VideoCollection> =
+        publishedCollections()
+            .filter { it.contentType == type }
+            .take(limit)
 
     // ─────────────────────────────────────────────
     // MARK: - User Collections
@@ -321,6 +342,8 @@ class CollectionService {
             segmentIDs      = segmentIDs,
             segmentCount    = (data["segmentCount"] as? Long)?.toInt() ?: segmentIDs.size,
             totalDuration   = (data["totalDuration"] as? Number)?.toDouble() ?: 0.0,
+            freeSegmentCount = (data["freeSegmentCount"] as? Number)?.toInt() ?: 0,
+            isFree          = data["isFree"] as? Boolean ?: false,
             status          = CollectionStatus.from(data["status"] as? String),
             visibility      = CollectionVisibility.from(data["visibility"] as? String),
             contentType     = CollectionContentType.from(data["contentType"] as? String),
