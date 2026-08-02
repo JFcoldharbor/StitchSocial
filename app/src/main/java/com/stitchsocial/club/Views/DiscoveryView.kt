@@ -46,6 +46,7 @@ import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -2335,6 +2336,28 @@ private fun DiscoveryFullscreenCard(
                     }
                 }
             )
+
+            // Edge peeks. This deck has had a horizontal reply swipe since it
+            // was rewritten to a pager, but NOTHING on screen said so — no
+            // affordance, so the gesture was undiscoverable unless you already
+            // knew. HomeFeedView and ThreadView both show these; the rewrite
+            // dropped them here.
+            //
+            // Above the video, below the overlay: the overlay owns the taps that
+            // matter (profile, stitch, exit) and must win any overlap.
+            if (allVideos.size > 1) {
+                VideoNavigationPeeks(
+                    allVideos = allVideos,
+                    currentVideoIndex = currentIndex,
+                    onTapPrevious = { if (currentIndex > 0) currentIndex -= 1 },
+                    onTapNext = { if (currentIndex < allVideos.size - 1) currentIndex += 1 },
+                    // Hidden mid-drag so it doesn't slide across the incoming
+                    // video, matching how the overlay behaves.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(if (isDragging) 0f else 1f)
+                )
+            }
         }
     }
 }
