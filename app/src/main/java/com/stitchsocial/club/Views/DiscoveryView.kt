@@ -2307,9 +2307,28 @@ private fun DiscoveryFullscreenCard(
                     }
                 ) { change, dragAmount ->
                     change.consume()
+                    // The clamps were attached to the WRONG ENDS, which is why
+                    // back felt fine and forward felt sticky.
+                    //
+                    // Negative offset = dragging toward the NEXT video, so its
+                    // limit belongs to "is there a next" — but it was gated on
+                    // safeIndex == 0, the FIRST index. Positive was gated on the
+                    // last. Swapped.
+                    //
+                    // The damage showed up forward because a discovery root
+                    // often has no replies loaded yet, so you're already on the
+                    // last index: the drag was granted 1.5x SCREEN WIDTH of
+                    // travel and then snapped all the way back. That long pull
+                    // against nothing is the stickiness.
+                    //
+                    // At a real end there's now 8% of give — enough to say "no
+                    // more that way", short enough that it reads as an edge
+                    // rather than a fight.
+                    val atLast = safeIndex >= videoCount - 1
+                    val atFirst = safeIndex == 0
                     dragOffset = (dragOffset + dragAmount).coerceIn(
-                        if (safeIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
-                        if (safeIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
+                        if (atLast) -screenWidthPx * 0.08f else -screenWidthPx * 1.5f,
+                        if (atFirst) screenWidthPx * 0.08f else screenWidthPx * 1.5f
                     )
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
                 }
