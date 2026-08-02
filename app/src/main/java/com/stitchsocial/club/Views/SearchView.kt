@@ -268,9 +268,11 @@ fun SearchView(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(listOf(Color.Black, Color(0xFF1A1A1A)))
-            )
+            // Was a hardcoded black gradient while the TEXT used theme tokens.
+            // In light mode textPrimary is #1A1A1A, so the screen rendered
+            // near-black text on a black background — unreadable, and the reason
+            // search looked broken rather than merely off-brand.
+            .background(AppTheme.colors.bg)
     ) {
         Column(Modifier.fillMaxSize()) {
 
@@ -377,11 +379,13 @@ private fun SearchBar(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .background(
-                color = Color(0xFF262626),
-                shape = RoundedCornerShape(16.dp)
+                color = AppTheme.colors.surface,
+                shape = RoundedCornerShape(12.dp)
             )
-            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(12.dp))
+            // 14dp vertical on top of the field's own height made the bar a
+            // slab. 10 keeps the tap target while letting results start higher.
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(Icons.Default.Search, contentDescription = null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(18.dp))
@@ -722,7 +726,7 @@ fun ModernUserRow(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E), CircleShape)
+                        .background(AppTheme.colors.surfaceStrong, CircleShape)
                 )
             }
 
@@ -750,7 +754,9 @@ fun ModernUserRow(
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isFollowing) Color.Transparent else Color.Cyan,
-                    contentColor = if (isFollowing) AppTheme.colors.textSecondary else Color.Black
+                    // Explicit, not a theme token: this sits on a fixed cyan
+                    // fill in BOTH themes, so it must not follow textPrimary.
+                    contentColor = if (isFollowing) AppTheme.colors.textSecondary else Color(0xFF0B0B0D)
                 ),
                 border = if (isFollowing) BorderStroke(1.dp, AppTheme.colors.textSecondary) else null,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
@@ -785,7 +791,7 @@ private fun VideoSearchCard(video: CoreVideoMetadata, onTap: () -> Unit) {
                 modifier = Modifier
                     .size(60.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF2C2C2E))
+                    .background(AppTheme.colors.surfaceStrong)
             )
             Spacer(Modifier.width(12.dp))
             Column {

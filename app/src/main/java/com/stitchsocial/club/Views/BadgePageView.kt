@@ -143,7 +143,11 @@ fun BadgePageView(
             }
         }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF07070B))) {
+    // Themed: this screen reads AppTheme.colors.textPrimary in 14 places, so a
+// hardcoded dark page put near-black text on a near-black background in
+// light mode — the same fault as Search. The badge art carries its own dark
+// disc, so the crests still read against a light page.
+    Column(modifier = Modifier.fillMaxSize().background(AppTheme.colors.bg)) {
 
         // Header
         Row(
@@ -443,7 +447,7 @@ private fun LockedCard(def: BadgeDefinition, onTap: () -> Unit) {
             .width(130.dp)
             .height(160.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF08080C))
+            .background(AppTheme.colors.surface)
             .border(1.5.dp, def.rarity.uiColor.copy(alpha = def.rarity.ringOpacity), RoundedCornerShape(20.dp))
             .clickable { onTap() }
     ) {
@@ -476,7 +480,7 @@ private fun InProgressCard(progress: BadgeProgress, onTap: () -> Unit) {
             .width(220.dp)
             .height(120.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF0C0C12))
+            .background(AppTheme.colors.surfaceStrong)
             .border(1.dp, AppTheme.colors.surfaceStrong, RoundedCornerShape(16.dp))
             .clickable { onTap() }
             .padding(12.dp)

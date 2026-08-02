@@ -477,7 +477,7 @@ fun NotificationViewComplete(
                                                     .fillMaxWidth()
                                                     .height(200.dp)
                                                     .clip(RoundedCornerShape(12.dp))
-                                                    .background(Color(0xFF2C2C2E)),
+                                                    .background(AppTheme.colors.surfaceStrong),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 val gridImgUrl = video.thumbnailURL
@@ -861,7 +861,10 @@ private fun NotificationRow(
     ) {
         Row(
             modifier = Modifier
-                .padding(16.dp)
+                // 16dp on every side plus a 40dp avatar made each row a block.
+                // Tighter vertical rhythm fits ~2 more notifications per screen
+                // without shrinking the tap target below 48dp.
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -882,7 +885,7 @@ private fun NotificationRow(
                             .build(),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF3C3C3E)),
                         contentScale = ContentScale.Crop
@@ -891,7 +894,7 @@ private fun NotificationRow(
                     // Letter fallback
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF6C5CE7)),
                         contentAlignment = Alignment.Center
