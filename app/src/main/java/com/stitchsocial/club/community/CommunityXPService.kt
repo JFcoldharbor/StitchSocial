@@ -39,6 +39,13 @@ class CommunityXPService private constructor() {
     private val _lastLevelUp = MutableStateFlow<LevelUpEvent?>(null)
     val lastLevelUp: StateFlow<LevelUpEvent?> = _lastLevelUp.asStateFlow()
 
+    /**
+     * Cleared by the toast once it's been shown. Without this the event
+     * sticks and the toast either never re-triggers for the next level or
+     * reappears on every recomposition.
+     */
+    fun clearLastLevelUp() { _lastLevelUp.value = null }
+
     private val _lastBadgeUnlock = MutableStateFlow<CommunityBadgeDefinition?>(null)
     val lastBadgeUnlock: StateFlow<CommunityBadgeDefinition?> = _lastBadgeUnlock.asStateFlow()
 

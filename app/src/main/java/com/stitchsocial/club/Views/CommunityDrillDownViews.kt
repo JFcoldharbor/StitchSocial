@@ -263,6 +263,14 @@ private fun LeaderboardRow(
 fun BadgeGalleryViewV2(
     currentLevel: Int,
     earnedBadgeIDs: List<String>,
+    /**
+     * Level for the PERK ladder, which is not the same question as badges.
+     * Badges are earned, so they read the raw level; perks can be granted, so an
+     * owner holding privileges genuinely has them and shouldn't be shown a list
+     * of locks for things they can already do. Defaults to currentLevel so every
+     * other caller is unaffected.
+     */
+    featureLevel: Int = currentLevel,
     onDismiss: () -> Unit,
 ) {
     val allBadges = remember { CommunityBadgeDefinition.allBadges }
@@ -321,6 +329,12 @@ fun BadgeGalleryViewV2(
                 fontWeight = FontWeight.SemiBold,
             )
         }
+
+        // The perk ladder. Badges are cosmetic; this is the part that says what
+        // levelling actually GETS you, and it lists only perks that exist.
+        Spacer(Modifier.height(8.dp))
+        com.stitchsocial.club.community.FeatureUnlockLadder(currentLevel = featureLevel)
+        Spacer(Modifier.height(8.dp))
 
         // Grid
         LazyVerticalGrid(

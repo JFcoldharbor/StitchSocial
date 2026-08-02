@@ -231,6 +231,22 @@ enum class CommunityFeatureGate(val requiredLevel: Int, val displayName: String)
     CO_HOST_LIVE(850, "Co-Host Lives"),
     COMMUNITY_WALL(950, "Community Wall"),
     IMMORTAL_STATUS(1000, "Immortal Status");
+
+    /**
+     * Whether this perk actually DOES anything today.
+     *
+     * Only two of the twenty-one are wired to real behaviour. Announcing
+     * "Unlocked · Animated Border" at level 150 when no such feature exists is
+     * worse than saying nothing — it's a specific, checkable promise the member
+     * will go looking for and won't find. iOS parity.
+     */
+    val isLive: Boolean
+        get() = this == VIDEO_CLIPS || this == MOD_ELIGIBLE
+
+    companion object {
+        /** The perks we can honestly promise. */
+        val live: List<CommunityFeatureGate> get() = entries.filter { it.isLive }
+    }
 }
 
 // MARK: - Community XP Curve

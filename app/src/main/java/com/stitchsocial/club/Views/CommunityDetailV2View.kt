@@ -84,6 +84,8 @@ import com.google.firebase.firestore.Query
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.community.CommunityListItem
 import com.stitchsocial.club.community.CommunityMembership
+import com.stitchsocial.club.community.CommunityXPService
+import com.stitchsocial.club.community.LevelUpToastHost
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.live.VideoComment
 import com.stitchsocial.club.community.CommunityPost
@@ -359,6 +361,7 @@ fun CommunityDetailV2View(
         if (showingBadges) {
             BadgeGalleryViewV2(
                 currentLevel = membership?.level ?: 1,
+                featureLevel = membership?.effectiveFeatureLevel ?: 1,
                 earnedBadgeIDs = membership?.earnedBadgeIDs ?: emptyList(),
                 onDismiss = { showingBadges = false },
             )
@@ -402,6 +405,14 @@ fun CommunityDetailV2View(
                 goLiveMessage = goLiveMessage ?: "",
                 onDismiss = { showingGoLive = false; goLiveMessage = null },
             )
+        }
+
+        // Progression had no voice: CommunityXPService has always published
+        // level-ups to `lastLevelUp` and nothing anywhere read it. Mounted last
+        // so it draws above the community content, but inside the root Box so
+        // it doesn't cover a live stream or the recorder.
+        if (!showingGoLive && !showingLiveStream) {
+            LevelUpToastHost(CommunityXPService.shared)
         }
     }
 
