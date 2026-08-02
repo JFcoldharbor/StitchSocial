@@ -133,6 +133,10 @@ class MainActivity : ComponentActivity() {
         // ✅ NEW: Request notification permission (Android 13+)
         requestNotificationPermission()
 
+        // Consent first, THEN the Ads SDK — see AdMobBootstrap. Started from the
+        // Activity because a consent form is a dialog and needs one.
+        com.stitchsocial.club.ads.AdMobBootstrap.start(this)
+
         enableEdgeToEdge()
 
         WindowCompat.setDecorFitsSystemWindows(window, false)

@@ -150,6 +150,9 @@ fun CommunityDetailV2View(
     // for, and reading the community's creatorTier would answer about the
     // wrong person entirely.
     var viewerTier by remember { mutableStateOf<UserTier?>(null) }
+    // Ad-free is a paid perk — resolved once, defaults to SHOWING ads so a
+    // failed lookup can't accidentally give the product away.
+    var viewerHasNoAds by remember { mutableStateOf(false) }
     // null = prompt not answered yet; "" = answered with the default.
     // Nullable rather than a second boolean so the two states can't drift.
     var goLiveMessage by remember { mutableStateOf<String?>(null) }
@@ -327,6 +330,17 @@ fun CommunityDetailV2View(
                                 }
                             },
                             onCompose = { onRecordClip(communityID, null) },
+                            // The ROOM's owner earns, split by THEIR tier — not
+                            // the viewer's, who is just watching.
+                            adOwner = com.stitchsocial.club.ads.AdConfig.ImpressionOwner(
+                                type = com.stitchsocial.club.ads.AdConfig.OwnerType.CREATOR,
+                                creatorID = communityID,
+                                tier = com.stitchsocial.club.foundation.UserTier
+                                    .fromRawValue(communityItem.creatorTier)
+                            ),
+                            // Subscribers bought ad-free; delivering ads anyway
+                            // is selling something we don't hand over.
+                            adsEnabled = !viewerHasNoAds,
                         )
                     }
                 }
@@ -526,6 +540,10 @@ private fun CommunityThreadsTab(
     onSelectPost: (CommunityPost) -> Unit,
     onHype: (CommunityPost) -> Unit,
     onCompose: () -> Unit,
+    /** Community inventory is CREATOR-owned — the room's owner earns, split by
+     *  their tier — matching the iOS ownership map. */
+    adOwner: com.stitchsocial.club.ads.AdConfig.ImpressionOwner? = null,
+    adsEnabled: Boolean = true,
 ) {
     if (posts.isEmpty()) {
         Column(
@@ -566,6 +584,20 @@ private fun CommunityThreadsTab(
                 onHype = { onHype(post) },
                 onTap = { onSelectPost(post) },
             )
+        }
+
+        // Partner card, LAST in the scroll. Deliberately not interleaved between
+        // posts: an ad spliced into a conversation reads as a post, which is
+        // both worse for the member and a policy problem — sponsored content
+        // has to be distinguishable from content.
+        if (adOwner != null && adsEnabled) {
+            item {
+                com.stitchsocial.club.ads.NativeAdCard(
+                    unitId = com.stitchsocial.club.ads.AdConfig.NativeUnit.community,
+                    owner = adOwner,
+                    placement = "community_partner_card",
+                )
+            }
         }
     }
 }

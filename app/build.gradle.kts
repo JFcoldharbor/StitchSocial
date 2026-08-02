@@ -178,6 +178,12 @@ dependencies {
     // Used by VideoExportService (caption burn-in) and ReactionCompositor
     // (split-screen / PiP). 1.4+ exposes VideoCompositorSettings.
     implementation("androidx.media3:media3-transformer:1.4.1")
+
+    // Google Mobile Ads (AdMob) + the User Messaging Platform SDK it needs for
+    // consent. UMP is not optional: serving personalised ads in the EEA/UK
+    // without a consent form is a policy violation, and Google gates fill on it.
+    implementation("com.google.android.gms:play-services-ads:23.6.0")
+    implementation("com.google.android.ump:user-messaging-platform:3.1.0")
     implementation("androidx.media3:media3-effect:1.4.1")
 
     // 1.4.0+ fixes 16 KB alignment in libimage_processing_util_jni.so.
