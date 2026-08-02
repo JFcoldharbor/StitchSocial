@@ -555,7 +555,10 @@ class NotificationService {
 
             StitchNotification(
                 id = doc.id,
-                type = parseNotificationType(data["type"] as? String),
+                type = StitchNotificationType.resolve(
+                    data["type"] as? String,
+                    data["payload"] as? Map<*, *>
+                ),
                 title = (data["title"] as? String) ?: "",
                 message = (data["message"] as? String) ?: "",
                 senderID = (data["senderID"] as? String) ?: "",
@@ -570,23 +573,6 @@ class NotificationService {
             )
         } catch (e: Exception) {
             null
-        }
-    }
-
-    private fun parseNotificationType(typeString: String?): StitchNotificationType {
-        return when (typeString?.lowercase()) {
-            "hype" -> StitchNotificationType.HYPE
-            "cool" -> StitchNotificationType.COOL
-            "reply" -> StitchNotificationType.REPLY
-            "follow" -> StitchNotificationType.FOLLOW
-            "mention" -> StitchNotificationType.MENTION
-            "share" -> StitchNotificationType.SHARE
-            "milestone" -> StitchNotificationType.MILESTONE
-            "tier_upgrade" -> StitchNotificationType.TIER_UPGRADE
-            "spinoff" -> StitchNotificationType.SPIN_OFF
-            "tip" -> StitchNotificationType.TIP
-            "system" -> StitchNotificationType.SYSTEM
-            else -> StitchNotificationType.SYSTEM
         }
     }
 
@@ -639,7 +625,18 @@ enum class StitchNotificationType(val rawValue: String) {
      * notifyOnQuestionPosted Cloud Function. Payload includes
      * videoID, threadID, and the tag list that triggered the match.
      */
-    QUESTION("question");
+    QUESTION("question"),
+
+    // Types iOS writes that Android had no case for, so every one of them
+    // decoded to SYSTEM and rendered as a gray gear.
+    GO_LIVE("go_live"),
+    COMMUNITY_POST("community_post"),
+    COMMUNITY_XP("community_xp"),
+    SUBSCRIPTION("subscription"),
+    NEW_VIDEO("newVideo"),
+    RSVP("rsvp"),
+    BADGE("badge"),
+    STREAK("streak");
 
     val displayName: String
         get() = when (this) {
@@ -655,6 +652,14 @@ enum class StitchNotificationType(val rawValue: String) {
             TIP -> "Tip"
             SYSTEM -> "System"
             QUESTION -> "Question"
+            GO_LIVE -> "Live"
+            COMMUNITY_POST -> "Community Post"
+            COMMUNITY_XP -> "Community XP"
+            SUBSCRIPTION -> "Subscription"
+            NEW_VIDEO -> "New Video"
+            RSVP -> "RSVP"
+            BADGE -> "Badge"
+            STREAK -> "Streak"
         }
 
     val iconName: String
@@ -671,5 +676,42 @@ enum class StitchNotificationType(val rawValue: String) {
             TIP -> "monetization_on"
             SYSTEM -> "info"
             QUESTION -> "help_outline"
+            GO_LIVE -> "sensors"
+            COMMUNITY_POST -> "forum"
+            COMMUNITY_XP -> "trending_up"
+            SUBSCRIPTION -> "card_membership"
+            NEW_VIDEO -> "video_library"
+            RSVP -> "event_available"
+            BADGE -> "military_tech"
+            STREAK -> "local_fire_department"
         }
+
+    companion object {
+        /**
+         * Decode the stored type, resolving the aliases the backend actually
+         * writes (iOS parity with StitchNotificationType.resolve).
+         *
+         * hype AND cool are both written as "engagement", with the real kind in
+         * payload.engagementType, and a stitch is written as "stitch" — none of
+         * which are rawValues here. They fell through to SYSTEM, so every hype
+         * and cool notification (the two most common kinds there are) showed the
+         * generic gear icon.
+         */
+        fun resolve(rawType: String?, payload: Map<*, *>? = null): StitchNotificationType {
+            val raw = rawType?.trim() ?: return SYSTEM
+            when (raw.lowercase()) {
+                "engagement" -> {
+                    val kind = (payload?.get("engagementType") as? String)?.lowercase()
+                    return if (kind == "cool") COOL else HYPE
+                }
+                "stitch" -> return REPLY
+            }
+            // Direct match. Case-insensitive EXCEPT that rawValues like
+            // "newVideo" are camelCase, so compare both ways rather than
+            // lowercasing the table.
+            return entries.firstOrNull { it.rawValue == raw }
+                ?: entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) }
+                ?: SYSTEM
+        }
+    }
 }

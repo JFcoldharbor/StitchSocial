@@ -79,6 +79,7 @@ import com.stitchsocial.club.services.AnnouncementService
 import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.views.AnnouncementOverlayView
 import com.stitchsocial.club.community.CommunityListItem
+import com.stitchsocial.club.community.CommunityService
 import com.stitchsocial.club.BuildConfig
 
 
@@ -446,6 +447,40 @@ fun MainScreen() {
                     }
                 }
                 // Milestone → notifications tab
+                // Going live now writes a real notification (LiveStreamService
+                // .sendGoLiveNotification). Without this branch the push
+                // arrived, showed, and did nothing when tapped.
+                "go_live" -> {
+                    val communityID = intent.getStringExtra("communityID")
+                        ?: intent.getStringExtra("community_id")
+                        ?: userId   // the sender IS the community owner
+                    if (communityID != null) {
+                        Log.d("STITCH_MAIN", "📱 Go-live tap -> community $communityID")
+                        scope.launch {
+                            val community = CommunityService.shared.fetchCommunity(communityID)
+                            if (community != null) {
+                                selectedCommunityItem = CommunityListItem(
+                                    id = community.id,
+                                    creatorUsername = community.creatorUsername,
+                                    creatorDisplayName = community.creatorDisplayName,
+                                    creatorTier = community.creatorTier,
+                                    profileImageURL = community.profileImageURL,
+                                    memberCount = community.memberCount,
+                                    userLevel = 0, userXP = 0, unreadCount = 0,
+                                    lastActivityPreview = "",
+                                    lastActivityAt = java.util.Date(),
+                                    // The whole reason for the tap.
+                                    isCreatorLive = true,
+                                    isVerified = false
+                                )
+                                isShowingCommunity = true
+                            } else {
+                                selectedTab = MainAppTab.NOTIFICATIONS
+                            }
+                        }
+                    }
+                }
+
                 "milestone" -> {
                     // Milestones with videoID → ThreadView, otherwise → tab
                     val resolvedThreadID = threadId ?: videoId
