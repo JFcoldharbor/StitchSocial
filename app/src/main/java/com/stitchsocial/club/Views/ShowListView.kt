@@ -102,10 +102,10 @@ fun ShowListView(
 
         // New show sheet
         if (showingNewShow) {
-            ShowEditorOverlay(
-                show = Show.newDraft(creatorID, creatorName),
+            ShowSettingsView(
+                initial = Show.newDraft(creatorID, creatorName),
                 isNew = true,
-                onSave = { vm.insertShow(it); showingNewShow = false },
+                onSaved = { vm.insertShow(it); showingNewShow = false },
                 onDismiss = { showingNewShow = false }
             )
         }
@@ -132,10 +132,10 @@ fun ShowListView(
         // redesigned settings) isn't ported yet, and an unreachable settings
         // screen is worse than an unfashionable one.
         settingsFor?.let { show ->
-            ShowEditorOverlay(
-                show = show,
+            ShowSettingsView(
+                initial = show,
                 isNew = false,
-                onSave = { vm.updateShow(it); settingsFor = null },
+                onSaved = { vm.updateShow(it) },
                 onDismiss = { settingsFor = null }
             )
         }
@@ -240,126 +240,6 @@ private fun ShowRowCard(show: Show, onTap: () -> Unit) {
             Spacer(Modifier.height(2.dp))
             Text("${show.seasonCount} season${if (show.seasonCount != 1) "s" else ""}",
                 color = Color.Gray, fontSize = 10.sp)
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// MARK: - ShowEditorOverlay
-// ─────────────────────────────────────────────────────────────────────
-
-@Composable
-fun ShowEditorOverlay(
-    show: Show,
-    isNew: Boolean,
-    onSave: (Show) -> Unit,
-    onDismiss: () -> Unit,
-    vm: ShowEditorViewModel = viewModel()
-) {
-    val currentShow by vm.show.collectAsStateWithLifecycle()
-    val scheduleConfig by vm.scheduleConfig.collectAsStateWithLifecycle()
-    val isSaving by vm.isSaving.collectAsStateWithLifecycle()
-    val seasons by vm.seasons.collectAsStateWithLifecycle()
-
-    LaunchedEffect(show.id) { vm.init(show, isNew) }
-
-    Box(
-        Modifier.fillMaxSize().zIndex(200f).background(Color.Black)
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            // Top bar
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray, fontSize = 15.sp) }
-                Text(if (isNew) "New Show" else "Edit Show",
-                    color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                TextButton(
-                    onClick = { vm.save { onSave(it) } },
-                    enabled = !isSaving
-                ) {
-                    Text(if (isSaving) "Saving..." else "Save", color = Color(0xFFFF2D55), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            Divider(color = Color.White.copy(alpha = 0.06f))
-
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 40.dp)
-            ) {
-                // Metadata
-                item { ShowMetadataSection(vm) }
-
-                // Release Schedule
-                item {
-                    ReleaseScheduleSection(
-                        config = scheduleConfig,
-                        onConfigChange = { vm.updateScheduleConfig(it) },
-                        onPersist = { currentShow?.let { s -> vm.persistSchedule(s.id) } }
-                    )
-                }
-
-                // Seasons
-                item {
-                    SeasonsSection(
-                        seasons = seasons,
-                        onAddSeason = { vm.addSeason() },
-                        onDeleteSeason = { vm.deleteSeason(it) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShowMetadataSection(vm: ShowEditorViewModel) {
-    val show by vm.show.collectAsStateWithLifecycle()
-    val s = show ?: return
-
-    Column(
-        Modifier.fillMaxWidth().padding(16.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("Title", fontSize = 10.sp, color = Color.Gray)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = s.title, onValueChange = { vm.updateShowField { c -> c.copy(title = it) } },
-                    placeholder = { Text("Show title...", color = Color.Gray, fontSize = 13.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.Cyan, unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                        focusedContainerColor = Color.White.copy(alpha = 0.06f),
-                        unfocusedContainerColor = Color.White.copy(alpha = 0.06f)
-                    ),
-                    singleLine = true, modifier = Modifier.fillMaxWidth(), textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
-                )
-            }
-        }
-
-        // Status picker
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ShowStatus.values().filter { it != ShowStatus.REMOVED }.forEach { status ->
-                val selected = s.status == status
-                FilterChip(
-                    selected = selected,
-                    onClick = { vm.updateShowField { c -> c.copy(status = status) } },
-                    label = { Text(status.displayName, fontSize = 11.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Color(0xFFFF2D55),
-                        selectedLabelColor = Color.White,
-                        containerColor = Color.White.copy(alpha = 0.08f),
-                        labelColor = Color.Gray
-                    )
-                )
-            }
         }
     }
 }
