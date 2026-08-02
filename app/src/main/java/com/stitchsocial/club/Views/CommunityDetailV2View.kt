@@ -84,6 +84,8 @@ import com.google.firebase.firestore.Query
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.community.CommunityListItem
 import com.stitchsocial.club.community.CommunityMembership
+import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.live.VideoComment
 import com.stitchsocial.club.community.CommunityPost
 import com.stitchsocial.club.community.CommunityPostType
 import kotlinx.coroutines.launch
@@ -141,6 +143,14 @@ fun CommunityDetailV2View(
     val scope = rememberCoroutineScope()
 
     var membership by remember { mutableStateOf<CommunityMembership?>(null) }
+    // The VIEWER's account tier — deliberately not the room owner's. An
+    // Ambassador visiting someone else's community is the case this exists
+    // for, and reading the community's creatorTier would answer about the
+    // wrong person entirely.
+    var viewerTier by remember { mutableStateOf<UserTier?>(null) }
+    // null = prompt not answered yet; "" = answered with the default.
+    // Nullable rather than a second boolean so the two states can't drift.
+    var goLiveMessage by remember { mutableStateOf<String?>(null) }
     var topMembers by remember { mutableStateOf<List<CommunityMembership>>(emptyList()) }
     var posts by remember { mutableStateOf<List<CommunityPost>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -225,6 +235,12 @@ fun CommunityDetailV2View(
             if (memDoc.exists()) {
                 membership = parseMembership(memDoc.id, memDoc.data ?: emptyMap())
             }
+
+            viewerTier = runCatching {
+                val raw = db.collection("users").document(userID).get().await()
+                    .getString("tier") ?: "rookie"
+                UserTier.fromRawValue(raw)
+            }.getOrNull()
 
             val membersSnap = db.collection("communities").document(communityID)
                 .collection("members")
@@ -364,18 +380,27 @@ fun CommunityDetailV2View(
                 // effectiveFeatureLevel or an owner — real level 1 since
                 // privileges no longer inflate it — can't reply in their OWN
                 // room. This exact line is what broke on iOS.
-                userLevel = membership?.effectiveFeatureLevel ?: 1,
+                userLevel = liveFeatureLevel(membership, viewerTier),
                 userUsername = membership?.username ?: "user",
                 userDisplayName = membership?.displayName ?: membership?.username ?: "User",
                 onDismiss = { showingLiveStream = false },
             )
         }
-        if (showingGoLive && isCreator) {
+        // Compose the invite BEFORE the camera opens — see GoLivePromptSheet.
+        if (showingGoLive && isCreator && goLiveMessage == null) {
+            com.stitchsocial.club.live.GoLivePromptSheet(
+                memberCount = communityItem.memberCount,
+                onGoLive = { goLiveMessage = it },
+                onCancel = { showingGoLive = false }
+            )
+        }
+        if (showingGoLive && isCreator && goLiveMessage != null) {
             com.stitchsocial.club.live.LiveStreamCreatorScreen(
                 creatorID = communityID,
                 creatorUsername = membership?.username ?: communityItem.creatorUsername,
                 creatorDisplayName = membership?.displayName ?: communityItem.creatorDisplayName,
-                onDismiss = { showingGoLive = false },
+                goLiveMessage = goLiveMessage ?: "",
+                onDismiss = { showingGoLive = false; goLiveMessage = null },
             )
         }
     }
@@ -1094,4 +1119,24 @@ private fun formatShort(n: Int): String = when {
     n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
     n >= 1_000 -> "%.1fK".format(n / 1_000.0)
     else -> n.toString()
+}
+
+/**
+ * Level handed to the live viewer for its video-reply gate.
+ *
+ * Was the raw `membership.level`, which meant an Ambassador — or the community's
+ * own owner, once privileges stopped inflating level — couldn't send a video
+ * reply until they'd ground to the gate in that specific room.
+ *
+ * Ambassador+ is a global rank, so it satisfies a per-community gate the same
+ * way the Spark grant satisfies the stream-duration ladder.
+ */
+private fun liveFeatureLevel(
+    membership: CommunityMembership?,
+    viewerTier: UserTier?
+): Int {
+    val base = membership?.effectiveFeatureLevel ?: 1
+    return if (viewerTier?.unlocksVideoReplies == true) {
+        maxOf(base, VideoComment.MINIMUM_LEVEL)
+    } else base
 }

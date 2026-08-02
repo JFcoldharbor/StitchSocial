@@ -59,6 +59,8 @@ fun LiveStreamCreatorScreen(
     creatorUsername: String,
     creatorDisplayName: String,
     tier: StreamDurationTier = StreamDurationTier.SPARK,
+    /** Composed in GoLivePromptSheet before this screen is shown. */
+    goLiveMessage: String = "",
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -105,6 +107,7 @@ fun LiveStreamCreatorScreen(
             creatorUsername = creatorUsername,
             creatorDisplayName = creatorDisplayName,
             tier = tier,
+            goLiveMessage = goLiveMessage,
         )
         if (stream == null) {
             startError = "Failed to start stream. Check your connection and try again."

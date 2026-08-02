@@ -127,6 +127,24 @@ enum class UserTier(val rawValue: String) {
     val isFounderTier: Boolean
         get() = this == FOUNDER || this == CO_FOUNDER
 
+    /** Ambassador and above. Business is excluded, as everywhere else. */
+    val isAmbassadorOrHigher: Boolean
+        get() = when (this) {
+            AMBASSADOR, ELITE, PARTNER, LEGENDARY, TOP_CREATOR, FOUNDER, CO_FOUNDER -> true
+            ROOKIE, RISING, VETERAN, INFLUENCER, BUSINESS -> false
+        }
+
+    /**
+     * Video replies in a live stream, in ANY community.
+     *
+     * The gate (VideoComment.MINIMUM_LEVEL) is a COMMUNITY level, and community
+     * level restarts at 1 in every room you join — so an Ambassador walking into
+     * someone else's community couldn't reply, despite the rank being the
+     * earning. Same reasoning as the Ambassador Spark grant on stream duration.
+     */
+    val unlocksVideoReplies: Boolean
+        get() = isAmbassadorOrHigher
+
     val isBusinessAccount: Boolean
         get() = this == BUSINESS
 

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.stitchsocial.club.BuildConfig
 
 /**
  * Singleton backing the live-stream module on Android. Mirrors the iOS
@@ -93,6 +94,61 @@ class LiveStreamService private constructor() {
     // the previous listener is detached first.
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Tell the community a stream just started (iOS parity with
+     * LiveStreamService.sendGoLiveNotification).
+     *
+     * Best-effort: a failure here must never fail the stream itself, which is
+     * already live by the time this runs. Capped at 200 members because this is
+     * a client-side fan-out — beyond that it belongs in a Cloud Function. Same
+     * limit iOS uses.
+     */
+    private suspend fun sendGoLiveNotification(
+        creatorID: String,
+        streamID: String,
+        message: String
+    ) {
+        try {
+            val communityDoc = db.collection("communities").document(creatorID).get().await()
+            val displayName = communityDoc.getString("creatorDisplayName")
+                ?: communityDoc.getString("creatorUsername")
+                ?: "Creator"
+
+            val membersSnap = db.collection("communities").document(creatorID)
+                .collection("members")
+                .limit(200)
+                .get().await()
+
+            val batch = db.batch()
+            for (doc in membersSnap.documents) {
+                val memberID = doc.id
+                if (memberID == creatorID) continue
+
+                val notifRef = db.collection("notifications").document()
+                batch.set(notifRef, mapOf(
+                    "id" to notifRef.id,
+                    "recipientID" to memberID,
+                    "senderID" to creatorID,
+                    "type" to "go_live",
+                    "title" to "\uD83D\uDD34 $displayName is LIVE!",
+                    "message" to message.trim().ifBlank { "Tap to join the stream" },
+                    "payload" to mapOf(
+                        "communityID" to creatorID,
+                        "streamID" to streamID
+                    ),
+                    "isRead" to false,
+                    "createdAt" to FieldValue.serverTimestamp()
+                ))
+            }
+            batch.commit().await()
+            if (BuildConfig.DEBUG) {
+                println("go-live notification sent to ${membersSnap.size()} members")
+            }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("go-live notification failed - ${e.message}") }
+        }
+    }
+
     fun listenToStream(creatorID: String, streamID: String) {
         removeStreamListener()
 
@@ -153,6 +209,12 @@ class LiveStreamService private constructor() {
         creatorUsername: String,
         creatorDisplayName: String,
         tier: StreamDurationTier = StreamDurationTier.SPARK,
+        /**
+         * What the creator wants their community to show up FOR. Blank falls
+         * back to the generic line — a creator who just wants to start isn't
+         * held up by a text field.
+         */
+        goLiveMessage: String = "",
     ): LiveStream? {
         val streamID = java.util.UUID.randomUUID().toString()
         val now = Timestamp.now()
@@ -191,6 +253,12 @@ class LiveStreamService private constructor() {
                     "activeStreamID" to streamID,
                 )
             ).await()
+
+            // Members were NEVER told a stream started on Android — the whole
+            // notification was missing, not just the message. Sent after the
+            // community doc flips, so nobody is invited to a stream that isn't
+            // discoverable yet.
+            sendGoLiveNotification(creatorID, streamID, goLiveMessage)
 
             val stream = LiveStream.fromDoc(streamID, payload)
             _activeStream.value = stream
