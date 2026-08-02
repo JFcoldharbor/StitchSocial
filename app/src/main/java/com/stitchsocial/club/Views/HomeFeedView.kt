@@ -550,7 +550,15 @@ private fun ThreadVideoCard(
         if (videoCount > 1 && isCurrentPage) {
             VideoNavigationPeeks(
                 allVideos = allVideos,
-                currentVideoIndex = currentIndex
+                currentVideoIndex = currentIndex,
+                // Tap does exactly what the swipe does — same index move, so the
+                // two gestures can't drift apart.
+                onTapPrevious = {
+                    if (currentIndex > 0) currentIndex -= 1
+                },
+                onTapNext = {
+                    if (currentIndex < allVideos.size - 1) currentIndex += 1
+                }
             )
         }
 

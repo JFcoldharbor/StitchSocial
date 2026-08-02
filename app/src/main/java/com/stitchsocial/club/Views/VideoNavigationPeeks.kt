@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -36,7 +37,19 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 fun VideoNavigationPeeks(
     allVideos: List<CoreVideoMetadata>,
     currentVideoIndex: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * Tapping a peek navigates to that stitch (iOS parity).
+     *
+     * The peeks were purely visual, so anyone who TAPPED one — rather than
+     * guessing that the gesture is a swipe — got nothing at all. A card that
+     * pulses to draw the eye and then ignores the eye's owner is worse than no
+     * card.
+     *
+     * Null keeps them visual-only, so existing callers are unaffected.
+     */
+    onTapPrevious: (() -> Unit)? = null,
+    onTapNext: (() -> Unit)? = null
 ) {
     val previousVideo = if (currentVideoIndex > 0) allVideos[currentVideoIndex - 1] else null
     val nextVideo = if (currentVideoIndex < allVideos.size - 1) allVideos[currentVideoIndex + 1] else null
@@ -68,6 +81,7 @@ fun VideoNavigationPeeks(
                 video = previousVideo,
                 isLeft = true,
                 pulseAlpha = pulseAlpha,
+                onTap = onTapPrevious,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .padding(start = 8.dp)
@@ -80,6 +94,7 @@ fun VideoNavigationPeeks(
                 video = nextVideo,
                 isLeft = false,
                 pulseAlpha = pulseAlpha,
+                onTap = onTapNext,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 8.dp)
@@ -93,6 +108,7 @@ private fun NavigationPeekCard(
     video: CoreVideoMetadata,
     isLeft: Boolean,
     pulseAlpha: Float,
+    onTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val borderColors = if (isLeft) {
@@ -106,6 +122,12 @@ private fun NavigationPeekCard(
             .width(45.dp)
             .height(80.dp)
             .clip(RoundedCornerShape(8.dp))
+            // Scoped to the 45x80 card only. The empty centre must keep passing
+            // taps through to the video underneath — that's the mute/play tap,
+            // and swallowing it would trade one broken gesture for another.
+            .then(
+                if (onTap != null) Modifier.clickable { onTap() } else Modifier
+            )
             .background(
                 Brush.linearGradient(
                     colors = listOf(

@@ -825,6 +825,21 @@ private fun FullscreenThreadPlayer(
         VideoNavigationPeeks(
             allVideos = videos,
             currentVideoIndex = pagerState.currentPage,
+            // animateScrollToPage, not scrollToPage — a tap should land with the
+            // same motion the swipe produces, or the two read as different
+            // features.
+            onTapPrevious = {
+                scope.launch {
+                    val target = pagerState.currentPage - 1
+                    if (target >= 0) pagerState.animateScrollToPage(target)
+                }
+            },
+            onTapNext = {
+                scope.launch {
+                    val target = pagerState.currentPage + 1
+                    if (target < videos.size) pagerState.animateScrollToPage(target)
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(5f)
