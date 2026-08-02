@@ -262,6 +262,73 @@ class AuthService {
         }
     }
 
+    /**
+     * Delete the account for good (iOS parity with AuthService.deleteAccount).
+     *
+     * Android had NO account deletion at all — not a broken one, none. Google
+     * Play requires an in-app path to delete an account for any app that lets
+     * you create one, so this was a store-policy gap as much as a parity gap.
+     *
+     * Re-auth first: Firebase requires a recent credential for destructive
+     * operations, and without it the callable fails on stale sessions only —
+     * which is the hardest kind of bug to reproduce.
+     *
+     * A THROW FROM THE CALLABLE DOES NOT MEAN THE DELETION FAILED. The server
+     * scrubs cross-collection data and deletes the Auth user LAST, and that user
+     * is the credential the call is authenticated with — so the response can
+     * fail to return on a deletion that fully succeeded. iOS shipped exactly
+     * that bug: accounts were wiped while the user was shown an error. Verify
+     * against reality before believing the error.
+     */
+    suspend fun deleteAccount(password: String? = null) {
+        val user = auth.currentUser ?: throw IllegalStateException("Not signed in")
+
+        // Step 1: re-authenticate where we can. Google/Apple sessions have no
+        // password to supply; the callable will reject a stale token itself.
+        if (!password.isNullOrBlank()) {
+            val email = user.email
+            if (!email.isNullOrBlank()) {
+                val cred = com.google.firebase.auth.EmailAuthProvider.getCredential(email, password)
+                user.reauthenticate(cred).await()
+            }
+        }
+
+        // Step 2: server-side scrub. Admin SDK is required because client rules
+        // can't cascade across collections.
+        try {
+            com.google.firebase.functions.FirebaseFunctions.getInstance("us-central1")
+                .getHttpsCallable("requestAccountDeletion")
+                .call()
+                .await()
+        } catch (e: Exception) {
+            if (accountStillExists(user)) throw e     // genuinely failed
+            if (BuildConfig.DEBUG) {
+                println("AUTH SERVICE: call errored but the account is gone — treating as success")
+            }
+        }
+
+        // Step 3: local cleanup. The Auth user is already gone server-side;
+        // signOut is idempotent even when the underlying user no longer exists.
+        runCatching { auth.signOut() }
+        _authState.value = AuthState.SIGNED_OUT
+        if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ Account deletion complete") }
+    }
+
+    /**
+     * Whether the Auth user still exists server-side.
+     *
+     * reload() round-trips to Firebase: it succeeds while the account lives and
+     * throws once it's gone. That makes it the only honest way to tell "the
+     * delete failed" apart from "the delete worked and took our credential with
+     * it".
+     */
+    private suspend fun accountStillExists(user: FirebaseUser): Boolean = try {
+        user.reload().await()
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     // MARK: - Reset Password
 
     suspend fun resetPassword(email: String) {

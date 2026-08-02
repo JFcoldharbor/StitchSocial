@@ -126,6 +126,8 @@ fun SettingsView(
     var notificationsEnabled by remember { mutableStateOf(prefs.getBoolean("notificationsEnabled", true)) }
 
     var showSignOutDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var isDeleting by remember { mutableStateOf(false) }
     var isSigningOut by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
@@ -436,6 +438,30 @@ fun SettingsView(
                             Text("Sign Out", color = Color(0xFFFF453A), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                     }
+                    Spacer(Modifier.height(14.dp))
+
+                    // Play policy requires an in-app way to delete an account
+                    // for any app that lets you create one. Android had none.
+                    // Placed below Sign Out and styled quieter — destructive,
+                    // findable, not easy to hit by accident.
+                    TextButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isDeleting
+                    ) {
+                        if (isDeleting) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFFF453A),
+                                modifier = Modifier.size(16.dp), strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                "Delete Account",
+                                color = Color(0xFFFF453A).copy(alpha = 0.85f),
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(40.dp))
                 }
             }
@@ -589,6 +615,45 @@ fun SettingsView(
                 }
             }
         }
+    }
+
+    // ── Delete Account ────────────────────────────────────────────
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete account", color = AppTheme.colors.textPrimary) },
+            text = {
+                Text(
+                    "This deletes your account and everything in it — videos, " +
+                    "collections, coins and community history. It cannot be undone.",
+                    color = AppTheme.colors.textSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    isDeleting = true
+                    scope.launch {
+                        try {
+                            authService.deleteAccount()
+                            onSignOutSuccess()
+                        } catch (e: Exception) {
+                            // Only reached when the account genuinely still
+                            // exists — deleteAccount verifies before surfacing.
+                            errorMessage = "Couldn't delete the account: ${e.message}"
+                            showError = true
+                            isDeleting = false
+                        }
+                    }
+                }) { Text("Delete", color = Color(0xFFFF453A)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel", color = AppTheme.colors.textSecondary)
+                }
+            },
+            containerColor = AppTheme.colors.surface
+        )
     }
 
     // ── Sign Out Dialog (matches iOS .alert "Sign Out") ───────────
