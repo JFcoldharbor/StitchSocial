@@ -360,7 +360,11 @@ fun CommunityDetailV2View(
                 userID = userID,
                 communityID = communityID,
                 streamID = liveStreamID!!,
-                userLevel = membership?.level ?: 1,
+                // Feeds the live video-comment gate (Lv5+). Must be
+                // effectiveFeatureLevel or an owner — real level 1 since
+                // privileges no longer inflate it — can't reply in their OWN
+                // room. This exact line is what broke on iOS.
+                userLevel = membership?.effectiveFeatureLevel ?: 1,
                 userUsername = membership?.username ?: "user",
                 userDisplayName = membership?.displayName ?: membership?.username ?: "User",
                 onDismiss = { showingLiveStream = false },

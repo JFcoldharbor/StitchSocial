@@ -108,6 +108,16 @@ data class CommunityMembership(
     var level: Int = 1,
     var earnedBadgeIDs: List<String> = emptyList(),
     var isOwner: Boolean = false,
+    /**
+     * Unlocks every community feature WITHOUT touching [level].
+     *
+     * Owners used to be handed `level = 1000` to achieve this — but level is
+     * also the input to the live-stream duration ladder, so that silently
+     * unlocked every stream tier for every creator on day one, and pinned the
+     * owner at #1 in their own leaderboard forever. One field cannot be both a
+     * feature key (should be max) and an earned rank (should start at 1).
+     */
+    var hasOwnerPrivileges: Boolean = false,
     var isModerator: Boolean = false,
     var isBanned: Boolean = false,
     var lastActiveAt: Date = Date(),
@@ -124,10 +134,27 @@ data class CommunityMembership(
     val canPostVideoClips: Boolean get() = level >= 20
     val canDMCreator: Boolean get() = level >= 25
     val canAccessPrivateLive: Boolean get() = level >= 50
-    val canBeNominatedMod: Boolean get() = level >= 100
-    val canCoHostLive: Boolean get() = level >= 850
+    val canBeNominatedMod: Boolean get() = hasOwnerPrivileges || level >= 100
+    val canCoHostLive: Boolean get() = hasOwnerPrivileges || level >= 850
 
-    fun isUnlocked(feature: CommunityFeatureGate): Boolean = level >= feature.requiredLevel
+    /**
+     * Level to use when checking a FEATURE gate.
+     *
+     * Owner privileges exist so the person who built the room isn't locked out
+     * of it. Anything asking "is level N unlocked?" should read this, not
+     * [level] — otherwise splitting privileges from level (which is what revives
+     * the live-stream ladder) silently locks owners out of every gate that takes
+     * a raw Int. That's exactly what happened to live video replies on iOS.
+     *
+     * The stream DURATION ladder is the deliberate exception and reads [level]
+     * directly — duration is earned, features are granted.
+     */
+    val effectiveFeatureLevel: Int
+        get() = if (hasOwnerPrivileges) maxOf(level, 1000) else level
+
+    /** Owners get everything in their own room without grinding it. */
+    fun isUnlocked(feature: CommunityFeatureGate): Boolean =
+        hasOwnerPrivileges || level >= feature.requiredLevel
 
     companion object {
         fun fromFirestore(data: Map<String, Any>): CommunityMembership {
@@ -142,6 +169,11 @@ data class CommunityMembership(
                 level = (data["level"] as? Number)?.toInt() ?: 1,
                 earnedBadgeIDs = (data["earnedBadgeIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
                 isOwner = data["isOwner"] as? Boolean ?: false,
+                // Legacy members were written before this field existed. Falling
+                // back to isOwner keeps every community founder unlocked without
+                // a backfill — matches iOS.
+                hasOwnerPrivileges = data["hasOwnerPrivileges"] as? Boolean
+                    ?: (data["isOwner"] as? Boolean ?: false),
                 isModerator = data["isModerator"] as? Boolean ?: false,
                 isBanned = data["isBanned"] as? Boolean ?: false,
                 lastActiveAt = (data["lastActiveAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
@@ -164,6 +196,7 @@ data class CommunityMembership(
         put("localXP", localXP); put("level", level)
         put("earnedBadgeIDs", earnedBadgeIDs)
         put("isOwner", isOwner)
+        put("hasOwnerPrivileges", hasOwnerPrivileges)
         put("isModerator", isModerator); put("isBanned", isBanned)
         put("lastActiveAt", com.google.firebase.Timestamp(lastActiveAt))
         put("joinedAt", com.google.firebase.Timestamp(joinedAt))

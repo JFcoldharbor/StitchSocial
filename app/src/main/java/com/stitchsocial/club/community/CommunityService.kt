@@ -251,7 +251,11 @@ class CommunityService private constructor() {
                 if (isOwnCommunity) {
                     isOwner = true
                     isModerator = true
-                    level = 1000
+                    // Privileges, NOT level. `level` also drives the live-stream
+                    // duration ladder, so setting it to 1000 here unlocked every
+                    // stream tier on day one and pinned the owner at #1 in their
+                    // own leaderboard forever. iOS parity.
+                    hasOwnerPrivileges = true
                 }
             }
 
@@ -316,6 +320,19 @@ class CommunityService private constructor() {
 
     // MARK: - Fetch Membership (with XP/Level, cached)
 
+    /**
+     * Reads the user's tier to decide the founder grant above. Returns false on
+     * any failure — a missed grant shows a founder their real level, which is
+     * merely wrong; guessing true would hand out max level on a network blip.
+     */
+    private suspend fun isFounderTier(userID: String): Boolean = try {
+        val raw = db.collection("users").document(userID).get().await()
+            .getString("tier") ?: "rookie"
+        UserTier.fromRawValue(raw)?.isFounderTier ?: false
+    } catch (e: Exception) {
+        false
+    }
+
     suspend fun fetchMembership(userID: String, creatorID: String): CommunityMembership? {
         val cacheKey = "${userID}_${creatorID}"
         membershipCache[cacheKey]?.let { if (!it.isExpired) return it.value }
@@ -327,7 +344,32 @@ class CommunityService private constructor() {
 
         // Developer bypass — max level, all features unlocked (matches iOS)
         if (isDeveloper) {
-            membership = membership.copy(level = 1000, localXP = 999999, isModerator = true)
+            // Same split as above: unlock the features, leave the earned rank
+            // alone, so a developer account doesn't silently skip the stream
+            // duration ladder it's supposed to be testing.
+            membership = membership.copy(
+                hasOwnerPrivileges = true, localXP = 999999, isModerator = true
+            )
+        }
+
+        // FOUNDERS sit at 1000 in their OWN community — the max level, earned by
+        // building the thing. Deliberately narrower than the rule this replaces:
+        // that gave 1000 to EVERY community owner, which silently unlocked every
+        // live-stream duration tier for every creator on day one, because the
+        // stream gate reads this level. Founders having all tiers is the intent;
+        // every creator having them was the bug.
+        //
+        // Own community only (userID == creatorID), so a founder browsing someone
+        // else's room shows their real standing there and can't outrank the host.
+        //
+        // Applied on READ rather than written to the doc: needs no migration for
+        // existing memberships, and can't be left behind in Firestore if the
+        // tier ever changes.
+        if (userID == creatorID && isFounderTier(userID)) {
+            membership = membership.copy(
+                level = maxOf(membership.level, 1000),
+                hasOwnerPrivileges = true
+            )
         }
 
         membershipCache[cacheKey] = CachedItem(membership, System.currentTimeMillis(), membershipTTL)
@@ -372,7 +414,9 @@ class CommunityService private constructor() {
                         creatorTier = community.creatorTier,
                         profileImageURL = community.profileImageURL,
                         memberCount = community.memberCount,
-                        userLevel = membership?.level ?: 1,
+                        // effectiveFeatureLevel, not level — owners hold privileges
+                        // rather than a level, and this value feeds feature gates.
+                        userLevel = membership?.effectiveFeatureLevel ?: 1,
                         userXP = membership?.localXP ?: 0,
                         unreadCount = 0,
                         lastActivityPreview = "",
