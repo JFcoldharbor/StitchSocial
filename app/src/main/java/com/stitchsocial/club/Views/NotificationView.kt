@@ -53,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -861,10 +863,10 @@ private fun NotificationRow(
     ) {
         Row(
             modifier = Modifier
-                // 16dp on every side plus a 40dp avatar made each row a block.
-                // Tighter vertical rhythm fits ~2 more notifications per screen
-                // without shrinking the tap target below 48dp.
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                // Second pass — still reading as blocks. 12/8 around a 32dp
+                // avatar puts the row at ~48dp, the minimum tap target, so this
+                // is as tight as it can go without becoming un-tappable.
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -885,7 +887,7 @@ private fun NotificationRow(
                             .build(),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF3C3C3E)),
                         contentScale = ContentScale.Crop
@@ -894,7 +896,7 @@ private fun NotificationRow(
                     // Letter fallback
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF6C5CE7)),
                         contentAlignment = Alignment.Center
@@ -950,13 +952,23 @@ private fun NotificationRow(
                     Surface(
                         shape = CircleShape,
                         color = getNotificationColor(notification.type).copy(alpha = 0.1f),
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(24.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = notification.type.emoji,
-                                fontSize = 14.sp
-                            )
+                            // The brand SVG marks, not the emoji placeholder.
+                            // Falls back to the emoji for any type without a
+                            // mark yet, so a new notification kind can't render
+                            // as an empty square.
+                            val iconRes = notificationIconRes(notification.type)
+                            if (iconRes != 0) {
+                                Image(
+                                    painter = painterResource(iconRes),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            } else {
+                                Text(text = notification.type.emoji, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
@@ -1266,5 +1278,33 @@ private fun formatCount(count: Int): String {
         count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)
         count >= 1_000 -> String.format("%.1fK", count / 1_000.0)
         else -> count.toString()
+    }
+}
+
+
+/**
+ * Brand mark for a notification type.
+ *
+ * The inbox rendered `type.emoji` — placeholder art the design handoff replaced.
+ * Resolved by name so a new icon is a file drop, not a code change; returns 0
+ * when there's no mark, and the caller falls back to the emoji rather than an
+ * empty square.
+ */
+@Composable
+private fun notificationIconRes(type: NotificationType): Int {
+    val name = when (type) {
+        NotificationType.HYPE_RECEIVED -> "ic_notif_hype"
+        NotificationType.REPLY_RECEIVED -> "ic_notif_stitch"
+        NotificationType.SHARE_RECEIVED -> "ic_notif_thread"
+        NotificationType.NEW_FOLLOWER -> "ic_notif_follow"
+        NotificationType.FOLLOWING_VIDEO -> "ic_notif_new_thread"
+        NotificationType.TAP_MILESTONE -> "ic_notif_streak"
+        NotificationType.TIER_UPGRADED -> "ic_notif_rank_up"
+        NotificationType.QUESTION_RECEIVED -> "ic_notif_moment"
+        NotificationType.SYSTEM_UPDATE -> "ic_notif_badge"
+    }
+    val context = LocalContext.current
+    return remember(name) {
+        context.resources.getIdentifier(name, "drawable", context.packageName)
     }
 }

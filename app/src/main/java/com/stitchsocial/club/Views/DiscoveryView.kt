@@ -2237,7 +2237,19 @@ private fun DiscoveryFullscreenCard(
     var isDragging by remember { mutableStateOf(false) }
     val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
 
-    val dragThreshold = screenWidthPx * 0.3f
+    // Live drag offset, updated SYNCHRONOUSLY on the pointer callback.
+    //
+    // The drag used to do `scope.launch { offsetX.snapTo(...) }` on every delta —
+    // a coroutine per pointer event, 60-120 a second, each one hopping a
+    // dispatcher before the frame moved. The video chased the finger instead of
+    // tracking it, which is the "sticky" feel. Animatable is now used only for
+    // the settle, where an animation is actually wanted.
+    var dragOffset by remember(root.id) { mutableFloatStateOf(0f) }
+
+    // 0.3 of the screen is a long way to commit before the card gives — about
+    // 320px on a 1080p phone. 0.22 with a lower velocity floor lets a flick
+    // count as a flick.
+    val dragThreshold = screenWidthPx * 0.22f
     val velocityTracker = remember { VelocityTracker() }
 
     Box(
@@ -2251,55 +2263,64 @@ private fun DiscoveryFullscreenCard(
                     onDragEnd = {
                         scope.launch {
                             val velocity = velocityTracker.calculateVelocity().x
-                            val shouldSnap = kotlin.math.abs(offsetX.value) > dragThreshold ||
-                                kotlin.math.abs(velocity) > 1000f
+                            val shouldSnap = kotlin.math.abs(dragOffset) > dragThreshold ||
+                                kotlin.math.abs(velocity) > 600f
                             if (shouldSnap) {
-                                val targetIndex = if (offsetX.value < 0)
+                                val targetIndex = if (dragOffset < 0)
                                     (safeIndex + 1).coerceIn(0, videoCount - 1)
                                 else
                                     (safeIndex - 1).coerceIn(0, videoCount - 1)
+                                // Continue from where the finger left off.
+                                offsetX.snapTo(dragOffset)
                                 offsetX.animateTo(
                                     targetValue = when {
                                         targetIndex > safeIndex -> -screenWidthPx
                                         targetIndex < safeIndex -> screenWidthPx
                                         else -> 0f
                                     },
+                                    // NoBouncy: a bouncy settle on a full-screen
+                                    // video reads as the page wobbling, not as
+                                    // polish.
                                     animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
                                     )
                                 )
                                 if (targetIndex != safeIndex) currentIndex = targetIndex
                                 offsetX.snapTo(0f)
+                                dragOffset = 0f
                             } else {
-                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                                offsetX.snapTo(dragOffset)
+                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                dragOffset = 0f
                             }
                             isDragging = false
                         }
                     },
                     onDragCancel = {
                         scope.launch {
+                            offsetX.snapTo(dragOffset)
                             offsetX.animateTo(0f)
+                            dragOffset = 0f
                             isDragging = false
                         }
                     }
                 ) { change, dragAmount ->
                     change.consume()
-                    scope.launch {
-                        val newOffset = (offsetX.value + dragAmount).coerceIn(
-                            if (safeIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
-                            if (safeIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
-                        )
-                        offsetX.snapTo(newOffset)
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    }
+                    dragOffset = (dragOffset + dragAmount).coerceIn(
+                        if (safeIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
+                        if (safeIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
+                    )
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
                 }
             }
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { translationX = offsetX.value }
+                .graphicsLayer {
+                    translationX = if (isDragging) dragOffset else offsetX.value
+                }
         ) {
             key(currentVideo.id) {
                 VideoPlayerComposable(

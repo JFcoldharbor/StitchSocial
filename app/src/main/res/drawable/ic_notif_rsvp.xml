@@ -1,0 +1,63 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M16 26h68v58a6 6 0 0 1-6 6H22a6 6 0 0 1-6-6z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="160"
+                android:startY="260"
+                android:endX="16.6"
+                android:endY="261">
+                <item
+                    android:color="#FFD9FBE6"
+                    android:offset="0"/>
+                <item
+                    android:color="#FF4ADE80"
+                    android:offset=".4"/>
+                <item
+                    android:color="#FF15803D"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#47FFFFFF"
+        android:pathData="M16 26h68v13H16z"/>
+    <path
+        android:pathData="M32 12v14m36-14v14">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="320"
+                android:startY="120"
+                android:endX="32.6"
+                android:endY="121">
+                <item
+                    android:color="#FFFFFFFF"
+                    android:offset="0"/>
+                <item
+                    android:color="#FFC9C6D0"
+                    android:offset=".45"/>
+                <item
+                    android:color="#FF6F6A78"
+                    android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M35 62l11 11 21-24"/>
+    <path
+        android:strokeColor="#4DFFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M22 32h56"/>
+</vector>
