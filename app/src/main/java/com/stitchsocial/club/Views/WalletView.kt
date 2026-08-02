@@ -217,7 +217,10 @@ private fun WalletBalanceHeader(availableCoins: Int, pendingCoins: Int) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.Schedule, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(13.dp))
-                Text("$pendingCoins pending", fontSize = 13.sp, color = Color.Yellow)
+                // "pending" alone reads as "briefly delayed". These are earned
+                // coins held for payout, and cash-out isn't shipped yet — say
+                // so rather than implying they'll land in the spendable balance.
+                Text("$pendingCoins earned · pending payout", fontSize = 13.sp, color = Color.Yellow)
             }
         }
     }

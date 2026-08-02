@@ -228,12 +228,21 @@ class HypeCoinService private constructor() {
             )
         ).await()
 
-        // Credit receiver — immediately spendable. Earnings used to land in
-        // pendingCoins "until cash-out", but that was never released so they were
-        // stranded. Now credit availableCoins directly (matches iOS fix).
+        // Credit receiver to pendingCoins — the EARNINGS bucket, held for payout
+        // and NOT re-spendable.
+        //
+        // This used to credit availableCoins, and the comment here said it
+        // matched iOS. iOS has since reverted to pendingCoins, which left
+        // Android as the outlier and broke the escrow model: a spend releases
+        // escrow and pays the creator, and that payout must not re-enter the
+        // spend pool or the same coins are counted twice — once as the fan's
+        // spend and again as the creator's spendable balance.
+        //
+        // PURCHASED coins still credit availableCoins and stay spendable; only
+        // EARNED coins (tips, subs, gifts) are held.
         receiverRef.update(
             mapOf(
-                FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to FieldValue.increment(amount.toLong()),
+                FirebaseSchema.CoinBalanceDocument.PENDING_COINS to FieldValue.increment(amount.toLong()),
                 FirebaseSchema.CoinBalanceDocument.LIFETIME_EARNED to FieldValue.increment(amount.toLong()),
                 FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp.now()
             )
