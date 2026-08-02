@@ -61,6 +61,9 @@ fun ShowListView(
     val isLoading by vm.isLoading.collectAsStateWithLifecycle()
     var showingNewShow by remember { mutableStateOf(false) }
     var selectedShow by remember { mutableStateOf<Show?>(null) }
+    var settingsFor by remember { mutableStateOf<Show?>(null) }
+    // showId / seasonId / episodeNumber for the composer.
+    var composerFor by remember { mutableStateOf<Triple<String, String, Int>?>(null) }
 
     LaunchedEffect(creatorID) { vm.loadShows(creatorID) }
 
@@ -107,13 +110,50 @@ fun ShowListView(
             )
         }
 
-        // Edit existing show
+        // Tapping a show opens the HUB, not the old editor. The hub is the
+        // screen a creator returns to weekly; the editor is now reachable from
+        // inside it as settings, which is where configuration belongs — below
+        // the content, not in front of it.
         selectedShow?.let { show ->
+            if (composerFor == null && settingsFor == null) {
+                ShowHubView(
+                    showId = show.id,
+                    onBack = { selectedShow = null },
+                    onOpenEpisode = { /* episode detail — existing player route */ },
+                    onNewEpisode = { seasonId, epNumber ->
+                        composerFor = Triple(show.id, seasonId, epNumber)
+                    },
+                    onOpenSettings = { settingsFor = it }
+                )
+            }
+        }
+
+        // Show settings. Still the old editor overlay — screen 1c-3 (the
+        // redesigned settings) isn't ported yet, and an unreachable settings
+        // screen is worse than an unfashionable one.
+        settingsFor?.let { show ->
             ShowEditorOverlay(
                 show = show,
                 isNew = false,
-                onSave = { vm.updateShow(it); selectedShow = null },
-                onDismiss = { selectedShow = null }
+                onSave = { vm.updateShow(it); settingsFor = null },
+                onDismiss = { settingsFor = null }
+            )
+        }
+
+        composerFor?.let { (showId, seasonId, epNumber) ->
+            EpisodeComposerView(
+                showId = showId,
+                seasonId = seasonId,
+                episodeNumber = epNumber,
+                creatorID = creatorID,
+                creatorName = creatorName,
+                onDismiss = { composerFor = null },
+                onPublished = {
+                    composerFor = null
+                    // Reopen the hub so the new episode is visible where the
+                    // creator expects it, rather than dumping them at the list.
+                    selectedShow = selectedShow
+                }
             )
         }
     }
