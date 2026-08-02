@@ -26,6 +26,9 @@ import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.foundation.threadOrdered
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import com.stitchsocial.club.BuildConfig
@@ -45,14 +48,12 @@ class HomeFeedService(
     private var isLoading: Boolean = false
 
     // Follower rotation
-    private var followerRotationIndex: Int = 0
     private var allFollowerIDs: List<String> = emptyList()
 
     // Configuration (matches iOS)
     private val defaultFeedSize = 40
     private val triggerLoadThreshold = 10
     private val maxCachedThreads = 300
-    private val followersPerBatch = 15
 
     // Following cache
     private var cachedFollowingIDs: List<String> = emptyList()
@@ -163,25 +164,57 @@ class HomeFeedService(
         limit: Int,
         excludeVideoIDs: Set<String>
     ): List<ThreadData> {
-        val sampledFollowers = getRotatingFollowerBatch(followingIDs)
-        if (sampledFollowers.isEmpty()) return emptyList()
+        if (followingIDs.isEmpty()) return emptyList()
 
         val fetchLimit = maxOf(limit * 3, 30).toLong()
 
         return try {
-            val snapshot = db.collection(FirebaseSchema.Collections.VIDEOS)
-                .whereIn(FirebaseSchema.VideoDocument.CREATOR_ID, sampledFollowers)
-                .whereEqualTo(FirebaseSchema.VideoDocument.CONVERSATION_DEPTH, 0)
-                .whereGreaterThanOrEqualTo(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(startDate))
-                .whereLessThan(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(endDate))
-                .orderBy(FirebaseSchema.VideoDocument.CREATED_AT, Query.Direction.DESCENDING)
-                .limit(fetchLimit)
-                .get()
-                .await()
+            // EVERY followed creator, chunked and run in parallel — not a sample.
+            //
+            // This used to query ONE rotating batch of 15 out of however many
+            // people you follow. Follow 228 and it asked about 15 of them, and
+            // roughly half of any given batch are creators who have never
+            // posted, so the feed regularly came back empty or nearly empty:
+            // "not seeing all my follows, no videos".
+            //
+            // The rotation didn't help either. It shuffled the list FRESH on
+            // every call and then indexed into it with a running counter, so the
+            // counter pointed into a different permutation each time — random
+            // sampling wearing a rotation's clothes, with no guarantee anyone
+            // was ever covered.
+            //
+            // 30 is Firestore's `in` ceiling, so 228 follows is 8 parallel
+            // queries. VideoService.getFeedVideos already fans out this way.
+            val documents = coroutineScope {
+                followingIDs.chunked(30).map { chunk ->
+                    async {
+                        try {
+                            db.collection(FirebaseSchema.Collections.VIDEOS)
+                                .whereIn(FirebaseSchema.VideoDocument.CREATOR_ID, chunk)
+                                .whereEqualTo(FirebaseSchema.VideoDocument.CONVERSATION_DEPTH, 0)
+                                .whereGreaterThanOrEqualTo(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(startDate))
+                                .whereLessThan(FirebaseSchema.VideoDocument.CREATED_AT, Timestamp(endDate))
+                                .orderBy(FirebaseSchema.VideoDocument.CREATED_AT, Query.Direction.DESCENDING)
+                                .limit(fetchLimit)
+                                .get()
+                                .await()
+                                .documents
+                        } catch (e: Exception) {
+                            // One bad chunk must not empty the whole feed.
+                            if (BuildConfig.DEBUG) { println("⚠️ FEED: chunk failed — ${e.message}") }
+                            emptyList<com.google.firebase.firestore.DocumentSnapshot>()
+                        }
+                    }
+                }.awaitAll().flatten()
+            }
+                // Chunks are each sorted; the union is not. Sort before the
+                // limit or "newest first" silently becomes "newest within
+                // whichever chunk answered first".
+                .sortedByDescending { it.getTimestamp(FirebaseSchema.VideoDocument.CREATED_AT)?.toDate() }
 
             val threads = mutableListOf<ThreadData>()
             val blockedIDs = BlockService.shared.blockedUserIds.value
-            for (document in snapshot.documents) {
+            for (document in documents) {
                 val videoID = document.getString(FirebaseSchema.VideoDocument.ID) ?: document.id
                 if (excludeVideoIDs.contains(videoID)) continue
                 if (currentFeedVideoIDs.contains(videoID)) continue
@@ -205,30 +238,6 @@ class HomeFeedService(
             if (BuildConfig.DEBUG) { println("⚠️ DEEP DISCOVERY: Time range query failed — ${e.message}") }
             emptyList()
         }
-    }
-
-    // MARK: - Follower Rotation (matches iOS)
-
-    private fun getRotatingFollowerBatch(followingIDs: List<String>): List<String> {
-        if (followingIDs.isEmpty()) return emptyList()
-
-        // Firestore 'in' queries limited to 30 items
-        val batchSize = minOf(followersPerBatch, 30)
-
-        if (followingIDs.size <= batchSize) return followingIDs
-
-        val shuffled = followingIDs.shuffled()
-        val startIndex = followerRotationIndex % shuffled.size
-
-        val batch = mutableListOf<String>()
-        for (i in 0 until batchSize) {
-            val index = (startIndex + i) % shuffled.size
-            batch.add(shuffled[index])
-        }
-
-        followerRotationIndex += batchSize
-        if (BuildConfig.DEBUG) { println("🔄 FOLLOWER ROTATION: Using batch starting at $startIndex") }
-        return batch
     }
 
     // MARK: - Deduplication
@@ -317,10 +326,8 @@ class HomeFeedService(
         currentFeedVideoIDs.clear()
         currentFeedVideoIDs.addAll(currentFeed.map { it.parentVideo.id })
 
-        // Reset follower rotation to get different creator batches
-        followerRotationIndex = 0
 
-        if (BuildConfig.DEBUG) { println("🔄 ENDLESS SCROLL: Recycled ${recycled.size} threads, reset rotation") }
+        if (BuildConfig.DEBUG) { println("🔄 ENDLESS SCROLL: Recycled ${recycled.size} threads") }
     }
 
     // MARK: - Thread Creation from Document
@@ -514,7 +521,6 @@ class HomeFeedService(
         currentFeed.clear()
         currentFeedVideoIDs.clear()
         hasMoreContent = true
-        followerRotationIndex = 0
         childrenCache.clear()
     }
 

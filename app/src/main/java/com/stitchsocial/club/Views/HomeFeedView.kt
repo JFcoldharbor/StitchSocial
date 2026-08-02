@@ -562,29 +562,11 @@ private fun ThreadVideoCard(
             )
         }
 
-        // Stitch indicator — capsule bars (matches iOS stitchIndicator)
-        if (videoCount > 1) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                repeat(videoCount) { index ->
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(3.dp)
-                            .background(
-                                if (index == currentIndex) Color.White
-                                else Color.White.copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(2.dp)
-                            )
-                    )
-                }
-            }
-        }
+        // Stitch capsule bars REMOVED (they were an iOS stitchIndicator port).
+        // Same reasoning as the profile dots: the edge peeks already say there's
+        // another stitch either side, and they're tappable. Collections keeps
+        // its segment bars — there the marks track progress THROUGH an episode,
+        // which is a different question from where you are in a thread.
     }
 }
 
