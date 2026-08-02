@@ -999,26 +999,10 @@ fun ProfileView(
                 }
             }
 
-            // Thread position dots
-            if (currentVideoList.size > 1) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 60.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    currentVideoList.forEachIndexed { index, _ ->
-                        Box(
-                            modifier = Modifier
-                                .size(if (index == selectedVideoIndex) 8.dp else 6.dp)
-                                .background(
-                                    if (index == selectedVideoIndex) Color.Cyan else Color.White.copy(alpha = 0.4f),
-                                    CircleShape
-                                )
-                        )
-                    }
-                }
-            }
+            // Thread position dots REMOVED. One dot per video across the top of
+            // a profile with dozens of posts is a row of specks nobody can count,
+            // and iOS has no equivalent — the edge peeks below already say
+            // there's more either side, which is the part people act on.
         }
     }
 
