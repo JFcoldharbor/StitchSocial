@@ -406,7 +406,7 @@ fun CommunityDetailView(
                             "authorID" to userID,
                             "authorUsername" to (membership?.username ?: "user"),
                             "authorDisplayName" to (membership?.displayName ?: "User"),
-                            "authorLevel" to (membership?.level ?: 0),
+                            "authorLevel" to (membership?.effectiveFeatureLevel ?: 0),
                             "isCreatorPost" to isCreator,
                             "postType" to "text",
                             "body" to body,
@@ -421,7 +421,7 @@ fun CommunityDetailView(
                             id = ref.id, communityID = communityID,
                             authorID = userID, authorUsername = membership?.username ?: "user",
                             authorDisplayName = membership?.displayName ?: "User",
-                            authorLevel = membership?.level ?: 0, isCreatorPost = isCreator,
+                            authorLevel = membership?.effectiveFeatureLevel ?: 0, isCreatorPost = isCreator,
                             postType = CommunityPostType.TEXT,
                             body = body, createdAt = Date()
                         )
@@ -1031,7 +1031,7 @@ private fun LiveStreamViewerHost(
         userID = userID,
         communityID = communityID,
         streamID = streamID,
-        userLevel = membership?.level ?: 1,
+        userLevel = membership?.effectiveFeatureLevel ?: 1,
         userUsername = membership?.username ?: "user",
         userDisplayName = membership?.displayName ?: membership?.username ?: "User",
         onDismiss = onDismiss,

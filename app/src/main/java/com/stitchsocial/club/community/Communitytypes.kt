@@ -105,6 +105,32 @@ data class Community(
     }
 }
 
+/**
+ * Per-community exceptions to the level gates.
+ *
+ * The Stitch Social community is the room everyone lands in on signup — it's the
+ * front door, not a room you climb into. Making a brand-new member grind to
+ * level 20 before they can post a video clip THERE gates the product's core
+ * action behind the one community where nobody has a level yet.
+ *
+ * Kept as a table rather than an `if` at each gate: there are three places that
+ * ask "can this person post a clip" (the model, the feed service, and the
+ * composer UI), and an override that only some of them know about is worse than
+ * no override — the button enables and the write throws.
+ */
+object CommunityGateOverrides {
+
+    /** Communities where the level requirement doesn't apply, by feature. */
+    private val ungated: Map<CommunityFeatureGate, Set<String>> = mapOf(
+        CommunityFeatureGate.VIDEO_CLIPS to setOf(
+            "L9cfRdqpDMWA9tq12YBh3IkhnGh1"   // Stitch Social — the official community
+        )
+    )
+
+    fun isUngated(feature: CommunityFeatureGate, communityID: String): Boolean =
+        ungated[feature]?.contains(communityID) == true
+}
+
 // MARK: - Community Membership
 
 /** Firestore: communities/{creatorID}/members/{userID} */
@@ -142,7 +168,10 @@ data class CommunityMembership(
     var lastDailyLoginAt: Date? = null
 ) {
     // Level gate checks
-    val canPostVideoClips: Boolean get() = level >= 20
+    val canPostVideoClips: Boolean
+        get() = hasOwnerPrivileges ||
+            CommunityGateOverrides.isUngated(CommunityFeatureGate.VIDEO_CLIPS, communityID) ||
+            level >= CommunityFeatureGate.VIDEO_CLIPS.requiredLevel
     val canDMCreator: Boolean get() = level >= 25
     val canAccessPrivateLive: Boolean get() = level >= 50
     val canBeNominatedMod: Boolean get() = hasOwnerPrivileges || level >= 100
@@ -165,7 +194,9 @@ data class CommunityMembership(
 
     /** Owners get everything in their own room without grinding it. */
     fun isUnlocked(feature: CommunityFeatureGate): Boolean =
-        hasOwnerPrivileges || level >= feature.requiredLevel
+        hasOwnerPrivileges ||
+            CommunityGateOverrides.isUngated(feature, communityID) ||
+            level >= feature.requiredLevel
 
     companion object {
         fun fromFirestore(data: Map<String, Any>): CommunityMembership {

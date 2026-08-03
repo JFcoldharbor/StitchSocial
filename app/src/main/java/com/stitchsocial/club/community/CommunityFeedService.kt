@@ -148,7 +148,14 @@ class CommunityFeedService private constructor() {
         isCreatorPost: Boolean, postType: CommunityPostType, body: String,
         videoLinkID: String? = null, videoThumbnailURL: String? = null
     ): CommunityPost {
-        if (postType == CommunityPostType.VIDEO_CLIP && authorLevel < CommunityFeatureGate.VIDEO_CLIPS.requiredLevel) {
+        // The server-side half of the same rule. If this doesn't know about the
+        // override, the composer enables the button and the write throws —
+        // which is a worse experience than the gate.
+        val clipsUngated = CommunityGateOverrides.isUngated(
+            CommunityFeatureGate.VIDEO_CLIPS, communityID
+        )
+        if (postType == CommunityPostType.VIDEO_CLIP && !clipsUngated &&
+            authorLevel < CommunityFeatureGate.VIDEO_CLIPS.requiredLevel) {
             throw CommunityFeedError.LevelTooLow(CommunityFeatureGate.VIDEO_CLIPS.requiredLevel)
         }
 

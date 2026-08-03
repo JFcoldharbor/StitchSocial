@@ -185,7 +185,7 @@ fun CommunityVideoComposerSheet(
                                             authorID = userID,
                                             authorUsername = membership?.username ?: "user",
                                             authorDisplayName = membership?.displayName ?: "User",
-                                            authorLevel = membership?.level ?: 0,
+                                            authorLevel = membership?.effectiveFeatureLevel ?: 0,
                                             isCreatorPost = isCreator,
                                             postType = CommunityPostType.VIDEO_CLIP,
                                             body = caption.trim(),

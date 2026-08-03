@@ -146,7 +146,7 @@ fun CommunityPostDetailView(
                 authorID = userID,
                 authorUsername = membership?.username ?: "user",
                 authorDisplayName = membership?.displayName ?: "User",
-                authorLevel = membership?.level ?: 0,
+                authorLevel = membership?.effectiveFeatureLevel ?: 0,
                 isCreatorReply = isCommunityCreator,
                 body = "",
                 replyID = replyID,
@@ -384,7 +384,7 @@ fun CommunityPostDetailView(
                                         authorID = userID,
                                         authorUsername = membership?.username ?: "user",
                                         authorDisplayName = membership?.displayName ?: "User",
-                                        authorLevel = membership?.level ?: 0,
+                                        authorLevel = membership?.effectiveFeatureLevel ?: 0,
                                         isCreatorReply = isCommunityCreator,
                                         body = body,
                                     )
