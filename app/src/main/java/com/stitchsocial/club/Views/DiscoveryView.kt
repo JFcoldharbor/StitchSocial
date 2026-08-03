@@ -21,7 +21,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.horizontalScroll
@@ -2229,9 +2228,12 @@ private fun DiscoveryFullscreenCard(
     }
 
     val videoCount = allVideos.size
-    val childPager = rememberPagerState(pageCount = { videoCount.coerceAtLeast(1) })
-    // The overlay, peeks and prefetch all read this; the pager owns the truth.
-    val currentIndex = childPager.currentPage
+    // A delegated MutableState, NOT a derived val — and that distinction is why
+    // HomeFeed's gesture works and the earlier version here didn't. The drag
+    // lambda outlives recomposition; capturing a plain `val safeIndex` freezes
+    // it, while reading this delegate goes through the state object every time
+    // and always sees the current value.
+    var currentIndex by remember(root.id) { mutableStateOf(0) }
 
     // Warm the neighbours' bytes so a swipe plays from disk instead of waiting
     // on the network — the buffer gap the poster is currently covering.
@@ -2250,69 +2252,130 @@ private fun DiscoveryFullscreenCard(
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
 
-    // iOS pauses during the transition too — FullscreenVideoView gates on
-    // `index == currentVideoIndex && !isAnimating` — and resumes where you left
-    // off when you come back. The pause was never the complaint; the DEAD TIME
-    // after it was, and that came from building the next player too late.
-    val isActive = isCurrentPage && !isAnnouncementShowing
+    val offsetX = remember { Animatable(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // HomeFeed's rule, which is also iOS's: only the settled video plays, so it
+    // pauses through the transition. Position is remembered, so coming back
+    // resumes rather than restarts.
+    val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
+    val dragThreshold = screenWidthPx * 0.3f
+    val velocityTracker = remember { VelocityTracker() }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .pointerInput(videoCount) {
+                if (videoCount <= 1) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { isDragging = true },
+                    onDragEnd = {
+                        scope.launch {
+                            val velocity = velocityTracker.calculateVelocity().x
+                            val shouldSnap = kotlin.math.abs(offsetX.value) > dragThreshold ||
+                                kotlin.math.abs(velocity) > 1000f
+                            if (shouldSnap) {
+                                val targetIndex = if (offsetX.value < 0) {
+                                    (currentIndex + 1).coerceIn(0, videoCount - 1)
+                                } else {
+                                    (currentIndex - 1).coerceIn(0, videoCount - 1)
+                                }
+                                offsetX.animateTo(
+                                    targetValue = if (targetIndex > currentIndex) -screenWidthPx
+                                    else if (targetIndex < currentIndex) screenWidthPx
+                                    else 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                                if (targetIndex != currentIndex) currentIndex = targetIndex
+                                offsetX.snapTo(0f)
+                            } else {
+                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                            }
+                            isDragging = false
+                        }
+                    },
+                    onDragCancel = {
+                        scope.launch {
+                            offsetX.animateTo(0f)
+                            isDragging = false
+                        }
+                    }
+                ) { change, dragAmount ->
+                    change.consume()
+                    scope.launch {
+                        val newOffset = (offsetX.value + dragAmount).coerceIn(
+                            if (currentIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
+                            if (currentIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
+                        )
+                        offsetX.snapTo(newOffset)
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    }
+                }
+            }
     ) {
-        // HORIZONTAL PAGER over the thread's children — the same thing the
-        // VERTICAL deck already does, and the reason vertical swipes never had
-        // this problem.
+        // The neighbours, as STILLS, riding one screen away — HomeFeed's
+        // approach. A thumbnail can't fight the player for a surface, which is
+        // what made two live pages overlap.
+        if (isDragging && videoCount > 1) {
+            val dragOffset = offsetX.value
+            if (dragOffset < 0 && currentIndex < videoCount - 1) {
+                val nextVideo = allVideos[currentIndex + 1]
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationX = screenWidthPx + dragOffset }
+                        .background(Color.Black)
+                ) { VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize()) }
+            }
+            if (dragOffset > 0 && currentIndex > 0) {
+                val prevVideo = allVideos[currentIndex - 1]
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationX = -screenWidthPx + dragOffset }
+                        .background(Color.Black)
+                ) { VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize()) }
+            }
+        }
+
+        // Horizontal stitch navigation, matching HomeFeedView exactly.
         //
-        // The pause was structural, not a tuning issue. This rendered ONE
-        // player, keyed to the current child, so the next child's ExoPlayer did
-        // not exist until you landed on it: construct, setMediaItem, prepare,
-        // buffer, first frame — all of it AFTER the swipe finished. Prefetching
-        // bytes can't fix that, because the missing thing is the player, not the
-        // data.
-        //
-        // beyondViewportPageCount = 1 composes the neighbour ahead of time, and
-        // VideoPlayerComposable prepares at construction, so the next stitch is
-        // already buffered and paused when you reach it. Landing just unpauses it.
-        //
-        // It also deletes the hand-rolled drag entirely — offset, clamps,
-        // velocity, spring, the swapped bounds, the stale-index capture. Every
-        // one of those bugs came from re-implementing what Pager already does.
-        HorizontalPager(
-            state = childPager,
-            beyondViewportPageCount = 1,
-            modifier = Modifier.fillMaxSize()
-        ) { page ->
-            val child = allVideos[page]
-            key(child.id) {
-                var showPoster by remember(child.id) { mutableStateOf(true) }
+        // The pager was the wrong shape for this: it scrolls two live players
+        // side by side, which on Android means two PlayerViews competing for the
+        // screen. HomeFeed's model is one player for the video you're watching
+        // and THUMBNAILS for the ones either side — the neighbours are pictures
+        // until you commit to them, so there is only ever one video on screen.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationX = offsetX.value }
+        ) {
+            key(currentVideo.id) {
+                var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
 
                 VideoPlayerComposable(
-                    video = child,
-                    // Only the settled page plays. Neighbours stay built and
-                    // buffered but silent.
-                    isActive = isCurrentPage &&
-                        childPager.currentPage == page &&
-                        !childPager.isScrollInProgress &&
-                        !isAnnouncementShowing,
+                    video = currentVideo,
+                    isActive = isActive,
                     modifier = Modifier.fillMaxSize(),
                     onPlaybackStarted = { showPoster = false }
                 )
 
-                // Only needed for a genuinely cold page (first open, cache miss).
-                // A prepared neighbour has frames immediately and this never shows.
+                // Covers the prepare-and-buffer gap on the incoming video so the
+                // swipe doesn't land on black. Clears on the first frame; the
+                // delay is only a ceiling for a video that never starts.
                 if (showPoster) {
-                    VideoThumbnailPeek(video = child, modifier = Modifier.fillMaxSize())
+                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize())
                 }
-                LaunchedEffect(child.id) {
+                LaunchedEffect(currentVideo.id) {
                     kotlinx.coroutines.delay(2000)
                     showPoster = false
                 }
             }
-        }
 
-        Box(Modifier.fillMaxSize()) {
             ContextualVideoOverlay(
                 video = currentVideo,
                 overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
@@ -2324,7 +2387,7 @@ private fun DiscoveryFullscreenCard(
                 followManager = followManager,
                 // Hide the overlay while the pager moves, so it doesn't ride
                 // across the incoming video.
-                isVisible = !childPager.isScrollInProgress,
+                isVisible = !isDragging,
                 // Fullscreen hides the tab bar; drop the metadata + actions lower and
                 // let the overlay's scrim sit flush to the screen edge.
                 bottomPaddingOverride = 42.dp,
@@ -2355,23 +2418,13 @@ private fun DiscoveryFullscreenCard(
                 VideoNavigationPeeks(
                     allVideos = allVideos,
                     currentVideoIndex = currentIndex,
-                    onTapPrevious = {
-                        scope.launch {
-                            if (currentIndex > 0) childPager.animateScrollToPage(currentIndex - 1)
-                        }
-                    },
-                    onTapNext = {
-                        scope.launch {
-                            if (currentIndex < allVideos.size - 1) {
-                                childPager.animateScrollToPage(currentIndex + 1)
-                            }
-                        }
-                    },
+                    onTapPrevious = { if (currentIndex > 0) currentIndex -= 1 },
+                    onTapNext = { if (currentIndex < allVideos.size - 1) currentIndex += 1 },
                     // Hidden while the pager moves so a peek doesn't slide across
                     // the incoming video.
                     modifier = Modifier
                         .fillMaxSize()
-                        .alpha(if (childPager.isScrollInProgress) 0f else 1f)
+                        .alpha(if (isDragging) 0f else 1f)
                 )
             }
         }
