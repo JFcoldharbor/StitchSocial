@@ -369,6 +369,8 @@ fun MainScreen() {
     // Community overlay state
     var isShowingCommunity by remember { mutableStateOf(false) }
     var selectedCommunityItem by remember { mutableStateOf<CommunityListItem?>(null) }
+    /// Stream to open immediately once the community screen mounts (go-live tap).
+    var autoOpenStreamID by remember { mutableStateOf<String?>(null) }
 
     val authService = remember { AuthService() }
     val videoService = remember { VideoServiceImpl() }
@@ -477,6 +479,10 @@ fun MainScreen() {
                                     isCreatorLive = true,
                                     isVerified = false
                                 )
+                                // The stream id rides along so the viewer opens
+                                // directly instead of stopping at the community.
+                                autoOpenStreamID = intent.getStringExtra("streamID")
+                                    ?: intent.getStringExtra("streamId")
                                 isShowingCommunity = true
                             } else {
                                 selectedTab = MainAppTab.NOTIFICATIONS
@@ -521,6 +527,31 @@ fun MainScreen() {
     // resolves the username to an id and parks it; this is the first point where
     // the profile overlay's state actually exists, which on a cold start is well
     // after the tap.
+    // Go-live taps: open the community AND the stream, not just the community.
+    val pendingLive by com.stitchsocial.club.live.LiveDeepLink.pending
+    LaunchedEffect(pendingLive) {
+        com.stitchsocial.club.live.LiveDeepLink.consume()?.let { target ->
+            val community = CommunityService.shared.fetchCommunity(target.communityID)
+            if (community != null) {
+                selectedCommunityItem = CommunityListItem(
+                    id = community.id,
+                    creatorUsername = community.creatorUsername,
+                    creatorDisplayName = community.creatorDisplayName,
+                    creatorTier = community.creatorTier,
+                    profileImageURL = community.profileImageURL,
+                    memberCount = community.memberCount,
+                    userLevel = 0, userXP = 0, unreadCount = 0,
+                    lastActivityPreview = "",
+                    lastActivityAt = java.util.Date(),
+                    isCreatorLive = true,
+                    isVerified = false
+                )
+                autoOpenStreamID = target.streamID
+                isShowingCommunity = true
+            }
+        }
+    }
+
     val pendingProfileUserID by ProfileDeepLink.pending
     LaunchedEffect(pendingProfileUserID) {
         ProfileDeepLink.consume()?.let { id ->
@@ -1069,6 +1100,9 @@ fun MainScreen() {
                             userID = currentUser?.id ?: "",
                             communityID = community.id,
                             communityItem = community,
+                            // Set only by a go-live tap; consumed once on mount.
+                            autoOpenStreamID = autoOpenStreamID,
+                            onAutoOpenConsumed = { autoOpenStreamID = null },
                             onDismiss = {
                                 isShowingCommunity = false
                                 selectedCommunityItem = null

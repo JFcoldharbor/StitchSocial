@@ -42,6 +42,8 @@ sealed class NotificationNavigationEvent {
     data class NavigateToThread(val threadId: String) : NotificationNavigationEvent()
     /** Event invite -> that event's Hub (presented by DiscoveryView). */
     data class NavigateToEvent(val eventId: String) : NotificationNavigationEvent()
+    /** Go-live -> the STREAM, not the creator's profile. */
+    data class NavigateToLive(val communityID: String, val streamID: String?) : NotificationNavigationEvent()
     object None : NotificationNavigationEvent()
 }
 
@@ -323,6 +325,15 @@ class NotificationViewModel(
             val eventId = notification.actionData["eventID"] as? String
                 ?: notification.actionData["eventId"] as? String
 
+            // Go-live. sendGoLiveNotification writes communityID + streamID into
+            // the payload; the community falls back to senderID because the
+            // sender IS the community owner.
+            val liveStreamId = notification.actionData["streamID"] as? String
+                ?: notification.actionData["streamId"] as? String
+            val liveCommunityId = notification.actionData["communityID"] as? String
+                ?: notification.actionData["communityId"] as? String
+                ?: senderUserId
+
             // Determine intent from BOTH type AND payload
             val isFollowType = notification.type == NotificationType.NEW_FOLLOWER
                     || notification.actionData["engagementType"]?.toString() == "follow"
@@ -336,6 +347,18 @@ class NotificationViewModel(
                 !eventId.isNullOrEmpty() -> {
                     Log.d(TAG, "NAV -> Event hub: $eventId")
                     _navigationEvent.emit(NotificationNavigationEvent.NavigateToEvent(eventId))
+                }
+
+                // GO-LIVE -> the stream. Placed above the sender fallbacks for
+                // the same reason as the event branch: a go-live notification
+                // carries a senderID and NO videoID, so "has sender but no
+                // video" swallowed it and opened the creator's PROFILE — the one
+                // place the viewer can't watch from.
+                notification.type == NotificationType.GO_LIVE && liveCommunityId != null -> {
+                    Log.d(TAG, "NAV -> Live: community=$liveCommunityId stream=$liveStreamId")
+                    _navigationEvent.emit(
+                        NotificationNavigationEvent.NavigateToLive(liveCommunityId, liveStreamId)
+                    )
                 }
 
                 // Follow notification (no video) -> profile

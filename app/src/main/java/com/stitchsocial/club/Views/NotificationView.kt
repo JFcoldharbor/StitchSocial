@@ -193,6 +193,13 @@ fun NotificationViewComplete(
                     // then opens the Hub and consumes it.
                     com.stitchsocial.club.events.EventDeepLink.request(event.eventId)
                 }
+                is NotificationNavigationEvent.NavigateToLive -> {
+                    Log.d("NOTIF_NAV", "🔴 -> Live: ${event.communityID} / ${event.streamID}")
+                    // Parked for the same reason as events: the live viewer is
+                    // presented from the community screen, which isn't composed
+                    // while this tab is up.
+                    com.stitchsocial.club.live.LiveDeepLink.request(event.communityID, event.streamID)
+                }
                 NotificationNavigationEvent.None -> { }
             }
         }

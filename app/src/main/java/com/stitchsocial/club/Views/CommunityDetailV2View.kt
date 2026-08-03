@@ -131,6 +131,14 @@ fun CommunityDetailV2View(
     userID: String,
     communityID: String,
     communityItem: CommunityListItem,
+    /**
+     * Stream to open immediately, set by a go-live notification tap.
+     *
+     * Without it a tap could only land on the community and rely on the live
+     * banner being visible — and the notification promised the stream.
+     */
+    autoOpenStreamID: String? = null,
+    onAutoOpenConsumed: () -> Unit = {},
     onDismiss: () -> Unit,
     /**
      * Opens the real app recorder (iOS parity, e6f51f6) — the same cinematic
@@ -271,6 +279,15 @@ fun CommunityDetailV2View(
                 }
             }
         onDispose { listener.remove() }
+    }
+
+    // Go-live tap: open the viewer as soon as we're here.
+    LaunchedEffect(autoOpenStreamID) {
+        val target = autoOpenStreamID ?: return@LaunchedEffect
+        liveStreamID = target
+        isCreatorLiveRealtime = true
+        showingLiveStream = true
+        onAutoOpenConsumed()
     }
 
     // Data load
