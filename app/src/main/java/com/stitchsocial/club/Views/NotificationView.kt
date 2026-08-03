@@ -1261,6 +1261,11 @@ private fun getNotificationColor(type: NotificationType): Color {
         NotificationType.NEW_FOLLOWER -> Color(0xFF95E1D3)
         NotificationType.TAP_MILESTONE -> Color(0xFFFFA502)
         NotificationType.TIER_UPGRADED -> Color(0xFF8E44AD)
+        // Money and going-live earn their own colours; everything else can share
+        // the generic purple.
+        NotificationType.TIP_RECEIVED, NotificationType.SUBSCRIPTION -> Color(0xFFFFC043)
+        NotificationType.GO_LIVE -> Color(0xFFFF375F)
+        NotificationType.COOL_RECEIVED -> Color(0xFF4EA8FF)
         else -> Color(0xFF5F27CD)
     }
 }
@@ -1313,6 +1318,19 @@ private fun notificationIconRes(type: NotificationType): Int {
         NotificationType.TIER_UPGRADED -> "ic_notif_rank_up"
         NotificationType.QUESTION_RECEIVED -> "ic_notif_moment"
         NotificationType.SYSTEM_UPDATE -> "ic_notif_badge"
+        // These three marks shipped with the icon set and had nothing to point
+        // at, because the display enum had no case for them. A tip is the one
+        // that matters: it was rendering as a generic system notice.
+        NotificationType.COOL_RECEIVED -> "ic_notif_cool"
+        NotificationType.TIP_RECEIVED -> "ic_notif_hype_coin"
+        NotificationType.RSVP -> "ic_notif_rsvp"
+        NotificationType.SUBSCRIPTION -> "ic_notif_hype_coin"
+        NotificationType.MENTION -> "ic_notif_stitch"
+        NotificationType.SPIN_OFF -> "ic_notif_thread"
+        NotificationType.GO_LIVE -> "ic_notif_moment"
+        NotificationType.BADGE_EARNED -> "ic_notif_badge"
+        NotificationType.STREAK -> "ic_notif_streak"
+        NotificationType.NEW_VIDEO -> "ic_notif_new_thread"
     }
     val context = LocalContext.current
     return remember(name) {

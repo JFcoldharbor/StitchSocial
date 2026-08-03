@@ -223,7 +223,7 @@ class NotificationViewModel(
     private fun mapNotificationType(firebaseType: StitchNotificationType): NotificationType {
         return when (firebaseType) {
             StitchNotificationType.HYPE -> NotificationType.HYPE_RECEIVED
-            StitchNotificationType.COOL -> NotificationType.HYPE_RECEIVED
+            StitchNotificationType.COOL -> NotificationType.COOL_RECEIVED
             StitchNotificationType.REPLY -> NotificationType.REPLY_RECEIVED
             StitchNotificationType.FOLLOW -> NotificationType.NEW_FOLLOWER
             StitchNotificationType.SHARE -> NotificationType.SHARE_RECEIVED
@@ -231,7 +231,17 @@ class NotificationViewModel(
             StitchNotificationType.TIER_UPGRADE -> NotificationType.TIER_UPGRADED
             StitchNotificationType.SYSTEM -> NotificationType.SYSTEM_UPDATE
             StitchNotificationType.QUESTION -> NotificationType.QUESTION_RECEIVED
-            else -> NotificationType.SYSTEM_UPDATE
+            StitchNotificationType.TIP -> NotificationType.TIP_RECEIVED
+            StitchNotificationType.MENTION -> NotificationType.MENTION
+            StitchNotificationType.SPIN_OFF -> NotificationType.SPIN_OFF
+            StitchNotificationType.GO_LIVE -> NotificationType.GO_LIVE
+            StitchNotificationType.BADGE -> NotificationType.BADGE_EARNED
+            StitchNotificationType.STREAK -> NotificationType.STREAK
+            StitchNotificationType.SUBSCRIPTION -> NotificationType.SUBSCRIPTION
+            StitchNotificationType.NEW_VIDEO -> NotificationType.NEW_VIDEO
+            StitchNotificationType.RSVP -> NotificationType.RSVP
+            StitchNotificationType.COMMUNITY_POST -> NotificationType.NEW_VIDEO
+            StitchNotificationType.COMMUNITY_XP -> NotificationType.TAP_MILESTONE
         }
     }
 
@@ -510,26 +520,16 @@ class NotificationViewModel(
 
         val filtered = when (filter) {
             NotificationFilter.ALL -> notifications
-            NotificationFilter.ENGAGEMENT -> notifications.filter {
-                it.type in listOf(
-                    NotificationType.HYPE_RECEIVED,
-                    NotificationType.REPLY_RECEIVED,
-                    NotificationType.SHARE_RECEIVED,
-                    NotificationType.TAP_MILESTONE
-                )
-            }
-            NotificationFilter.SOCIAL -> notifications.filter {
-                it.type in listOf(
-                    NotificationType.NEW_FOLLOWER,
-                    NotificationType.FOLLOWING_VIDEO
-                )
-            }
-            NotificationFilter.SYSTEM -> notifications.filter {
-                it.type in listOf(
-                    NotificationType.TIER_UPGRADED,
-                    NotificationType.SYSTEM_UPDATE
-                )
-            }
+            // Bucketed by an EXHAUSTIVE `when` (see NotificationType.bucket)
+            // rather than three hand-maintained allow-lists.
+            //
+            // The lists were the reason a tip vanished under every tab except
+            // All and Unread: a type absent from all three lists belongs to no
+            // category, and nothing complains. With a `when`, adding a type
+            // fails to compile until someone decides where it goes.
+            NotificationFilter.ENGAGEMENT,
+            NotificationFilter.SOCIAL,
+            NotificationFilter.SYSTEM -> notifications.filter { it.type.bucket == filter }
             NotificationFilter.UNREAD -> notifications.filter { !it.isRead }
         }
 
@@ -605,7 +605,21 @@ enum class NotificationType {
     TAP_MILESTONE,
     TIER_UPGRADED,
     SYSTEM_UPDATE,
-    QUESTION_RECEIVED;
+    QUESTION_RECEIVED,
+    // Was folded into HYPE_RECEIVED, discarding the distinction the backend
+    // sends deliberately (engagementType on an "engagement" notification).
+    COOL_RECEIVED,
+    // TIP IS MONEY. It fell through to SYSTEM_UPDATE, so someone sending you
+    // coins looked exactly like an app announcement.
+    TIP_RECEIVED,
+    MENTION,
+    SPIN_OFF,
+    GO_LIVE,
+    BADGE_EARNED,
+    STREAK,
+    SUBSCRIPTION,
+    NEW_VIDEO,
+    RSVP;
 
     val emoji: String
         get() = when (this) {
@@ -618,8 +632,52 @@ enum class NotificationType {
             TIER_UPGRADED -> "â¬†ï¸"
             SYSTEM_UPDATE -> "â„¹ï¸"
             QUESTION_RECEIVED -> "❓"
+            COOL_RECEIVED -> "\u2744\uFE0F"
+            TIP_RECEIVED -> "\uD83E\uDE99"
+            MENTION -> "@"
+            SPIN_OFF -> "\uD83C\uDF00"
+            GO_LIVE -> "\uD83D\uDD34"
+            BADGE_EARNED -> "\uD83C\uDFC5"
+            STREAK -> "\uD83D\uDD25"
+            SUBSCRIPTION -> "\u2B50"
+            NEW_VIDEO -> "\uD83C\uDFAC"
+            RSVP -> "\uD83D\uDCC5"
         }
 }
+
+/**
+ * Which filter tab a notification belongs under.
+ *
+ * Exhaustive on purpose: every type must name a bucket, so a new one can't
+ * silently disappear from the tabs the way TIP did.
+ */
+val NotificationType.bucket: NotificationFilter
+    get() = when (this) {
+        // Someone reacted to, replied to, or paid for your work.
+        NotificationType.HYPE_RECEIVED,
+        NotificationType.COOL_RECEIVED,
+        NotificationType.REPLY_RECEIVED,
+        NotificationType.SHARE_RECEIVED,
+        NotificationType.TAP_MILESTONE,
+        NotificationType.MENTION,
+        NotificationType.SPIN_OFF,
+        NotificationType.QUESTION_RECEIVED,
+        NotificationType.STREAK,
+        NotificationType.TIP_RECEIVED,
+        NotificationType.SUBSCRIPTION -> NotificationFilter.ENGAGEMENT
+
+        // People you follow, doing things.
+        NotificationType.NEW_FOLLOWER,
+        NotificationType.FOLLOWING_VIDEO,
+        NotificationType.NEW_VIDEO,
+        NotificationType.GO_LIVE,
+        NotificationType.RSVP -> NotificationFilter.SOCIAL
+
+        // The app talking to you about your account.
+        NotificationType.TIER_UPGRADED,
+        NotificationType.BADGE_EARNED,
+        NotificationType.SYSTEM_UPDATE -> NotificationFilter.SYSTEM
+    }
 
 enum class NotificationFilter {
     ALL,
