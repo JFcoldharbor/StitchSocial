@@ -223,6 +223,11 @@ class HomeFeedService(
                 val publicVisibility = document.getString("publicVisibility") ?: "public"
                 if (publicVisibility != "public") continue
 
+                // Episode parts, not posts. They're written to top-level `videos`
+                // so engagement can reach them, so every post list has to exclude
+                // them or one episode fills the feed with N entries.
+                if (document.getBoolean("isCollectionSegment") == true) continue
+
                 // Skip blocked users' content (App Store Guideline 1.2 / Play UGC).
                 val creatorID = document.getString(FirebaseSchema.VideoDocument.CREATOR_ID) ?: ""
                 if (blockedIDs.contains(creatorID)) continue

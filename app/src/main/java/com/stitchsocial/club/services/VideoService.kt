@@ -248,7 +248,10 @@ class VideoServiceImpl {
                             .await()
                         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk ${chunkIndex + 1} returned ${snapshot.documents.size} documents") }
                         convertFirebaseToVideoMetadata(snapshot.documents)
-                            .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
+                            .filter {
+                                it.conversationDepth == 0 && !it.isDeleted &&
+                                    it.isPubliclyVisible && !it.isCollectionSegment
+                            }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk query failed: ${e.message}") }
                         emptyList()
@@ -274,7 +277,10 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
+                .filter {
+                    it.conversationDepth == 0 && !it.isDeleted &&
+                        it.isPubliclyVisible && !it.isCollectionSegment
+                }
                 .sortedByDescending { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Loaded ${videos.size} feed videos") }
@@ -407,7 +413,11 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { !it.isDeleted }
+                // Collection segments are EPISODE PARTS, not posts. They live in
+                // top-level `videos` so engagement can reach them, which means
+                // every surface that lists posts has to exclude them explicitly
+                // or an episode shows up as N separate videos on the profile.
+                .filter { !it.isDeleted && !it.isCollectionSegment }
                 .sortedByDescending { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} videos for user $userID") }
@@ -575,7 +585,10 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
+                .filter {
+                    it.conversationDepth == 0 && !it.isDeleted &&
+                        it.isPubliclyVisible && !it.isCollectionSegment
+                }
                 .sortedByDescending { it.trendingScore }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} discovery videos") }
@@ -598,7 +611,10 @@ class VideoServiceImpl {
                 .await()
 
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { it.conversationDepth == 0 && !it.isDeleted && it.isPubliclyVisible }
+                .filter {
+                    it.conversationDepth == 0 && !it.isDeleted &&
+                        it.isPubliclyVisible && !it.isCollectionSegment
+                }
                 .sortedByDescending { it.engagementRatio }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${videos.size} personalized videos") }
@@ -821,6 +837,12 @@ class VideoServiceImpl {
                     hashtags = (data["hashtags"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
                     createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: Date(),
                     threadID = data["threadID"] as? String,
+                    // Never parsed before, so it defaulted to false on EVERY
+                    // video — which made every model-level filter for it a no-op.
+                    // Only DiscoveryView escaped that, because it reads the raw
+                    // document itself instead of going through here.
+                    isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false,
+                    collectionID = data["collectionID"] as? String,
                     replyToVideoID = data["replyToVideoID"] as? String,
                     conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0,
                     // Thread spine: creator-posted continuation via continue-thread flow.
