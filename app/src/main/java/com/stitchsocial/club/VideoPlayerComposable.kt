@@ -86,7 +86,23 @@ fun VideoPlayerComposable(
     // reflection over declaredFields can't see, so cast to the model first and
     // only fall back to reflection for non-CoreVideoMetadata callers.
     val videoModel = video as? com.stitchsocial.club.foundation.CoreVideoMetadata
-    val remoteURL = videoModel?.playbackURL ?: getVideoProperty(video, "videoURL") ?: ""
+
+    // A CACHED MP4 BEATS A LIVE HLS STREAM.
+    //
+    // playbackURL prefers HLS, and prefetching an HLS URL only ever caches the
+    // .m3u8 manifest — the segments live behind it, so the disk cache has been
+    // doing nothing for the surfaces that matter. When the faststart MP4 for
+    // this video is already on disk, play THAT: it starts from local bytes with
+    // no network round trip, which is the buffer gap the poster was covering.
+    //
+    // HLS still wins when nothing is cached — adaptive bitrate is the better
+    // choice over a cold network.
+    val cachedMp4 = videoModel?.mp4URL?.takeIf {
+        it.isNotEmpty() && com.stitchsocial.club.services.VideoDiskCache.isCached(it)
+    }
+    val remoteURL = cachedMp4
+        ?: videoModel?.playbackURL
+        ?: getVideoProperty(video, "videoURL") ?: ""
     val videoTitle = getVideoProperty(video, "title") ?: "Unknown Video"
     val videoId = getVideoProperty(video, "id") ?: "unknown_id"
 

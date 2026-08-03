@@ -2229,6 +2229,20 @@ private fun DiscoveryFullscreenCard(
 
     val videoCount = allVideos.size
     var currentIndex by remember(root.id) { mutableStateOf(0) }
+
+    // Warm the neighbours' bytes so a swipe plays from disk instead of waiting
+    // on the network — the buffer gap the poster is currently covering.
+    //
+    // Prefetch the MP4, never the HLS. Downloading an .m3u8 caches the MANIFEST
+    // and nothing else; the segments it points at are separate requests, so
+    // prefetching HLS has been quietly doing nothing. Legacy videos have no
+    // mp4URL and their videoURL IS an MP4, so it caches fine.
+    LaunchedEffect(allVideos, currentIndex) {
+        val idx = currentIndex.coerceIn(0, (allVideos.size - 1).coerceAtLeast(0))
+        listOfNotNull(allVideos.getOrNull(idx + 1), allVideos.getOrNull(idx - 1))
+            .mapNotNull { v -> v.mp4URL?.takeIf { it.isNotEmpty() } ?: v.videoURL.takeIf { it.isNotEmpty() } }
+            .let { com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(it) }
+    }
     val safeIndex = currentIndex.coerceIn(0, (videoCount - 1).coerceAtLeast(0))
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
