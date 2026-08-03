@@ -57,6 +57,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -592,11 +595,11 @@ private fun LazyListScope.notificationSection(
         items = sectionItems,
         key = { it.id }
     ) { notification ->
-        Box(
-            modifier = Modifier
-                .padding(horizontal = 20.dp, vertical = 6.dp)
-                .animateItem()
-        ) {
+        // FULL-BLEED, no outer margin. Each row used to sit in 20dp side margins
+        // with 12dp between rows, on top of its own padding — that gap is what
+        // made them read as floating blocks rather than an inbox. The unread
+        // tint now reaches the screen edge, which also makes "new" scan faster.
+        Column(modifier = Modifier.animateItem()) {
             NotificationRow(
                 notification = notification,
                 followManager = followManager,
@@ -606,6 +609,14 @@ private fun LazyListScope.notificationSection(
                     onTap(notification)
                 },
                 onProfileTap = onProfileTap
+            )
+            // A hairline instead of a gap: separation without spending height.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 62.dp)   // starts past the avatar, as lists do
+                    .height(0.5.dp)
+                    .background(AppTheme.colors.hairline)
             )
         }
     }
@@ -853,31 +864,42 @@ private fun NotificationRow(
     val isFollowing = if (userId.isNotEmpty()) followingStates[userId] ?: false else false
     val isLoadingFollow = if (userId.isNotEmpty()) loadingStates.contains(userId) else false
 
-    Surface(
+    // Revamped to iOS's shape (NotificationRowView). Padding was never the
+    // problem — the row carried THREE stacked text lines (title, message,
+    // timestamp) plus a separate 24dp type chip in its own column. That's a
+    // block no matter how tight the padding gets.
+    //
+    // Now: one text line that reads as a sentence, the timestamp inline at the
+    // end of it, and the type as a badge ON THE AVATAR CORNER, which is where
+    // iOS puts it — costing zero extra width and zero extra height.
+    //
+    // The per-row card is gone too. Rounded surfaces stacked in a list read as
+    // blocks; a full-bleed row with a hairline under it reads as a list. The
+    // unread tint still marks what's new.
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onTap),
-        shape = RoundedCornerShape(12.dp),
-        // Unread ("NEW" bucket) rows get a purple tint
-        color = if (notification.isRead) AppTheme.colors.surface else PurpleAccent.copy(alpha = 0.14f)
+            .background(
+                if (notification.isRead) Color.Transparent
+                else PurpleAccent.copy(alpha = 0.10f)
+            )
+            .clickable(onClick = onTap)
     ) {
         Row(
             modifier = Modifier
-                // Second pass — still reading as blocks. 12/8 around a 32dp
-                // avatar puts the row at ~48dp, the minimum tap target, so this
-                // is as tight as it can go without becoming un-tappable.
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            // Profile picture - clickable
             val profileImageUrl = profileImages[userId]
                 ?: (notification.actionData["profileImageURL"] as? String)?.takeIf { it.isNotEmpty() }
+
+            // Avatar with the type badge on its corner.
             Box(
-                modifier = Modifier.clickable {
-                    if (userId.isNotEmpty()) onProfileTap(userId)
-                },
-                contentAlignment = Alignment.Center
+                modifier = Modifier
+                    .size(38.dp)
+                    .clickable { if (userId.isNotEmpty()) onProfileTap(userId) }
             ) {
                 if (profileImageUrl != null) {
                     AsyncImage(
@@ -887,91 +909,80 @@ private fun NotificationRow(
                             .build(),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF3C3C3E)),
+                            .background(AppTheme.colors.surfaceStrong),
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    // Letter fallback
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF6C5CE7)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = (notification.title.firstOrNull()?.uppercase() ?: "?"),
-                            color = AppTheme.colors.textPrimary,
-                            fontSize = 16.sp,
+                            color = Color.White,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-            }
 
-            // Content
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                // Dark base under the mark: the SVGs are light-filled art drawn
+                // for a dark disc, so on a light avatar they'd disappear.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(17.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF16151C)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = notification.title,
-                            color = AppTheme.colors.textPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    val iconRes = notificationIconRes(notification.type)
+                    if (iconRes != 0) {
+                        Image(
+                            painter = painterResource(iconRes),
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp)
                         )
-
-                        Text(
-                            text = notification.message,
-                            color = AppTheme.colors.textSecondary,
-                            fontSize = 13.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-
-                        Text(
-                            text = notification.timeAgo,
-                            color = AppTheme.colors.textSecondary.copy(alpha = 0.7f),
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-
-                    // Notification icon
-                    Surface(
-                        shape = CircleShape,
-                        color = getNotificationColor(notification.type).copy(alpha = 0.1f),
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            // The brand SVG marks, not the emoji placeholder.
-                            // Falls back to the emoji for any type without a
-                            // mark yet, so a new notification kind can't render
-                            // as an empty square.
-                            val iconRes = notificationIconRes(notification.type)
-                            if (iconRes != 0) {
-                                Image(
-                                    painter = painterResource(iconRes),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            } else {
-                                Text(text = notification.type.emoji, fontSize = 13.sp)
-                            }
-                        }
+                    } else {
+                        Text(text = notification.type.emoji, fontSize = 9.sp)
                     }
                 }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                // Title and message as ONE sentence rather than two stacked
+                // lines — "Alex hyped your stitch" is how the inbox is read
+                // anyway, and it halves the row.
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                            append(notification.title)
+                        }
+                        if (notification.message.isNotBlank()) {
+                            append("  ")
+                            withStyle(SpanStyle(color = AppTheme.colors.textSecondary)) {
+                                append(notification.message)
+                            }
+                        }
+                    },
+                    color = AppTheme.colors.textPrimary,
+                    fontSize = 13.5.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Text(
+                    text = notification.timeAgo,
+                    color = AppTheme.colors.textSecondary.copy(alpha = 0.6f),
+                    fontSize = 10.5.sp,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
 
                 // Follow back button for follow notifications
                 if (notification.type == NotificationType.NEW_FOLLOWER && userId.isNotEmpty() && !isFollowing) {
