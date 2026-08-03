@@ -53,6 +53,11 @@ class LiveStreamService private constructor() {
     private val db = FirebaseFirestore.getInstance("stitchfin")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /// Creators with a start in progress, claimed under [startLock] before any
+    /// suspension so concurrent starts can't both proceed. See startStream.
+    private val startLock = Any()
+    private val startInFlight = mutableSetOf<String>()
+
     // ── Published state (collected by the viewer screen) ────────────────────
 
     private val _activeStream = MutableStateFlow<LiveStream?>(null)
@@ -234,6 +239,27 @@ class LiveStreamService private constructor() {
             }
         }
 
+        // Checking _isStreaming alone is NOT enough — it's set several suspend
+        // points later, so two concurrent starts both pass before either sets
+        // it. iOS device logs caught exactly that: two stream docs ms apart, two
+        // chat listeners, the notification sent twice, and only the second
+        // stream ever joined Agora.
+        //
+        // The claim has to be atomic. This one is taken under a lock before any
+        // suspension, so exactly one caller proceeds.
+        val claimed = synchronized(startLock) {
+            if (startInFlight.contains(creatorID)) false
+            else { startInFlight.add(creatorID); true }
+        }
+        if (!claimed) {
+            Log.w(TAG, "start already in flight for $creatorID — waiting for it")
+            repeat(30) {
+                kotlinx.coroutines.delay(100)
+                _activeStream.value?.let { if (it.creatorID == creatorID) return it }
+            }
+            return null
+        }
+
         val streamID = java.util.UUID.randomUUID().toString()
         val now = Timestamp.now()
         // FIX 2026-05-22: write the FULL schema iOS's Codable LiveStream
@@ -263,7 +289,11 @@ class LiveStreamService private constructor() {
             "creatorDisplayName" to creatorDisplayName,
         )
 
-        return runCatching {
+        // RELEASE THE CLAIM ON EVERY PATH. A start that failed without
+        // releasing would lock this creator out of going live for the rest of
+        // the process — worse than the bug being fixed.
+        return try {
+            runCatching {
             db.document(streamPath(creatorID, streamID)).set(payload).await()
             db.collection("communities").document(creatorID).update(
                 mapOf(
@@ -300,6 +330,9 @@ class LiveStreamService private constructor() {
         }.getOrElse { err ->
             Log.w(TAG, "startStream failed: ${err.localizedMessage}")
             null
+        }
+        } finally {
+            synchronized(startLock) { startInFlight.remove(creatorID) }
         }
     }
 
