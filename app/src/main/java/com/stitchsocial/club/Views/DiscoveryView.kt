@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.horizontalScroll
@@ -2228,7 +2229,9 @@ private fun DiscoveryFullscreenCard(
     }
 
     val videoCount = allVideos.size
-    var currentIndex by remember(root.id) { mutableStateOf(0) }
+    val childPager = rememberPagerState(pageCount = { videoCount.coerceAtLeast(1) })
+    // The overlay, peeks and prefetch all read this; the pager owns the truth.
+    val currentIndex = childPager.currentPage
 
     // Warm the neighbours' bytes so a swipe plays from disk instead of waiting
     // on the network — the buffer gap the poster is currently covering.
@@ -2247,190 +2250,69 @@ private fun DiscoveryFullscreenCard(
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
 
-    val offsetX = remember { Animatable(0f) }
-    var isDragging by remember { mutableStateOf(false) }
     // Deliberately NOT gated on isDragging any more. Pausing the moment a
     // finger touched the screen is the "pauses half-way through the swipe" —
     // the video you're sliding away froze while it slid. A video that keeps
     // running as it leaves reads as one continuous motion.
     val isActive = isCurrentPage && !isAnnouncementShowing
 
-    // Live drag offset, updated SYNCHRONOUSLY on the pointer callback.
-    //
-    // The drag used to do `scope.launch { offsetX.snapTo(...) }` on every delta —
-    // a coroutine per pointer event, 60-120 a second, each one hopping a
-    // dispatcher before the frame moved. The video chased the finger instead of
-    // tracking it, which is the "sticky" feel. Animatable is now used only for
-    // the settle, where an animation is actually wanted.
-    var dragOffset by remember(root.id) { mutableFloatStateOf(0f) }
-
-    // 0.3 of the screen is a long way to commit before the card gives — about
-    // 320px on a 1080p phone. 0.22 with a lower velocity floor lets a flick
-    // count as a flick.
-    val dragThreshold = screenWidthPx * 0.22f
-    val velocityTracker = remember { VelocityTracker() }
-
-    // The gesture block is a suspend lambda that survives recomposition, so it
-    // CAPTURES whatever safeIndex/videoCount were when it was created and never
-    // sees them change. Keyed on videoCount alone, it was built the moment
-    // children loaded — while you were still on the parent — and froze
-    // safeIndex at 0 forever.
-    //
-    // That is why swiping back to the PARENT did nothing: onDragEnd computed
-    // targetIndex = (0 - 1).coerceIn(...) = 0, compared it to the stale
-    // safeIndex of 0, found them equal and skipped the assignment. Forward kept
-    // working because it always resolved to index 1. Tapping a peek was fine
-    // because that reads state directly from composition.
-    val liveIndex by rememberUpdatedState(safeIndex)
-    val liveCount by rememberUpdatedState(videoCount)
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(videoCount > 1) {
-                if (liveCount <= 1) return@pointerInput
-                detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true },
-                    onDragEnd = {
-                        scope.launch {
-                            val velocity = velocityTracker.calculateVelocity().x
-                            val shouldSnap = kotlin.math.abs(dragOffset) > dragThreshold ||
-                                kotlin.math.abs(velocity) > 600f
-                            if (shouldSnap) {
-                                val idx = liveIndex
-                                val targetIndex = if (dragOffset < 0)
-                                    (idx + 1).coerceIn(0, liveCount - 1)
-                                else
-                                    (idx - 1).coerceIn(0, liveCount - 1)
-                                // Continue from where the finger left off.
-                                offsetX.snapTo(dragOffset)
-                                offsetX.animateTo(
-                                    targetValue = when {
-                                        targetIndex > idx -> -screenWidthPx
-                                        targetIndex < idx -> screenWidthPx
-                                        else -> 0f
-                                    },
-                                    // NoBouncy: a bouncy settle on a full-screen
-                                    // video reads as the page wobbling, not as
-                                    // polish.
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                )
-                                if (targetIndex != idx) currentIndex = targetIndex
-                                offsetX.snapTo(0f)
-                                dragOffset = 0f
-                            } else {
-                                offsetX.snapTo(dragOffset)
-                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                dragOffset = 0f
-                            }
-                            isDragging = false
-                        }
-                    },
-                    onDragCancel = {
-                        scope.launch {
-                            offsetX.snapTo(dragOffset)
-                            offsetX.animateTo(0f)
-                            dragOffset = 0f
-                            isDragging = false
-                        }
-                    }
-                ) { change, dragAmount ->
-                    change.consume()
-                    // The clamps were attached to the WRONG ENDS, which is why
-                    // back felt fine and forward felt sticky.
-                    //
-                    // Negative offset = dragging toward the NEXT video, so its
-                    // limit belongs to "is there a next" — but it was gated on
-                    // safeIndex == 0, the FIRST index. Positive was gated on the
-                    // last. Swapped.
-                    //
-                    // The damage showed up forward because a discovery root
-                    // often has no replies loaded yet, so you're already on the
-                    // last index: the drag was granted 1.5x SCREEN WIDTH of
-                    // travel and then snapped all the way back. That long pull
-                    // against nothing is the stickiness.
-                    //
-                    // At a real end there's now 8% of give — enough to say "no
-                    // more that way", short enough that it reads as an edge
-                    // rather than a fight.
-                    val atLast = liveIndex >= liveCount - 1
-                    val atFirst = liveIndex == 0
-                    dragOffset = (dragOffset + dragAmount).coerceIn(
-                        if (atLast) -screenWidthPx * 0.08f else -screenWidthPx,
-                        if (atFirst) screenWidthPx * 0.08f else screenWidthPx
-                    )
-                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                }
-            }
     ) {
-        // The stitch you're dragging TOWARD, sitting exactly one screen away so
-        // it arrives as the current one leaves.
+        // HORIZONTAL PAGER over the thread's children — the same thing the
+        // VERTICAL deck already does, and the reason vertical swipes never had
+        // this problem.
         //
-        // Without this the card slid off into empty black and snapped back with
-        // nothing behind it — the gesture had no destination, which reads as
-        // resistance no matter how the spring is tuned. HomeFeedView already
-        // draws this; the fullscreen deck never did.
-        if (isDragging && dragOffset != 0f) {
-            val incoming = if (dragOffset < 0) allVideos.getOrNull(safeIndex + 1)
-                           else allVideos.getOrNull(safeIndex - 1)
-            if (incoming != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            translationX = if (dragOffset < 0)
-                                screenWidthPx + dragOffset else -screenWidthPx + dragOffset
-                        }
-                        .background(Color.Black)
-                ) {
-                    VideoThumbnailPeek(video = incoming, modifier = Modifier.fillMaxSize())
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    translationX = if (isDragging) dragOffset else offsetX.value
-                }
-        ) {
-            key(currentVideo.id) {
-                var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
+        // The pause was structural, not a tuning issue. This rendered ONE
+        // player, keyed to the current child, so the next child's ExoPlayer did
+        // not exist until you landed on it: construct, setMediaItem, prepare,
+        // buffer, first frame — all of it AFTER the swipe finished. Prefetching
+        // bytes can't fix that, because the missing thing is the player, not the
+        // data.
+        //
+        // beyondViewportPageCount = 1 composes the neighbour ahead of time, and
+        // VideoPlayerComposable prepares at construction, so the next stitch is
+        // already buffered and paused when you reach it. Landing just unpauses it.
+        //
+        // It also deletes the hand-rolled drag entirely — offset, clamps,
+        // velocity, spring, the swapped bounds, the stale-index capture. Every
+        // one of those bugs came from re-implementing what Pager already does.
+        HorizontalPager(
+            state = childPager,
+            beyondViewportPageCount = 1,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val child = allVideos[page]
+            key(child.id) {
+                var showPoster by remember(child.id) { mutableStateOf(true) }
 
                 VideoPlayerComposable(
-                    video = currentVideo,
-                    isActive = isActive,
+                    video = child,
+                    // Only the settled page plays. Neighbours stay built and
+                    // buffered but silent.
+                    isActive = isCurrentPage &&
+                        childPager.currentPage == page &&
+                        !childPager.isScrollInProgress &&
+                        !isAnnouncementShowing,
                     modifier = Modifier.fillMaxSize(),
                     onPlaybackStarted = { showPoster = false }
                 )
 
-                // Switching stitch creates a NEW ExoPlayer (it's remembered by
-                // URL), so there's a prepare-and-buffer gap where the surface is
-                // black — that's the "appears, then plays" beat. Hold the
-                // thumbnail over the top until playback has actually started.
-                //
-                // OVER, not under: PlayerView renders on a SurfaceView, which
-                // punches through anything drawn behind it.
-                // Ceiling only. The poster normally clears on the first frame;
-                // this stops a video that never starts from hiding behind a
-                // still image indefinitely.
-                LaunchedEffect(currentVideo.id) {
+                // Only needed for a genuinely cold page (first open, cache miss).
+                // A prepared neighbour has frames immediately and this never shows.
+                if (showPoster) {
+                    VideoThumbnailPeek(video = child, modifier = Modifier.fillMaxSize())
+                }
+                LaunchedEffect(child.id) {
                     kotlinx.coroutines.delay(2000)
                     showPoster = false
                 }
-                if (showPoster) {
-                    VideoThumbnailPeek(
-                        video = currentVideo,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
             }
+        }
 
+        Box(Modifier.fillMaxSize()) {
             ContextualVideoOverlay(
                 video = currentVideo,
                 overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
@@ -2440,7 +2322,9 @@ private fun DiscoveryFullscreenCard(
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
                 followManager = followManager,
-                isVisible = !isDragging,
+                // Hide the overlay while the pager moves, so it doesn't ride
+                // across the incoming video.
+                isVisible = !childPager.isScrollInProgress,
                 // Fullscreen hides the tab bar; drop the metadata + actions lower and
                 // let the overlay's scrim sit flush to the screen edge.
                 bottomPaddingOverride = 42.dp,
@@ -2471,13 +2355,23 @@ private fun DiscoveryFullscreenCard(
                 VideoNavigationPeeks(
                     allVideos = allVideos,
                     currentVideoIndex = currentIndex,
-                    onTapPrevious = { if (currentIndex > 0) currentIndex -= 1 },
-                    onTapNext = { if (currentIndex < allVideos.size - 1) currentIndex += 1 },
-                    // Hidden mid-drag so it doesn't slide across the incoming
-                    // video, matching how the overlay behaves.
+                    onTapPrevious = {
+                        scope.launch {
+                            if (currentIndex > 0) childPager.animateScrollToPage(currentIndex - 1)
+                        }
+                    },
+                    onTapNext = {
+                        scope.launch {
+                            if (currentIndex < allVideos.size - 1) {
+                                childPager.animateScrollToPage(currentIndex + 1)
+                            }
+                        }
+                    },
+                    // Hidden while the pager moves so a peek doesn't slide across
+                    // the incoming video.
                     modifier = Modifier
                         .fillMaxSize()
-                        .alpha(if (isDragging) 0f else 1f)
+                        .alpha(if (childPager.isScrollInProgress) 0f else 1f)
                 )
             }
         }
