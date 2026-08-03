@@ -92,7 +92,9 @@ class StreamQueueService private constructor() {
         isPriority: Boolean = false,
         priorityCoinsCost: Int = 0,
     ): VideoComment? {
-        require(authorLevel >= VideoComment.MINIMUM_LEVEL) {
+        val repliesUngated = com.stitchsocial.club.community.CommunityGateOverrides
+            .liveVideoRepliesUngated(communityID)
+        require(repliesUngated || authorLevel >= VideoComment.MINIMUM_LEVEL) {
             "Author level $authorLevel below minimum ${VideoComment.MINIMUM_LEVEL}"
         }
         val clamped = durationSeconds.coerceAtMost(VideoComment.maxClipSeconds(authorLevel))

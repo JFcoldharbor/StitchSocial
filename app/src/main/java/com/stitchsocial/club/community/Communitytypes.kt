@@ -129,6 +129,22 @@ object CommunityGateOverrides {
 
     fun isUngated(feature: CommunityFeatureGate, communityID: String): Boolean =
         ungated[feature]?.contains(communityID) == true
+
+    /**
+     * Live video replies, which aren't a CommunityFeatureGate — they're gated by
+     * VideoComment.MINIMUM_LEVEL rather than the perk ladder, so they need their
+     * own entry rather than being forced into the enum.
+     *
+     * Same reasoning as video clips: the official community is where everyone
+     * arrives with no level, and a live stream nobody can reply to is a
+     * broadcast, not a conversation.
+     */
+    private val liveVideoRepliesUngatedIn = setOf(
+        "L9cfRdqpDMWA9tq12YBh3IkhnGh1"   // Stitch Social — the official community
+    )
+
+    fun liveVideoRepliesUngated(communityID: String): Boolean =
+        liveVideoRepliesUngatedIn.contains(communityID)
 }
 
 // MARK: - Community Membership

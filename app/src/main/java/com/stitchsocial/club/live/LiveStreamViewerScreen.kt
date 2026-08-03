@@ -95,7 +95,13 @@ fun LiveStreamViewerScreen(
 
     // Gate the video-comment submit button by the same level requirement as
     // iOS — Lv 5+ can submit. Lower-level viewers see a chat-only UI.
-    val canSubmitVideo = userLevel >= VideoComment.MINIMUM_LEVEL
+    // Ungated in the official community — see CommunityGateOverrides. Checked
+    // here AND in StreamQueueService: if only one knows, the button enables and
+    // the submit throws.
+    val canSubmitVideo =
+        com.stitchsocial.club.community.CommunityGateOverrides
+            .liveVideoRepliesUngated(communityID) ||
+        userLevel >= VideoComment.MINIMUM_LEVEL
 
     // Pre-flight: bail to a "Stream ended" state if the stream doc says the
     // session is over (or doesn't exist). Handles ghost streams where the
