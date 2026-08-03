@@ -347,15 +347,19 @@ fun VideoPlayerComposable(
                 // ExoPlayer View - NO BUFFERING INDICATOR
                 AndroidView(
                     factory = { ctx ->
-                        // Inflated, not constructed: surface_type is an inflation-
-                        // time attribute, and the default SurfaceView does not clip
-                        // or move with a scrolling Compose container — inside a
-                        // Pager that paints two videos across the screen at once.
-                        // See res/layout/player_view_texture.xml.
-                        val view = android.view.LayoutInflater.from(ctx)
-                            .inflate(com.stitchsocial.club.R.layout.player_view_texture, null)
-                                as PlayerView
-                        view.apply {
+                        // SurfaceView (PlayerView's default), NOT TextureView.
+                        //
+                        // TextureView was introduced when the horizontal swipe was
+                        // a Pager, because a SurfaceView won't clip to a scrolling
+                        // page. That pager is gone — HomeFeed's model shows one
+                        // player and thumbnails either side — so the reason is
+                        // gone with it, and TextureView's cost isn't free:
+                        // it composites every frame through the GPU like an
+                        // ordinary view, which is a real source of playback jank.
+                        //
+                        // A SurfaceView still won't let anything draw BEHIND it,
+                        // but the poster is drawn ON TOP, which works either way.
+                        PlayerView(ctx).apply {
                             player = exoPlayer
                             useController = false
 

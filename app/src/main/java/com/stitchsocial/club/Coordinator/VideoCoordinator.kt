@@ -933,6 +933,13 @@ class VideoCoordinator(
             "status" to (metadata.status ?: "processing"),
             "cdnVideoId" to (cdnVideoId ?: ""),
 
+            // Random 0..1 key for discovery sampling (iOS parity). Only 927 of
+            // 1715 videos carry it today, which is why Discovery can't order by
+            // it yet — Firestore excludes documents missing an orderBy field, so
+            // sampling on feedSeed would hide every older video. Writing it on
+            // every new video is what eventually makes that possible.
+            "feedSeed" to kotlin.random.Random.nextDouble(),
+
             // Moderate-before-publish (iOS parity, VideoService.swift:238). New
             // videos start hidden from public surfaces until the moderation
             // Cloud Function flips this to "public" on pass.

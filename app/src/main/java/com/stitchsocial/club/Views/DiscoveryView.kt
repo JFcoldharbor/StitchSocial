@@ -247,18 +247,43 @@ class DiscoveryViewModel(
                             .limit(50)
                             .get().await()
                     }
+                    // The back catalogue, sampled by feedSeed — iOS's approach
+                    // (DiscoveryService.fetchSeedBatch), not a time window.
+                    //
+                    // Taking the newest 100 of "older than 48h" meant Discovery
+                    // could only ever reach the same ~150 videos. Measured
+                    // against production: 1008 qualify, 6 are under 48h and 920
+                    // are older than a month — about 90% was unreachable.
+                    //
+                    // feedSeed is a random 0..1 stamped on every video, so
+                    // `feedSeed >= <random>` ordered ascending is a random slice
+                    // of the whole catalogue, and it moves every load.
+                    val seed = kotlin.random.Random.nextDouble()
                     val rest = async {
-                        db.collection("videos")
-                            .whereLessThan("createdAt", cutoff)
-                            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                            .limit(100)
-                            .get().await()
+                        val first = db.collection("videos")
+                            .whereEqualTo("conversationDepth", 0)
+                            .whereGreaterThanOrEqualTo("feedSeed", seed)
+                            .orderBy("feedSeed")
+                            .limit(80L)
+                            .get().await().documents
+                        // Wrap around when the slice above the seed is thin,
+                        // otherwise a high seed returns almost nothing.
+                        if (first.size < 40) {
+                            first + db.collection("videos")
+                                .whereEqualTo("conversationDepth", 0)
+                                .whereLessThan("feedSeed", seed)
+                                .orderBy("feedSeed")
+                                .limit((80 - first.size).toLong())
+                                .get().await().documents
+                        } else first
                     }
                     fresh.await() to rest.await()
                 }
 
-                fun filterDocs(snap: com.google.firebase.firestore.QuerySnapshot): List<CoreVideoMetadata> =
-                    snap.documents.mapNotNull { doc ->
+                fun filterDocs(
+                    docs: List<com.google.firebase.firestore.DocumentSnapshot>
+                ): List<CoreVideoMetadata> =
+                    docs.mapNotNull { doc ->
                         val data = doc.data ?: return@mapNotNull null
                         if (data["isDeleted"] as? Boolean == true) return@mapNotNull null
                         if (data["isCollectionSegment"] as? Boolean == true) return@mapNotNull null
@@ -277,8 +302,8 @@ class DiscoveryViewModel(
                         decodeVideo(data, doc.id)
                     }
 
-                val fresh = filterDocs(freshSnap).shuffled()
-                val rest  = filterDocs(restSnap).shuffled()
+                val fresh = filterDocs(freshSnap.documents).shuffled()
+                val rest  = filterDocs(restSnap).distinctBy { it.id }.shuffled()
 
                 // Combine: fresh pinned first, rest shuffled behind — matches Swift
                 val combined = fresh + rest
