@@ -258,7 +258,14 @@ class LiveStreamService private constructor() {
             // notification was missing, not just the message. Sent after the
             // community doc flips, so nobody is invited to a stream that isn't
             // discoverable yet.
-            sendGoLiveNotification(creatorID, streamID, goLiveMessage)
+            //
+            // FIRE-AND-FORGET. Awaiting this inline made going live wait on a
+            // community read, a 200-member query and a 200-document batch
+            // commit before the stream even flipped to live and Agora joined —
+            // seconds of dead time on a slow connection, with the creator
+            // staring at a preview that hasn't started. An invite is best-effort
+            // and must never sit in front of the broadcast.
+            scope.launch { sendGoLiveNotification(creatorID, streamID, goLiveMessage) }
 
             val stream = LiveStream.fromDoc(streamID, payload)
             _activeStream.value = stream
