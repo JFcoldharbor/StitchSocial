@@ -309,10 +309,37 @@ class LiveStreamService private constructor() {
     suspend fun endStream(creatorID: String) {
         val stream = _activeStream.value ?: return
         runCatching {
+            // END EVERY LIVE STREAM FOR THIS CREATOR, not just the tracked one.
+            //
+            // Ending only _activeStream while clearing the community flag
+            // globally orphans any stream the service isn't tracking — a
+            // duplicate from a double start, or a session that died — leaving it
+            // marked live forever while the community says nobody is.
+            //
+            // Orphans aren't cosmetic: fetchActiveStream picks among live docs,
+            // so one can be returned instead of the real stream, and then the
+            // viewer preflight rejects the stream you tapped while ghost
+            // recovery reads the id mismatch as a stale flag.
+            val now = Timestamp.now()
+            val liveDocs = db.collection(streamsPath(creatorID))
+                .whereEqualTo("status", StreamStatus.LIVE.raw)
+                .get().await()
+            for (doc in liveDocs.documents) {
+                runCatching {
+                    doc.reference.update(
+                        mapOf(
+                            "status" to StreamStatus.ENDED.raw,
+                            "endedAt" to now,
+                            "viewerCount" to 0,
+                        )
+                    ).await()
+                }
+            }
+            // Tracked stream explicitly too, in case it fell outside that read.
             db.document(streamPath(creatorID, stream.id)).update(
                 mapOf(
                     "status" to StreamStatus.ENDED.raw,
-                    "endedAt" to Timestamp.now(),
+                    "endedAt" to now,
                     "viewerCount" to 0,
                 )
             ).await()
