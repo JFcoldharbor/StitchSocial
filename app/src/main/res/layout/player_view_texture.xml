@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    PlayerView on a TEXTURE_VIEW rather than the default SurfaceView.
+
+    A SurfaceView is a separate window layer punched through the view hierarchy.
+    It does not clip or transform with a scrolling Compose container, so inside a
+    Pager two video surfaces paint across the whole screen during the scroll
+    instead of staying inside their pages — "videos sharing screen on swipe".
+    It's the same property that stops anything drawn BEHIND a player showing up.
+
+    surface_type can only be set at inflation, never on an existing PlayerView,
+    which is why this is a layout file rather than a line of Kotlin.
+
+    TextureView composites through the view hierarchy like anything else, which
+    costs a little more — that is the trade for a player that behaves like a view.
+-->
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/texture_player_view"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:surface_type="texture_view"
+    app:use_controller="false"
+    app:resize_mode="zoom" />

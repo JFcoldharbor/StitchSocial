@@ -151,6 +151,9 @@ fun VideoPlayerComposable(
                 if (currentURL.isNotEmpty()) {
                     val mediaItem = MediaItem.fromUri(currentURL)
                     setMediaItem(mediaItem)
+                    // Pick up where this video was left, if anywhere.
+                    val resumeAt = com.stitchsocial.club.services.VideoPositionMemory.get(videoId)
+                    if (resumeAt > 0) seekTo(resumeAt)
                     prepare()
                     Log.d("VIDEO_PLAYER", "📺 Loading video $videoId from $currentURL")
                 } else {
@@ -278,6 +281,14 @@ fun VideoPlayerComposable(
     DisposableEffect(Unit) {
         onDispose {
             Log.d("VIDEO_PLAYER", "🗑️ Disposing player for $videoId")
+            // Remember where this video was BEFORE the player goes away, so
+            // coming back resumes instead of restarting (iOS parity). Read it
+            // before stop(), which resets the position to zero.
+            runCatching {
+                com.stitchsocial.club.services.VideoPositionMemory.save(
+                    videoId, exoPlayer.currentPosition, exoPlayer.duration
+                )
+            }
             VideoManager.clearPlayer(videoId)
             exoPlayer.stop()
             exoPlayer.release()
@@ -336,7 +347,15 @@ fun VideoPlayerComposable(
                 // ExoPlayer View - NO BUFFERING INDICATOR
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).apply {
+                        // Inflated, not constructed: surface_type is an inflation-
+                        // time attribute, and the default SurfaceView does not clip
+                        // or move with a scrolling Compose container — inside a
+                        // Pager that paints two videos across the screen at once.
+                        // See res/layout/player_view_texture.xml.
+                        val view = android.view.LayoutInflater.from(ctx)
+                            .inflate(com.stitchsocial.club.R.layout.player_view_texture, null)
+                                as PlayerView
+                        view.apply {
                             player = exoPlayer
                             useController = false
 

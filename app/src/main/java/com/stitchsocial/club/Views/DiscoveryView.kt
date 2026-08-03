@@ -2250,10 +2250,10 @@ private fun DiscoveryFullscreenCard(
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
 
-    // Deliberately NOT gated on isDragging any more. Pausing the moment a
-    // finger touched the screen is the "pauses half-way through the swipe" —
-    // the video you're sliding away froze while it slid. A video that keeps
-    // running as it leaves reads as one continuous motion.
+    // iOS pauses during the transition too — FullscreenVideoView gates on
+    // `index == currentVideoIndex && !isAnimating` — and resumes where you left
+    // off when you come back. The pause was never the complaint; the DEAD TIME
+    // after it was, and that came from building the next player too late.
     val isActive = isCurrentPage && !isAnnouncementShowing
 
     Box(
