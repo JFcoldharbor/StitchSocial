@@ -214,6 +214,37 @@ fun CommunityDetailV2View(
         val verified = com.stitchsocial.club.live.LiveStreamService
             .getInstance().fetchActiveStream(creatorID = communityID)
         if (verified != null && verified.id == flaggedStreamID) return@LaunchedEffect
+
+        // A LIVE STREAM EXISTS, it just isn't the one the community doc names.
+        // REPAIR, don't kill.
+        //
+        // This branch used to force-end the stream, and production shows why
+        // that's dangerous: streams were being created in pairs, so
+        // activeStreamID recorded one while fetchActiveStream returned the
+        // other. The ID comparison failed, this concluded the flag was stale,
+        // and it force-ended a creator who was genuinely broadcasting —
+        // leaving isCreatorLive false with two live streams running. That's the
+        // "creator is live but nobody can join" state: no badge, no entry point.
+        //
+        // Ghost recovery is for a flag with NO stream behind it. If a stream is
+        // live, the flag is simply pointing at the wrong one, and the fix is to
+        // point it at the right one.
+        if (verified != null) {
+            if (BuildConfig.DEBUG) {
+                println("🧹 GHOST: V2 repointing $communityID at live stream ${verified.id}")
+            }
+            isCreatorLiveRealtime = true
+            liveStreamID = verified.id
+            if (isCreator) {
+                runCatching {
+                    db.collection("communities").document(communityID).update(
+                        mapOf("isCreatorLive" to true, "activeStreamID" to verified.id)
+                    ).await()
+                }
+            }
+            return@LaunchedEffect
+        }
+
         if (BuildConfig.DEBUG) println("🧹 GHOST: V2 detected stale live flag on $communityID")
         if (isCreator) {
             com.stitchsocial.club.live.LiveStreamService.getInstance()

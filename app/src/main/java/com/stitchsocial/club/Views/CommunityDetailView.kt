@@ -137,6 +137,26 @@ fun CommunityDetailView(
             return@LaunchedEffect
         }
 
+        // Same repair-don't-kill rule as CommunityDetailV2View: if a stream IS
+        // live and only the id disagrees, the flag is pointing at the wrong
+        // stream, not at nothing. Force-ending here took a genuinely
+        // broadcasting creator offline.
+        if (verified != null) {
+            if (BuildConfig.DEBUG) {
+                println("🧹 GHOST: $communityID repointing at live stream ${verified.id}")
+            }
+            isCreatorLiveRealtime = true
+            liveStreamID = verified.id
+            if (isCreator) {
+                runCatching {
+                    db.collection("communities").document(communityID).update(
+                        mapOf("isCreatorLive" to true, "activeStreamID" to verified.id)
+                    ).await()
+                }
+            }
+            return@LaunchedEffect
+        }
+
         if (BuildConfig.DEBUG) {
             println("🧹 GHOST: $communityID flagged live but no LIVE stream doc found")
         }
