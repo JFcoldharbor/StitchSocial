@@ -2327,13 +2327,38 @@ private fun DiscoveryFullscreenCard(
                     val atLast = safeIndex >= videoCount - 1
                     val atFirst = safeIndex == 0
                     dragOffset = (dragOffset + dragAmount).coerceIn(
-                        if (atLast) -screenWidthPx * 0.08f else -screenWidthPx * 1.5f,
-                        if (atFirst) screenWidthPx * 0.08f else screenWidthPx * 1.5f
+                        if (atLast) -screenWidthPx * 0.08f else -screenWidthPx,
+                        if (atFirst) screenWidthPx * 0.08f else screenWidthPx
                     )
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
                 }
             }
     ) {
+        // The stitch you're dragging TOWARD, sitting exactly one screen away so
+        // it arrives as the current one leaves.
+        //
+        // Without this the card slid off into empty black and snapped back with
+        // nothing behind it — the gesture had no destination, which reads as
+        // resistance no matter how the spring is tuned. HomeFeedView already
+        // draws this; the fullscreen deck never did.
+        if (isDragging && dragOffset != 0f) {
+            val incoming = if (dragOffset < 0) allVideos.getOrNull(safeIndex + 1)
+                           else allVideos.getOrNull(safeIndex - 1)
+            if (incoming != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationX = if (dragOffset < 0)
+                                screenWidthPx + dragOffset else -screenWidthPx + dragOffset
+                        }
+                        .background(Color.Black)
+                ) {
+                    VideoThumbnailPeek(video = incoming, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
