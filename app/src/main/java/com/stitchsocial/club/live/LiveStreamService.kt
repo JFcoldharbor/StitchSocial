@@ -405,12 +405,19 @@ class LiveStreamService private constructor() {
 
     suspend fun fetchActiveStream(creatorID: String): LiveStream? {
         return runCatching {
+            // NEWEST first. This used to take an arbitrary single doc
+            // (limit(1) with no order), so if a previous stream was ever left
+            // marked live — a crash, a lost end-write — this could return the
+            // DEAD one. The viewer's preflight then compares it against the
+            // stream you tapped, sees a mismatch and refuses to join, which
+            // presents as "the new live won't let anyone in".
             val snap = db.collection(streamsPath(creatorID))
                 .whereEqualTo("status", StreamStatus.LIVE.raw)
-                .limit(1)
                 .get()
                 .await()
-            snap.documents.firstOrNull()?.let { decode(it) }
+            snap.documents
+                .mapNotNull { decode(it) }
+                .maxByOrNull { it.startedAt?.toDate()?.time ?: 0L }
         }.getOrNull()
     }
 

@@ -150,6 +150,9 @@ fun CommunityDetailV2View(
     // for, and reading the community's creatorTier would answer about the
     // wrong person entirely.
     var viewerTier by remember { mutableStateOf<UserTier?>(null) }
+    // Live profile values, preferred over the membership snapshot.
+    var viewerUsername by remember { mutableStateOf<String?>(null) }
+    var viewerDisplayName by remember { mutableStateOf<String?>(null) }
     // Ad-free is a paid perk — resolved once, defaults to SHOWING ads so a
     // failed lookup can't accidentally give the product away.
     var viewerHasNoAds by remember { mutableStateOf(false) }
@@ -227,6 +230,14 @@ fun CommunityDetailV2View(
                 val data = snap?.data ?: return@addSnapshotListener
                 isCreatorLiveRealtime = data["isCreatorLive"] as? Boolean ?: false
                 liveStreamID = data["activeStreamID"] as? String
+                // Close the viewer when the stream it was showing goes away.
+                // Without this, showingLiveStream stayed true after a stream
+                // ended, so the NEXT stream re-presented the screen on its own
+                // — or left the flag stuck in a state the Watch button couldn't
+                // change, which reads as "I can't get into the new live".
+                if (!isCreatorLiveRealtime || liveStreamID == null) {
+                    showingLiveStream = false
+                }
             }
         onDispose { listener.remove() }
     }
@@ -241,11 +252,19 @@ fun CommunityDetailV2View(
                 membership = parseMembership(memDoc.id, memDoc.data ?: emptyMap())
             }
 
-            viewerTier = runCatching {
-                val raw = db.collection("users").document(userID).get().await()
-                    .getString("tier") ?: "rookie"
-                UserTier.fromRawValue(raw)
-            }.getOrNull()
+            // The viewer's own profile — tier AND name.
+            //
+            // The membership doc carries a username/displayName snapshot taken
+            // when they JOINED this community, so anyone who has renamed since
+            // shows up under their old name in chat and the join message, while
+            // notifications (which read the users doc) show the new one. Same
+            // person, two names, depending on which door they came through.
+            runCatching {
+                val doc = db.collection("users").document(userID).get().await()
+                viewerTier = UserTier.fromRawValue(doc.getString("tier") ?: "rookie")
+                doc.getString("username")?.takeIf { it.isNotBlank() }?.let { viewerUsername = it }
+                doc.getString("displayName")?.takeIf { it.isNotBlank() }?.let { viewerDisplayName = it }
+            }
 
             val membersSnap = db.collection("communities").document(communityID)
                 .collection("members")
@@ -398,8 +417,11 @@ fun CommunityDetailV2View(
                 // privileges no longer inflate it — can't reply in their OWN
                 // room. This exact line is what broke on iOS.
                 userLevel = liveFeatureLevel(membership, viewerTier),
-                userUsername = membership?.username ?: "user",
-                userDisplayName = membership?.displayName ?: membership?.username ?: "User",
+                // Live profile first; membership only as a fallback for a
+                // viewer whose user doc failed to load.
+                userUsername = viewerUsername ?: membership?.username ?: "user",
+                userDisplayName = viewerDisplayName
+                    ?: membership?.displayName ?: membership?.username ?: "User",
                 onDismiss = { showingLiveStream = false },
             )
         }

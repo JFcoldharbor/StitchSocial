@@ -166,7 +166,12 @@ fun LiveStreamViewerScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    // KEYED ON streamID, not Unit. If the creator ends one stream and starts
+    // another while this screen is composed, streamID changes and the join
+    // effect re-runs — but with Unit this teardown never fired, so the Agora
+    // engine was still in the OLD channel and the new join failed. That's a
+    // viewer who can never get back in until the app restarts.
+    DisposableEffect(streamID) {
         onDispose {
             // Flush any pending free-hype taps before tearing down — last
             // chance to credit the creator's stream with this viewer's spam.
