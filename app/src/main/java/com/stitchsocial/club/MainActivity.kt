@@ -429,6 +429,20 @@ fun MainScreen() {
                 com.stitchsocial.club.events.EventDeepLink.request(eventId)
             }
 
+            // A TAP TAKES PRECEDENCE OVER WHATEVER IS OPEN.
+            //
+            // Every branch below sets presentation state, and none of them used
+            // to clear what was already on screen. Tap a notification while a
+            // thread, a profile or a community is open and the destination was
+            // set UNDERNEATH it — nothing visibly happened, so the notification
+            // read as broken.
+            //
+            // Cleared before resolving rather than inside each branch: there are
+            // a dozen branches and one of them will always be forgotten.
+            isShowingThreadView = false
+            isShowingProfileView = false
+            isShowingCommunity = false
+
             when (notificationType) {
                 // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
                 "hype", "reply", "cool", "engagement",
@@ -531,6 +545,10 @@ fun MainScreen() {
     val pendingLive by com.stitchsocial.club.live.LiveDeepLink.pending
     LaunchedEffect(pendingLive) {
         com.stitchsocial.club.live.LiveDeepLink.consume()?.let { target ->
+            // Same precedence rule as the notification-intent path: a tap wins
+            // over whatever is already open.
+            isShowingThreadView = false
+            isShowingProfileView = false
             val community = CommunityService.shared.fetchCommunity(target.communityID)
             if (community != null) {
                 selectedCommunityItem = CommunityListItem(
@@ -556,6 +574,8 @@ fun MainScreen() {
     LaunchedEffect(pendingProfileUserID) {
         ProfileDeepLink.consume()?.let { id ->
             Log.d("STITCH_MAIN", "🔗 Profile deep-link -> $id")
+            isShowingThreadView = false
+            isShowingCommunity = false
             profileViewUserID = id
             isShowingProfileView = true
         }
