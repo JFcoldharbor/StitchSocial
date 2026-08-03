@@ -2252,12 +2252,26 @@ private fun DiscoveryFullscreenCard(
     val dragThreshold = screenWidthPx * 0.22f
     val velocityTracker = remember { VelocityTracker() }
 
+    // The gesture block is a suspend lambda that survives recomposition, so it
+    // CAPTURES whatever safeIndex/videoCount were when it was created and never
+    // sees them change. Keyed on videoCount alone, it was built the moment
+    // children loaded — while you were still on the parent — and froze
+    // safeIndex at 0 forever.
+    //
+    // That is why swiping back to the PARENT did nothing: onDragEnd computed
+    // targetIndex = (0 - 1).coerceIn(...) = 0, compared it to the stale
+    // safeIndex of 0, found them equal and skipped the assignment. Forward kept
+    // working because it always resolved to index 1. Tapping a peek was fine
+    // because that reads state directly from composition.
+    val liveIndex by rememberUpdatedState(safeIndex)
+    val liveCount by rememberUpdatedState(videoCount)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(videoCount) {
-                if (videoCount <= 1) return@pointerInput
+            .pointerInput(videoCount > 1) {
+                if (liveCount <= 1) return@pointerInput
                 detectHorizontalDragGestures(
                     onDragStart = { isDragging = true },
                     onDragEnd = {
@@ -2266,16 +2280,17 @@ private fun DiscoveryFullscreenCard(
                             val shouldSnap = kotlin.math.abs(dragOffset) > dragThreshold ||
                                 kotlin.math.abs(velocity) > 600f
                             if (shouldSnap) {
+                                val idx = liveIndex
                                 val targetIndex = if (dragOffset < 0)
-                                    (safeIndex + 1).coerceIn(0, videoCount - 1)
+                                    (idx + 1).coerceIn(0, liveCount - 1)
                                 else
-                                    (safeIndex - 1).coerceIn(0, videoCount - 1)
+                                    (idx - 1).coerceIn(0, liveCount - 1)
                                 // Continue from where the finger left off.
                                 offsetX.snapTo(dragOffset)
                                 offsetX.animateTo(
                                     targetValue = when {
-                                        targetIndex > safeIndex -> -screenWidthPx
-                                        targetIndex < safeIndex -> screenWidthPx
+                                        targetIndex > idx -> -screenWidthPx
+                                        targetIndex < idx -> screenWidthPx
                                         else -> 0f
                                     },
                                     // NoBouncy: a bouncy settle on a full-screen
@@ -2286,7 +2301,7 @@ private fun DiscoveryFullscreenCard(
                                         stiffness = Spring.StiffnessMediumLow
                                     )
                                 )
-                                if (targetIndex != safeIndex) currentIndex = targetIndex
+                                if (targetIndex != idx) currentIndex = targetIndex
                                 offsetX.snapTo(0f)
                                 dragOffset = 0f
                             } else {
@@ -2324,8 +2339,8 @@ private fun DiscoveryFullscreenCard(
                     // At a real end there's now 8% of give — enough to say "no
                     // more that way", short enough that it reads as an edge
                     // rather than a fight.
-                    val atLast = safeIndex >= videoCount - 1
-                    val atFirst = safeIndex == 0
+                    val atLast = liveIndex >= liveCount - 1
+                    val atFirst = liveIndex == 0
                     dragOffset = (dragOffset + dragAmount).coerceIn(
                         if (atLast) -screenWidthPx * 0.08f else -screenWidthPx,
                         if (atFirst) screenWidthPx * 0.08f else screenWidthPx
