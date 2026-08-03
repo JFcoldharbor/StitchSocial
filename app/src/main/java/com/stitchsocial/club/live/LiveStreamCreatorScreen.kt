@@ -25,6 +25,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -98,7 +99,17 @@ fun LiveStreamCreatorScreen(
 
     // ── Lifecycle: start stream → join Agora → listen to chat ──────────────
 
+    // Guarded against re-running. LaunchedEffect(Unit) restarts if this
+    // composable leaves and re-enters composition, and each restart used to
+    // create a SECOND stream — production has stream docs written in pairs
+    // milliseconds apart. The service refuses duplicates now too; this stops
+    // the request being made at all.
+    var startAttempted by rememberSaveable { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
+        if (startAttempted) return@LaunchedEffect
+        startAttempted = true
+
         agoraService.initEngine(context)
         agoraService.setupLocalVideo(localSurface)
 

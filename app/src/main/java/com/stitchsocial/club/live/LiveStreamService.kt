@@ -216,6 +216,24 @@ class LiveStreamService private constructor() {
          */
         goLiveMessage: String = "",
     ): LiveStream? {
+        // ONE STREAM PER GO-LIVE. Production shows stream docs created in PAIRS
+        // milliseconds apart (17ms, 24ms), which means this ran twice for a
+        // single tap — a recomposition re-running the creator screen's start
+        // effect is enough. The damage is not a stray document: two docs means
+        // two Agora channels, the community's activeStreamID points at ONE of
+        // them, and the broadcaster may be publishing to the other. Viewers then
+        // join a channel with nobody in it and sit on a black or frozen frame.
+        //
+        // Guarded here rather than only at the call site because every caller
+        // would otherwise need to remember, and the cost of getting it wrong is
+        // a broadcast nobody can watch.
+        _activeStream.value?.let { existing ->
+            if (existing.creatorID == creatorID && _isStreaming.value) {
+                Log.w(TAG, "startStream called while already live — returning existing ${existing.id}")
+                return existing
+            }
+        }
+
         val streamID = java.util.UUID.randomUUID().toString()
         val now = Timestamp.now()
         // FIX 2026-05-22: write the FULL schema iOS's Codable LiveStream
