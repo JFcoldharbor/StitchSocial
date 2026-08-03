@@ -339,6 +339,40 @@ class NotificationViewModel(
                     || notification.actionData["engagementType"]?.toString() == "follow"
             val isTierUpgrade = notification.type == NotificationType.TIER_UPGRADED
 
+            // SHARED RESOLVER first, so the in-app list and the push intent
+            // can't disagree about where a notification goes. That drift is
+            // exactly how go-live opened the creator's profile here while the
+            // push path opened their community.
+            //
+            // The hand-rolled ladder below still handles the cases the model
+            // deliberately leaves alone — tier-upgrade opens YOUR profile, which
+            // needs the current user rather than anything in the payload.
+            val destination = NotificationDestination.resolve(
+                notification.type.name.lowercase(),
+                notification.actionData + mapOf(
+                    "senderID" to senderUserId,
+                    "videoID" to videoId,
+                    "eventID" to eventId,
+                    "streamID" to liveStreamId,
+                    "communityID" to liveCommunityId
+                )
+            )
+            when (destination) {
+                is NotificationDestination.Event -> {
+                    Log.d(TAG, "NAV -> Event hub: ${destination.eventID}")
+                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToEvent(destination.eventID))
+                    return@launch
+                }
+                is NotificationDestination.Live -> {
+                    Log.d(TAG, "NAV -> Live: ${destination.communityID}/${destination.streamID}")
+                    _navigationEvent.emit(
+                        NotificationNavigationEvent.NavigateToLive(destination.communityID, destination.streamID)
+                    )
+                    return@launch
+                }
+                else -> Unit
+            }
+
             when {
                 // Event invite -> the event's Hub. FIRST on purpose: an invite
                 // carries a senderID and no videoID, so the generic sender

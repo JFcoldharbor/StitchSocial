@@ -429,6 +429,24 @@ fun MainScreen() {
                 com.stitchsocial.club.events.EventDeepLink.request(eventId)
             }
 
+            // SHARED RESOLVER — the same one the in-app list uses, so a
+            // notification lands in the same place whichever way it's opened.
+            // Only Live and Event are taken from it so far; the `when` below
+            // still owns the rest until each type is verified.
+            val resolved = NotificationDestination.resolve(
+                notificationType,
+                mapOf(
+                    "videoID" to videoId,
+                    "threadID" to threadId,
+                    "senderID" to userId,
+                    "eventID" to eventId,
+                    "streamID" to (intent.getStringExtra("streamID")
+                        ?: intent.getStringExtra("streamId")),
+                    "communityID" to (intent.getStringExtra("communityID")
+                        ?: intent.getStringExtra("community_id"))
+                )
+            )
+
             // A TAP TAKES PRECEDENCE OVER WHATEVER IS OPEN.
             //
             // Every branch below sets presentation state, and none of them used
@@ -442,6 +460,16 @@ fun MainScreen() {
             isShowingThreadView = false
             isShowingProfileView = false
             isShowingCommunity = false
+
+            // Live resolves through the shared model rather than a string
+            // branch, so a payload that names a stream reaches the stream even
+            // if the type is written differently than expected.
+            (resolved as? NotificationDestination.Live)?.let { live ->
+                Log.d("STITCH_MAIN", "📱 Go-live tap -> live ${live.communityID}/${live.streamID}")
+                com.stitchsocial.club.live.LiveDeepLink.request(live.communityID, live.streamID)
+                MainActivity.pendingNotificationIntent = null
+                return@LaunchedEffect
+            }
 
             when (notificationType) {
                 // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
