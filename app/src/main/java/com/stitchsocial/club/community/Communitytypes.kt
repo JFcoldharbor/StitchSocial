@@ -41,6 +41,15 @@ data class Community(
     var profileImageURL: String? = null,
     var bannerImageURL: String? = null,
     var pinnedPostID: String? = null,
+    /**
+     * Live state, READ ONLY.
+     *
+     * Deliberately absent from toFirestore: the live flag is owned by
+     * LiveStreamService, and writing it back from a community save would let an
+     * edit to the name or banner knock a creator off air.
+     */
+    var isCreatorLive: Boolean = false,
+    var activeStreamID: String? = null,
     val createdAt: Date = Date(),
     var updatedAt: Date = Date()
 ) {
@@ -69,6 +78,8 @@ data class Community(
                 profileImageURL = data["profileImageURL"] as? String,
                 bannerImageURL = data["bannerImageURL"] as? String,
                 pinnedPostID = data["pinnedPostID"] as? String,
+                isCreatorLive = data["isCreatorLive"] as? Boolean ?: false,
+                activeStreamID = data["activeStreamID"] as? String,
                 createdAt = (data["createdAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
                 updatedAt = (data["updatedAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date()
             )

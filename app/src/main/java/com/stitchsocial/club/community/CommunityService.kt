@@ -421,7 +421,12 @@ class CommunityService private constructor() {
                         unreadCount = 0,
                         lastActivityPreview = "",
                         lastActivityAt = community.updatedAt,
-                        isCreatorLive = false,
+                        // Was HARDCODED false, so no community ever appeared live
+                        // in the list — no pink card, no "Jump in", no way to
+                        // find a live stream without opening each community and
+                        // landing on its Home tab. The flag was being read
+                        // nowhere despite the list already sorting and styling by it.
+                        isCreatorLive = community.isCreatorLive,
                         isVerified = false
                     ))
                 }
@@ -458,7 +463,9 @@ class CommunityService private constructor() {
                 profileImageURL = c.profileImageURL, memberCount = c.memberCount,
                 userLevel = 0, userXP = 0, unreadCount = 0,
                 lastActivityPreview = c.description, lastActivityAt = c.updatedAt,
-                isCreatorLive = false, isVerified = false
+                // Same hardcode as the "my communities" list — browse could
+                // never show a live creator either.
+                isCreatorLive = c.isCreatorLive, isVerified = false
             )
         }
         allCommunitiesCache = CachedItem(items, System.currentTimeMillis(), listTTL)
