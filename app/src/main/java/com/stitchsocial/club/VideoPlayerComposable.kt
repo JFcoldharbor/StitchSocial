@@ -65,7 +65,16 @@ fun VideoPlayerComposable(
     managed: Boolean = true,  // false = don't register with VideoManager (allows concurrent players)
     onEngagement: ((InteractionType) -> Unit)? = null,
     onVideoClick: (() -> Unit)? = null,
-    onSwipeUp: (() -> Unit)? = null  // Callback for swipe up to exit
+    onSwipeUp: (() -> Unit)? = null,  // Callback for swipe up to exit
+    /**
+     * Fired the first time this player actually starts producing frames.
+     *
+     * Callers that cover the surface with a poster during the prepare-and-buffer
+     * gap need to know when to drop it. A timer can't: too short and you get the
+     * black flash back, too long and a still frame sits on top of a playing
+     * video. Optional, so every existing call site is unaffected.
+     */
+    onPlaybackStarted: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
@@ -140,6 +149,7 @@ fun VideoPlayerComposable(
             // Add listener for play state
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(playing: Boolean) {
+                    if (playing) onPlaybackStarted?.invoke()
                     isPlaying = playing
                     showPlayButton = !playing && !isError && !isActive
                     Log.d("VIDEO_PLAYER", "▶️ $videoId playing = $playing, isActive = $isActive")

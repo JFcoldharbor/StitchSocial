@@ -2235,7 +2235,11 @@ private fun DiscoveryFullscreenCard(
 
     val offsetX = remember { Animatable(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
+    // Deliberately NOT gated on isDragging any more. Pausing the moment a
+    // finger touched the screen is the "pauses half-way through the swipe" —
+    // the video you're sliding away froze while it slid. A video that keeps
+    // running as it leaves reads as one continuous motion.
+    val isActive = isCurrentPage && !isAnnouncementShowing
 
     // Live drag offset, updated SYNCHRONOUSLY on the pointer callback.
     //
@@ -2382,11 +2386,35 @@ private fun DiscoveryFullscreenCard(
                 }
         ) {
             key(currentVideo.id) {
+                var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
+
                 VideoPlayerComposable(
                     video = currentVideo,
                     isActive = isActive,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    onPlaybackStarted = { showPoster = false }
                 )
+
+                // Switching stitch creates a NEW ExoPlayer (it's remembered by
+                // URL), so there's a prepare-and-buffer gap where the surface is
+                // black — that's the "appears, then plays" beat. Hold the
+                // thumbnail over the top until playback has actually started.
+                //
+                // OVER, not under: PlayerView renders on a SurfaceView, which
+                // punches through anything drawn behind it.
+                // Ceiling only. The poster normally clears on the first frame;
+                // this stops a video that never starts from hiding behind a
+                // still image indefinitely.
+                LaunchedEffect(currentVideo.id) {
+                    kotlinx.coroutines.delay(2000)
+                    showPoster = false
+                }
+                if (showPoster) {
+                    VideoThumbnailPeek(
+                        video = currentVideo,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
 
             ContextualVideoOverlay(
