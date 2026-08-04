@@ -107,6 +107,46 @@ data class LiveStream(
 // out of the same stream doc on every snapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A hype / gift / tip announced to EVERYONE in the stream, mirrored on the
+ * stream doc.
+ *
+ * The alert used to be read from the `hypeEvents` subcollection, which does not
+ * work across platforms: iOS writes that event with a `sentAt` timestamp and
+ * Android's listener orders by `createdAt`, and a Firestore orderBy silently
+ * EXCLUDES documents missing the field. So an iPhone viewer's hype was invisible
+ * to an Android creator — the query never returned it. The only alert that ever
+ * showed was the sender's own, set locally at the moment of sending.
+ *
+ * Announcing on the stream doc removes the dependency on the ledger's schema
+ * entirely: one shape, one listener, already open on both sides for the PiP.
+ */
+data class HypeAlertMirror(
+    /** Unique per hype, so two identical gifts in a row still read as two. */
+    val alertID: String,
+    val senderID: String,
+    val senderUsername: String,
+    val hypeTypeRaw: String,
+    val coins: Int,
+) {
+    val hypeType: StreamHypeType? get() = StreamHypeType.fromRaw(hypeTypeRaw)
+
+    companion object {
+        fun fromDoc(data: Map<String, Any?>): HypeAlertMirror? {
+            val alertID = data["lastHypeAlertID"] as? String ?: return null
+            val username = data["lastHypeSenderUsername"] as? String ?: return null
+            if (alertID.isEmpty()) return null
+            return HypeAlertMirror(
+                alertID = alertID,
+                senderID = data["lastHypeSenderID"] as? String ?: "",
+                senderUsername = username,
+                hypeTypeRaw = data["lastHypeType"] as? String ?: "",
+                coins = (data["lastHypeCoins"] as? Number)?.toInt() ?: 0,
+            )
+        }
+    }
+}
+
 data class PipMirrorState(
     val commentID: String,
     val videoURL: String,
@@ -147,8 +187,14 @@ data class StreamChatMessage(
     val authorLevel: Int,
     val isCreator: Boolean,
     val body: String,
+    /** "chat" / "text" / "system" / "freeHype" / "gift" — matches iOS. */
+    val messageType: String,
     val createdAt: Timestamp?,
 ) {
+    val isSystem: Boolean get() = messageType == "system"
+    val isGift: Boolean get() = messageType == "gift"
+    val isFreeHype: Boolean get() = messageType == "freeHype"
+
     companion object {
         fun fromDoc(id: String, data: Map<String, Any?>): StreamChatMessage? {
             val authorID = data["authorID"] as? String ?: return null
@@ -161,6 +207,7 @@ data class StreamChatMessage(
                 authorLevel = (data["authorLevel"] as? Number)?.toInt() ?: 0,
                 isCreator = (data["isCreator"] as? Boolean) ?: false,
                 body = body,
+                messageType = data["messageType"] as? String ?: "chat",
                 createdAt = data["createdAt"] as? Timestamp,
             )
         }

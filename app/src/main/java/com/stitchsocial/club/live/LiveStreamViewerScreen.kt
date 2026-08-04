@@ -72,7 +72,8 @@ fun LiveStreamViewerScreen(
     val messages by chatService.messages.collectAsState()
     val remoteJoined by agoraService.remoteUserJoined.collectAsState()
     val remoteUid by agoraService.remoteUid.collectAsState()
-    val lastHypeAlert by coinService.lastHypeAlert.collectAsState()
+    // From the STREAM DOC, so every viewer sees every hype — not just their own.
+    val lastHypeAlert by streamService.hypeAlert.collectAsState()
 
     // SurfaceView lives outside Compose because Agora paints onto it. We
     // remember it once per channel so re-composition doesn't recreate the
@@ -337,6 +338,17 @@ fun LiveStreamViewerScreen(
                                             )
                                             .await()
                                     }
+                                    // One chat line per FLUSH, never per tap —
+                                    // the taps are already batched precisely so a
+                                    // spam-tapper doesn't spam the room.
+                                    runCatching {
+                                        chatService.sendFreeHypeAnnouncement(
+                                            communityID = communityID,
+                                            streamID = streamID,
+                                            username = userUsername,
+                                            count = taps,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -499,6 +511,23 @@ private fun TopOverlay(
 
 @Composable
 private fun ChatRow(msg: StreamChatMessage) {
+    // Paid gifts and hype bursts are announcements, not conversation — they get
+    // their own colour so they read at a glance in a moving chat. Matches iOS.
+    if (msg.isGift || msg.isFreeHype) {
+        val tint = if (msg.isGift) Color(0xFFFFC107) else Color(0xFFFF8A3D)
+        Text(
+            text = msg.body,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(tint.copy(alpha = 0.15f))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+        return
+    }
+
     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (msg.isCreator) {
             Text("👑", fontSize = 9.sp)

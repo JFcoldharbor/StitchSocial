@@ -78,6 +78,10 @@ class LiveStreamService private constructor() {
     private val _pipState = MutableStateFlow<PipMirrorState?>(null)
     val pipState: StateFlow<PipMirrorState?> = _pipState.asStateFlow()
 
+    /** Latest hype/gift/tip, mirrored on the stream doc — see [HypeAlertMirror]. */
+    private val _hypeAlert = MutableStateFlow<HypeAlertMirror?>(null)
+    val hypeAlert: StateFlow<HypeAlertMirror?> = _hypeAlert.asStateFlow()
+
     // ── Private ─────────────────────────────────────────────────────────────
 
     private var streamListener: ListenerRegistration? = null
@@ -184,6 +188,10 @@ class LiveStreamService private constructor() {
                 // dismissed).
                 val parsed = PipMirrorState.fromDoc(raw)
                 _pipState.value = parsed
+
+                // Hype/gift/tip announcement — same mirror pattern, and the only
+                // path that works across platforms. See [HypeAlertMirror].
+                _hypeAlert.value = HypeAlertMirror.fromDoc(raw)
 
                 // Viewer-side prefetch — pull the broadcasting clip onto disk
                 // so any future recreate of the ExoPlayer serves locally.

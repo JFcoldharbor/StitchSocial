@@ -76,6 +76,7 @@ class StreamChatService private constructor() {
         authorLevel: Int,
         isCreator: Boolean,
         body: String,
+        messageType: String = "chat",
     ) {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) return
@@ -94,7 +95,7 @@ class StreamChatService private constructor() {
             "authorLevel" to authorLevel,
             "isCreator" to isCreator,
             "body" to trimmed,
-            "messageType" to "chat",
+            "messageType" to messageType,
             "createdAt" to Timestamp.now(),
         )
         Log.d(TAG, "💬 sending '$trimmed' from @$authorUsername to $streamID")
@@ -108,4 +109,46 @@ class StreamChatService private constructor() {
             Log.w(TAG, "❌ chat send failed: ${it.localizedMessage}")
         }
     }
+
+    /**
+     * Announce a paid gift in chat. Body format is IDENTICAL to iOS
+     * `sendGiftMessage` so the same line renders the same on both platforms —
+     * the two clients read each other's chat, and a mismatch shows up as one
+     * phone's gifts looking like ordinary messages on the other.
+     */
+    suspend fun sendGiftAnnouncement(
+        communityID: String,
+        streamID: String,
+        username: String,
+        giftName: String,
+        emoji: String,
+    ) = send(
+        communityID = communityID,
+        streamID = streamID,
+        authorID = "system",
+        authorUsername = username,
+        authorDisplayName = username,
+        authorLevel = 0,
+        isCreator = false,
+        body = "$emoji $username sent $giftName!",
+        messageType = "gift",
+    )
+
+    /** Announce a burst of free taps. One line per flush, never per tap. */
+    suspend fun sendFreeHypeAnnouncement(
+        communityID: String,
+        streamID: String,
+        username: String,
+        count: Int,
+    ) = send(
+        communityID = communityID,
+        streamID = streamID,
+        authorID = "system",
+        authorUsername = username,
+        authorDisplayName = username,
+        authorLevel = 0,
+        isCreator = false,
+        body = if (count > 1) "\uD83D\uDD25 $username hyped \u00D7$count!" else "\uD83D\uDD25 $username hyped!",
+        messageType = "freeHype",
+    )
 }

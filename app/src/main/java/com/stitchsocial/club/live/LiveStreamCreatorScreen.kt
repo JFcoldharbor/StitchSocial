@@ -104,7 +104,9 @@ fun LiveStreamCreatorScreen(
     val displayedComments by queueService.displayedComments.collectAsState()
     val activePiP by queueService.activePiP.collectAsState()
     val pipPlaybackToken by queueService.pipPlaybackToken.collectAsState()
-    val lastHypeAlert by coinService.lastHypeAlert.collectAsState()
+    // From the STREAM DOC, not coinService — that one is set locally when YOU
+    // send a hype, so the creator (who never sends) saw nothing at all.
+    val lastHypeAlert by streamService.hypeAlert.collectAsState()
 
     var isStarting by remember { mutableStateOf(true) }
     var startError by remember { mutableStateOf<String?>(null) }

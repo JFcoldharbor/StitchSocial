@@ -108,12 +108,27 @@ class StreamCoinService private constructor() {
                 .await()
         }.onFailure { Log.w(TAG, "hypeEvent write failed: ${it.localizedMessage}") }
 
-        // 3. Increment stream doc counters atomically
+        // 3. Increment stream doc counters atomically, and ANNOUNCE the hype in
+        //    the same write.
+        //
+        //    The announcement can't come from the hypeEvents doc above: iOS
+        //    writes that with a `sentAt` timestamp while this service's listener
+        //    orders by `createdAt`, and a Firestore orderBy silently excludes
+        //    documents missing the field — so an iPhone viewer's hype never
+        //    reached an Android creator at all. Riding the stream doc drops the
+        //    dependency on the ledger's schema, and it's free: this update was
+        //    already happening.
         runCatching {
             db.document(streamDoc(communityID, streamID)).update(
                 mapOf(
                     "hypeCount" to FieldValue.increment(1L),
                     "totalCoinsSpent" to FieldValue.increment(hypeType.coinCost.toLong()),
+                    "lastHypeAlertID" to event.id,
+                    "lastHypeSenderID" to senderID,
+                    "lastHypeSenderUsername" to senderUsername,
+                    "lastHypeType" to hypeType.raw,
+                    "lastHypeCoins" to hypeType.coinCost,
+                    "lastHypeAt" to event.createdAt,
                 )
             ).await()
         }.onFailure { Log.w(TAG, "stream counter update failed: ${it.localizedMessage}") }

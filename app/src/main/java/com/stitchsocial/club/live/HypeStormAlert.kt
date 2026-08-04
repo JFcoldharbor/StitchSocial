@@ -31,14 +31,14 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun HypeStormAlert(
-    event: StreamHypeEvent?,
+    event: HypeAlertMirror?,
     modifier: Modifier = Modifier,
     displayDurationMs: Long = 3200L,
     onTimeout: () -> Unit = {},
 ) {
-    var visibleEvent by remember { mutableStateOf<StreamHypeEvent?>(null) }
+    var visibleEvent by remember { mutableStateOf<HypeAlertMirror?>(null) }
 
-    LaunchedEffect(event?.id) {
+    LaunchedEffect(event?.alertID) {
         val incoming = event ?: return@LaunchedEffect
         visibleEvent = incoming
         delay(displayDurationMs)
@@ -61,7 +61,7 @@ fun HypeStormAlert(
 }
 
 @Composable
-private fun HypeAlertCard(event: StreamHypeEvent) {
+private fun HypeAlertCard(event: HypeAlertMirror) {
     val tint = when (event.hypeType) {
         StreamHypeType.SUPER_HYPE -> Color(0xFFFF4F8B)
         StreamHypeType.MEGA_HYPE -> Color(0xFFFFB300)
@@ -69,6 +69,7 @@ private fun HypeAlertCard(event: StreamHypeEvent) {
         StreamHypeType.GIFT_SUB -> Color(0xFF9D5BFF)
         StreamHypeType.SPOTLIGHT -> Color(0xFF34D399)
         StreamHypeType.BOOST_STREAM -> Color(0xFFEC4899)
+        null -> Color(0xFFEC4899)
     }
 
     Row(
@@ -84,7 +85,7 @@ private fun HypeAlertCard(event: StreamHypeEvent) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(event.hypeType.emoji, fontSize = 22.sp)
+        Text(event.hypeType?.emoji ?: "\uD83D\uDD25", fontSize = 22.sp)
         Column {
             Text(
                 "@${event.senderUsername}",
@@ -94,14 +95,15 @@ private fun HypeAlertCard(event: StreamHypeEvent) {
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "sent ${event.hypeType.displayName}",
+                    "sent ${event.hypeType?.displayName ?: "Hype"}${if (event.coins > 0) " · ${event.coins}" else ""}",
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (event.hypeType.xpMultiplier > 1) {
+                val mult = event.hypeType?.xpMultiplier ?: 1
+                if (mult > 1) {
                     Text(
-                        "×${event.hypeType.xpMultiplier} XP",
+                        "×$mult XP",
                         color = tint,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,

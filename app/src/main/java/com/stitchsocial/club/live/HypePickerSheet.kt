@@ -128,6 +128,18 @@ fun HypePickerSheet(
                                         senderLevel = senderLevel,
                                     )
                                 }.onSuccess {
+                                    // Announce it in chat too, so the gift leaves a
+                                    // trace after the 3s toast is gone. Same body
+                                    // format as iOS `sendGiftMessage`.
+                                    runCatching {
+                                        StreamChatService.getInstance().sendGiftAnnouncement(
+                                            communityID = communityID,
+                                            streamID = streamID,
+                                            username = senderUsername,
+                                            giftName = hype.displayName,
+                                            emoji = hype.emoji,
+                                        )
+                                    }
                                     sending = false
                                     onDismiss()
                                 }.onFailure { err ->
