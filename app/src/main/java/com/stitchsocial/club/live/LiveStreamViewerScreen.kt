@@ -384,18 +384,34 @@ fun LiveStreamViewerScreen(
             )
         }
 
-        // Video comment record sheet — fullscreen overlay when the viewer
-        // taps the 📹 button. Disabled below Lv 5 (gated by canSubmitVideo).
-        if (showingRecordSheet) {
-            VideoCommentRecordSheet(
-                userID = userID,
-                communityID = communityID,
-                streamID = streamID,
-                userLevel = userLevel,
-                userUsername = userUsername,
-                userDisplayName = userDisplayName,
-                onDismiss = { showingRecordSheet = false },
+        // Hype storm alert — slides in when ANY viewer sends a hype.
+        // Suppressed while recording, along with the PiP below.
+        if (!showingRecordSheet) {
+            HypeStormAlert(
+                event = lastHypeAlert,
+                modifier = Modifier.fillMaxSize(),
             )
+        }
+
+        // PiP overlay — appears when the creator broadcasts a queued clip.
+        //
+        // HIDDEN WHILE RECORDING A REPLY. Two reasons, and the second is the one
+        // that matters: this used to be declared AFTER the record sheet in this
+        // Box, so it painted straight over the recorder — the viewer filmed
+        // themselves behind someone else's clip. And because the overlay stayed
+        // in the tree its player kept going, so the PiP's audio went down the
+        // microphone and into the reply. Taking it out of composition tears the
+        // player down, which stops both.
+        if (!showingRecordSheet) {
+            pipState?.let { pip ->
+                LiveStreamPipOverlay(
+                    videoURL = pip.videoURL,
+                    authorUsername = pip.authorUsername,
+                    authorLevel = pip.authorLevel,
+                    playbackToken = pip.playbackToken,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         // Hype picker sheet — bottom-anchored grid of hype types.
@@ -410,20 +426,18 @@ fun LiveStreamViewerScreen(
             )
         }
 
-        // Hype storm alert — slides in when ANY viewer sends a hype.
-        HypeStormAlert(
-            event = lastHypeAlert,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        // PiP overlay — appears when the creator broadcasts a queued clip.
-        pipState?.let { pip ->
-            LiveStreamPipOverlay(
-                videoURL = pip.videoURL,
-                authorUsername = pip.authorUsername,
-                authorLevel = pip.authorLevel,
-                playbackToken = pip.playbackToken,
-                modifier = Modifier.fillMaxSize(),
+        // Video comment record sheet — fullscreen overlay when the viewer taps
+        // the 📹 button. Disabled below Lv 5 (gated by canSubmitVideo).
+        // Declared LAST so nothing in this Box can draw over the camera.
+        if (showingRecordSheet) {
+            VideoCommentRecordSheet(
+                userID = userID,
+                communityID = communityID,
+                streamID = streamID,
+                userLevel = userLevel,
+                userUsername = userUsername,
+                userDisplayName = userDisplayName,
+                onDismiss = { showingRecordSheet = false },
             )
         }
     }
