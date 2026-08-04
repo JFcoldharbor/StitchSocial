@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -73,6 +74,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlin.random.Random
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.services.SocialAuth
 
 private const val TERMS_VERSION = "1.0"
 private const val TERMS_URL = "https://stitchsocial.me/terms"
@@ -119,6 +121,8 @@ fun LoginView(
     val focusManager = LocalFocusManager.current
 
     // Form
+    // Welcome landing gates the form, mirroring iOS `showWelcome`.
+    var showWelcome by remember { mutableStateOf(true) }
     var mode by remember { mutableStateOf(AuthMode.SIGN_IN) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -182,6 +186,57 @@ fun LoginView(
         AuthMode.SIGN_UP -> when (accountType) {
             AccountType.BUSINESS -> validEmail && brandName.isNotBlank() && validPw && pwMatch
             else -> validEmail && username.length >= 3 && displayName.isNotBlank() && validPw && pwMatch
+        }
+    }
+
+    /**
+     * Google. The WEB client id comes out of google-services.json (client_type 3)
+     * — Firebase rejects an id token minted for the Android client.
+     */
+    fun doGoogle() {
+        errorMsg = null
+        isLoading = true
+        scope.launch {
+            try {
+                val social = SocialAuth.signInWithGoogle(context, GOOGLE_WEB_CLIENT_ID)
+                authService.signInWithCredential(social.credential, social.displayName)
+                onLoginSuccess()
+            } catch (e: SocialAuth.SocialAuthCancelled) {
+                // Deliberate back-out. Saying anything here reads as a bug.
+            } catch (e: Exception) {
+                errorMsg = e.message ?: "Google sign-in failed. Please try again."
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    /**
+     * Apple, via Firebase's OAuth web flow — Android has no native equivalent.
+     * A failure is surfaced rather than swallowed: this needs a Services ID
+     * configured in the Firebase console, and a silent no-op button is the exact
+     * thing that got the iOS build rejected.
+     */
+    fun doApple() {
+        val activity = context as? android.app.Activity ?: run {
+            errorMsg = "Couldn't open Apple sign-in."
+            return
+        }
+        errorMsg = null
+        isLoading = true
+        scope.launch {
+            try {
+                val social = SocialAuth.signInWithApple(activity)
+                authService.signInWithCredential(social.credential, social.displayName)
+                onLoginSuccess()
+            } catch (e: Exception) {
+                val msg = e.message ?: ""
+                if (!msg.contains("canceled", true) && !msg.contains("cancelled", true)) {
+                    errorMsg = "Apple sign-in failed. $msg".trim()
+                }
+            } finally {
+                isLoading = false
+            }
         }
     }
 
@@ -277,12 +332,62 @@ fun LoginView(
     )) {
         repeat(20) { i -> FloatingParticle(i, 400f, 800f) }
 
+        // WELCOME FIRST (iOS parity). The form used to be the landing screen —
+        // an email/password wall as the very first thing anyone saw, while iOS
+        // opened on the brand with Continue with Apple/Google and pushed email to
+        // a second step. Same order here now.
+        if (showWelcome) {
+            WelcomeLanding(
+                animated = animated,
+                isLoading = isLoading,
+                errorMsg = errorMsg,
+                onApple = { doApple() },
+                onGoogle = { doGoogle() },
+                onEmailSignUp = {
+                    mode = AuthMode.SIGN_UP
+                    errorMsg = null
+                    showWelcome = false
+                },
+                onLogIn = {
+                    mode = AuthMode.SIGN_IN
+                    errorMsg = null
+                    showWelcome = false
+                },
+            )
+        } else {
+
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp).imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(60.dp))
+            Spacer(Modifier.height(20.dp))
+
+            // Back to the welcome landing. Without it the email form is a
+            // one-way door — you'd have to kill the app to reach the social
+            // buttons again. iOS has the same affordance.
+            Row(Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .clickable(enabled = !isLoading) {
+                            errorMsg = null
+                            showWelcome = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "Back",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
 
             // Logo
             Column(horizontalAlignment = Alignment.CenterHorizontally,
@@ -526,6 +631,7 @@ fun LoginView(
 
             Spacer(Modifier.height(40.dp))
         }
+        }
 
         // Success overlay
         if (showSuccess) {
@@ -738,5 +844,166 @@ fun PasswordRequirementRow(text: String, isMet: Boolean) {
             modifier = Modifier.size(16.dp)
         )
         Text(text, fontSize = 12.sp, color = if (isMet) StitchColors.success else StitchColors.textSecondary)
+    }
+}
+// MARK: - Welcome Landing (iOS parity)
+
+/**
+ * Web OAuth client from google-services.json (`client_type: 3`). Google's ID
+ * token must be minted for the WEB client or Firebase rejects it as
+ * audience-mismatched, even though the Android client is what signs the request.
+ */
+private const val GOOGLE_WEB_CLIENT_ID =
+    "854189118304-cf785f2n1i0p3psjidr1ib27c51ho346.apps.googleusercontent.com"
+
+/**
+ * Brand-first landing: logo, name, tagline, the two social buttons, then email.
+ *
+ * Deliberately mirrors iOS `welcomeLanding` — same order, same copy, same
+ * hierarchy — because this is the first screen a new user sees and the two
+ * platforms were telling different stories about what the app is. Android
+ * opened straight into an email/password form; iOS opened on the brand.
+ */
+@Composable
+private fun WelcomeLanding(
+    animated: Boolean,
+    isLoading: Boolean,
+    errorMsg: String?,
+    onApple: () -> Unit,
+    onGoogle: () -> Unit,
+    onEmailSignUp: () -> Unit,
+    onLogIn: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp)
+            .imePadding(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.alpha(if (animated) 1f else 0f),
+        ) {
+            Image(
+                painterResource(R.drawable.stitchsociallogo),
+                "Stitch Social",
+                Modifier.size(96.dp).clip(RoundedCornerShape(20.dp)),
+                contentScale = ContentScale.Fit,
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "Stitch Social",
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Where conversations become creativity.",
+                fontSize = 15.sp,
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        errorMsg?.let {
+            Text(
+                it,
+                color = StitchColors.error,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // No icons yet on either button. Material has no Apple mark (it's a
+            // trademark, deliberately absent), and Google's own mark has brand
+            // rules that a Material glyph would violate. iOS carries the same
+            // gap — both want the real logo assets dropped in.
+            SocialButton("Continue with Apple", null, isLoading, onApple)
+            SocialButton("Continue with Google", null, isLoading, onGoogle)
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(vertical = 4.dp),
+            ) {
+                Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.15f)))
+                Text("or", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.4f))
+                Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.15f)))
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                    .clickable(enabled = !isLoading) { onEmailSignUp() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Sign up with email", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            }
+        }
+
+        Row(
+            modifier = Modifier.padding(top = 22.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Have an account?", fontSize = 14.sp, color = Color.White.copy(alpha = 0.5f))
+            Text(
+                "Log in",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = StitchColors.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = !isLoading) { onLogIn() }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
+        }
+
+        Spacer(Modifier.height(36.dp))
+    }
+}
+
+@Composable
+private fun SocialButton(
+    title: String,
+    icon: ImageVector?,
+    isLoading: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White)
+            .clickable(enabled = !isLoading) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = Color.Black,
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                icon?.let { Icon(it, null, tint = Color.Black, modifier = Modifier.size(19.dp)) }
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+            }
+        }
     }
 }

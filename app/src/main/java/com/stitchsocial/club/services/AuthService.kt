@@ -16,6 +16,7 @@
 
 package com.stitchsocial.club.services
 
+import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
@@ -129,6 +130,65 @@ class AuthService {
             } finally {
                 _isLoading.value = false
             }
+        }
+    }
+
+    // MARK: - Sign In with a social credential (Google / Apple)
+
+    /**
+     * Complete a Firebase sign-in from an OAuth credential and provision a
+     * profile if this is a first-time social user.
+     *
+     * Mirrors iOS `signInWithCredential(_:displayName:)`. The key difference from
+     * the email path is ORDER: OAuth creates the Firebase account BEFORE we know
+     * anything about the person, so there is no opportunity for a pre-signup age
+     * gate. A brand-new social user is provisioned with an auto-generated
+     * username here and meets the POST-auth birthday gate at first profile load,
+     * which is what keeps the COPPA path intact.
+     *
+     * Returns `isNewUser` so the caller can tell a fresh signup from a returning
+     * account — the two want different first screens.
+     */
+    suspend fun signInWithCredential(
+        credential: AuthCredential,
+        displayName: String? = null,
+    ): AuthResult = withContext(Dispatchers.IO) {
+        try {
+            _isLoading.value = true
+            _authState.value = AuthState.SIGNING_IN
+            _lastError.value = null
+
+            val result = auth.signInWithCredential(credential).await()
+            val user = result.user ?: throw StitchError.AuthenticationError("No user returned")
+
+            // Provision on the spot rather than in a detached coroutine: the
+            // caller navigates the moment this returns, and a profile that
+            // arrives later means landing on an empty account.
+            val profileExists = checkUserProfileExists(user.uid)
+            if (!profileExists) {
+                createUserProfile(
+                    firebaseUser = user,
+                    displayName = displayName ?: user.displayName,
+                )
+            }
+
+            if (BuildConfig.DEBUG) {
+                println("AUTH SERVICE: ✅ Social sign-in — UID ${user.uid}, new=${!profileExists}")
+            }
+
+            AuthResult(
+                success = true,
+                userId = user.uid,
+                email = user.email ?: "",
+                isNewUser = !profileExists,
+                needsProfileSetup = !profileExists,
+            )
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) println("AUTH SERVICE: ❌ Social sign-in failed: ${e.message}")
+            _authState.value = AuthState.SIGNED_OUT
+            throw e
+        } finally {
+            _isLoading.value = false
         }
     }
 
