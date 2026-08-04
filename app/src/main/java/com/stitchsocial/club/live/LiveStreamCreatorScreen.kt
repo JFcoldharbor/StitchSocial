@@ -37,7 +37,32 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.stitchsocial.club.BuildConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/**
+ * Whether a creator's live screen is currently on screen, tracked OUTSIDE
+ * composition on purpose.
+ *
+ * When the screen leaves and re-enters composition every `remember` is
+ * re-initialised, so a presence flag stored in one can't tell "I came back"
+ * from "I'm gone" — the coroutine doing the teardown would be holding the old
+ * instance. This survives the churn, and the teardown scope with it: a scope
+ * from `rememberCoroutineScope()` is cancelled the instant the screen leaves,
+ * which is the worst possible moment to be ending a stream.
+ */
+private object CreatorScreenPresence {
+    private val onScreen = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    fun enter(creatorID: String) { onScreen[creatorID] = true }
+    fun leave(creatorID: String) { onScreen[creatorID] = false }
+    fun isOnScreen(creatorID: String) = onScreen[creatorID] == true
+}
 
 /**
  * Creator-side live stream screen. Minimum-viable Phase 3a — supports:
@@ -133,11 +158,32 @@ fun LiveStreamCreatorScreen(
         isStarting = false
     }
 
+    // Defense-in-depth: any dismissal path (back gesture, app kill, parent swap)
+    // ends the stream so we don't leave a ghost.
+    //
+    // FIX 2026-08-04 — "any dismissal path" included one that isn't a dismissal.
+    // `LaunchedEffect(Unit)` restarts when this screen leaves and re-enters
+    // composition, which means onDispose fires on a screen that is coming straight
+    // back. The iOS device log for a single go-live shows exactly that shape, and
+    // there the teardown force-ended the creator ONE SECOND after joining Agora.
+    // A real dismissal never comes back, so wait, then look.
+    //
+    // The old `scope.launch` compounded it: `rememberCoroutineScope()` is cancelled
+    // the moment the screen leaves composition, so on a genuine dismissal the
+    // teardown was racing its own cancellation and could leave the stream live
+    // with nothing left to end it.
     DisposableEffect(Unit) {
+        CreatorScreenPresence.enter(creatorID)
         onDispose {
-            // Defense-in-depth: any dismissal path (back gesture, app kill,
-            // parent swap) ends the stream so we don't leave a ghost.
-            scope.launch {
+            CreatorScreenPresence.leave(creatorID)
+            CreatorScreenPresence.scope.launch {
+                delay(700)
+                if (CreatorScreenPresence.isOnScreen(creatorID)) {
+                    if (BuildConfig.DEBUG) {
+                        println("↩️ CREATOR SCREEN: $creatorID came back — skipping teardown")
+                    }
+                    return@launch
+                }
                 queueService.onStreamEnd()
                 coinService.onStreamEnd()
                 streamService.endStream(creatorID = creatorID)

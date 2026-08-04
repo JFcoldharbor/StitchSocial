@@ -265,7 +265,16 @@ fun CommunityDetailV2View(
     // Live-state listener — passive UI sync only.
     DisposableEffect(communityID) {
         val listener = db.collection("communities").document(communityID)
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, err ->
+                // A silently-dropped error here is how the Join button loses its
+                // stream id — the banner keeps the cached live flag and nothing
+                // ever fills in activeStreamID.
+                if (err != null) {
+                    if (BuildConfig.DEBUG) {
+                        println("⚠️ LIVE: community listener failed for $communityID — ${err.message}")
+                    }
+                    return@addSnapshotListener
+                }
                 val data = snap?.data ?: return@addSnapshotListener
                 isCreatorLiveRealtime = data["isCreatorLive"] as? Boolean ?: false
                 liveStreamID = data["activeStreamID"] as? String
@@ -288,6 +297,40 @@ fun CommunityDetailV2View(
         isCreatorLiveRealtime = true
         showingLiveStream = true
         onAutoOpenConsumed()
+    }
+
+    // JOIN MUST NEVER BE A NO-OP.
+    //
+    // This was `if (liveStreamID != null) showingLiveStream = true`, so whenever
+    // the LIVE NOW banner was up without a stream id the button did nothing at
+    // all: no screen, no error, no log, no way in. And the banner routinely
+    // outlives the id — it seeds from the CACHED list item, while the id only
+    // ever arrives from the community-doc snapshot listener (which swallows its
+    // error, so a failed read leaves the id null forever), and endStream clears
+    // activeStreamID on a doc whose flag can lag.
+    //
+    // So ask the source of truth instead. fetchActiveStream returns the NEWEST
+    // live stream for the creator: if one exists we open it and repair local
+    // state, and if none does the banner was a ghost and comes down.
+    suspend fun openLiveStream() {
+        liveStreamID?.let { showingLiveStream = true; return }
+
+        val verified = com.stitchsocial.club.live.LiveStreamService
+            .getInstance().fetchActiveStream(creatorID = communityID)
+        if (verified != null) {
+            if (BuildConfig.DEBUG) {
+                println("🔴 LIVE: join had no streamID — resolved ${verified.id} for $communityID")
+            }
+            liveStreamID = verified.id
+            isCreatorLiveRealtime = true
+            showingLiveStream = true
+        } else {
+            if (BuildConfig.DEBUG) {
+                println("🔴 LIVE: join tapped but no live stream exists for $communityID — clearing banner")
+            }
+            isCreatorLiveRealtime = false
+            liveStreamID = null
+        }
     }
 
     // Data load
@@ -369,9 +412,7 @@ fun CommunityDetailV2View(
                             topMembers = topMembers,
                             isCreator = isCreator,
                             isCreatorLive = isCreatorLiveRealtime,
-                            onJoinLive = {
-                                if (liveStreamID != null) showingLiveStream = true
-                            },
+                            onJoinLive = { scope.launch { openLiveStream() } },
                             onGoLive = { showingGoLive = true },
                             onShowLeaderboard = { showingLeaderboard = true },
                             onShowSupporters = { showingSupporters = true },
