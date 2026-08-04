@@ -6,7 +6,9 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.FirebaseAuth
@@ -45,20 +47,57 @@ object SocialAuth {
      * minted for the web client or Firebase rejects it as audience-mismatched.
      */
     suspend fun signInWithGoogle(context: Context, webClientID: String): SocialCredential {
-        val option = GetGoogleIdOption.Builder()
-            // false = show every Google account on the device, including when
-            // none has been used with us before. Filtering to authorized accounts
-            // shows an empty sheet to a first-time user, which looks broken.
+        val manager = CredentialManager.create(context)
+
+        // TWO OPTIONS, IN ORDER — and the order matters.
+        //
+        // GetGoogleIdOption is the one-tap style prompt. It only ever offers
+        // accounts already present and eligible on the device, and when there
+        // are none it throws NoCredentialException — "credentials not available"
+        // — which is a dead end for someone who has simply never signed in here.
+        //
+        // GetSignInWithGoogleOption is the flow designed for an explicit "Sign
+        // in with Google" BUTTON: it shows the full picker and lets the person
+        // add an account. That's the correct fallback, and it's what makes the
+        // button work on a device with no Google account configured yet.
+        val quickOption = GetGoogleIdOption.Builder()
+            // false = offer every Google account on the device, not just ones
+            // already authorized for us. Filtering shows a first-time user an
+            // empty sheet, which reads as broken.
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(webClientID)
             .build()
 
-        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+        val buttonOption = GetSignInWithGoogleOption.Builder(webClientID).build()
+
+        suspend fun request(option: androidx.credentials.CredentialOption) =
+            manager.getCredential(
+                context,
+                GetCredentialRequest.Builder().addCredentialOption(option).build(),
+            )
 
         val response = try {
-            CredentialManager.create(context).getCredential(context, request)
+            request(quickOption)
         } catch (e: GetCredentialCancellationException) {
             throw SocialAuthCancelled()
+        } catch (e: NoCredentialException) {
+            if (BuildConfig.DEBUG) {
+                println("SOCIAL AUTH: no eligible account for one-tap — falling back to the picker")
+            }
+            try {
+                request(buttonOption)
+            } catch (e: GetCredentialCancellationException) {
+                throw SocialAuthCancelled()
+            } catch (e: NoCredentialException) {
+                // Still nothing. Almost always a CONFIG problem rather than a
+                // device one: this app's signing SHA-1 has to be registered on
+                // the Firebase Android client, or Play services refuses to mint
+                // a token and reports it as "no credentials available".
+                throw IllegalStateException(
+                    "No Google accounts available. Add a Google account on this " +
+                        "device, or check that this build's SHA-1 is registered in Firebase."
+                )
+            }
         }
 
         val credential = response.credential
