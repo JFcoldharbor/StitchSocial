@@ -287,6 +287,14 @@ class DiscoveryViewModel(
                         val data = doc.data ?: return@mapNotNull null
                         if (data["isDeleted"] as? Boolean == true) return@mapNotNull null
                         if (data["isCollectionSegment"] as? Boolean == true) return@mapNotNull null
+                        // Event moments/POVs stay in the room until the host locks
+                        // the moment (iOS parity with VideoServiceDiscovery.swift:45).
+                        val evID = data["eventId"] as? String
+                        if (!evID.isNullOrBlank() &&
+                            data["isEventRecap"] as? Boolean != true &&
+                            data["isEventPromo"] as? Boolean != true &&
+                            data["eventMomentPublished"] as? Boolean != true
+                        ) return@mapNotNull null
                         val depth = (data["conversationDepth"] as? Long)?.toInt() ?: 0
                         if (depth > 0) return@mapNotNull null
                         val vis = data["visibility"] as? String ?: "public"
@@ -391,7 +399,8 @@ class DiscoveryViewModel(
             isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false,
             eventID = data["eventId"] as? String,
             isEventPromo = data["isEventPromo"] as? Boolean ?: false,
-            isEventRecap = data["isEventRecap"] as? Boolean ?: false
+            isEventRecap = data["isEventRecap"] as? Boolean ?: false,
+            eventMomentPublished = data["eventMomentPublished"] as? Boolean ?: false
         )
     }
 

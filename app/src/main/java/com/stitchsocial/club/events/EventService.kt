@@ -162,6 +162,16 @@ object EventService {
                 "updatedAt" to Timestamp(now)
             )
         ).await()
+        // Lock the final live moment so the whole night lands in Discovery
+        // (iOS parity with EventService.swift:743). Without this the last moment
+        // of every event — usually the best one — stays in-room forever.
+        runCatching { fetchAgenda(eventID) }.getOrNull()
+            ?.filter { it.isFilled && !it.isLocked }
+            ?.forEach { slot ->
+                runCatching { lockMoment(eventID, slot.id) }.onFailure { e ->
+                    if (BuildConfig.DEBUG) println("EVENT: end-lock of ${slot.id} failed - ${e.message}")
+                }
+            }
     }
 
     /** Host-only delete of the event doc. onEventDeleted CF recursively cleans subcollections. */
@@ -342,6 +352,77 @@ object EventService {
             txn.update(eventRef, eventUpdate)
             null
         }.await()
+
+        // Publish-on-lock (iOS parity with EventService.swift:411). Creating THIS
+        // moment locks every previously-live one — each locked moment plus its POVs
+        // pushes to Discovery. The new moment stays in-room until the host records
+        // the next. Best-effort per slot: one failure must not strand the rest.
+        runCatching { fetchAgenda(eventID) }.getOrNull()
+            ?.filter { it.id != agendaItemID && it.isFilled && !it.isLocked }
+            ?.forEach { slot ->
+                runCatching { lockMoment(eventID, slot.id) }.onFailure { e ->
+                    if (BuildConfig.DEBUG) println("EVENT: lock of ${slot.id} failed - ${e.message}")
+                }
+            }
+    }
+
+    /**
+     * Lock a moment (the host created the next one, or ended the event): flip the
+     * slot to locked and publish its head video plus every POV stitched onto it to
+     * Discovery. Idempotent.
+     */
+    suspend fun lockMoment(eventID: String, agendaItemID: String) =
+        setMomentPublished(eventID, agendaItemID, published = true)
+
+    /** Unlock a previously-locked moment: pull it and its POVs back out of Discovery. */
+    suspend fun unlockMoment(eventID: String, agendaItemID: String) =
+        setMomentPublished(eventID, agendaItemID, published = false)
+
+    /**
+     * Flip a moment's published state on the slot, its head video, and its POVs.
+     *
+     * `eventMomentPublished` is what lifts an event clip out of in-room-only and
+     * into Discovery — see CoreVideoMetadata.isEventInternal. Android never wrote
+     * it before, so Android-created moments stayed invisible on both platforms
+     * forever while iOS-created ones were locked and published correctly.
+     */
+    private suspend fun setMomentPublished(eventID: String, agendaItemID: String, published: Boolean) {
+        if (eventID.isBlank() || agendaItemID.isBlank()) throw EventException("Missing event or account details")
+        val itemRef = agendaRef(eventID).document(agendaItemID)
+        val itemSnap = itemRef.get().await()
+
+        val batch = db.batch()
+        batch.update(
+            itemRef,
+            mapOf(
+                "locked" to published,
+                "lockedAt" to if (published) Timestamp(Date()) else FieldValue.delete()
+            )
+        )
+
+        // The moment head video.
+        val headID = itemSnap.getString("momentVideoID")
+        if (!headID.isNullOrBlank()) {
+            batch.update(
+                db.collection(Col.VIDEOS).document(headID),
+                mapOf("eventMomentPublished" to published)
+            )
+        }
+
+        // Cascade to every POV stitched onto this moment. Single-field query — the
+        // slot id is globally unique, so no composite index is needed.
+        val povs = db.collection(Col.VIDEOS)
+            .whereEqualTo("anchorMomentId", agendaItemID)
+            .get()
+            .await()
+        for (doc in povs.documents) {
+            batch.update(doc.reference, mapOf("eventMomentPublished" to published))
+        }
+
+        batch.commit().await()
+        if (BuildConfig.DEBUG) {
+            println("EVENT: moment $agendaItemID ${if (published) "LOCKED -> Discovery" else "UNLOCKED -> in-room"} (+${povs.documents.size} POVs)")
+        }
     }
 
     /** Attach an on-site POV stitch to the slot it hangs off: tag the video + bump slot/attendee povCount. */
@@ -398,11 +479,17 @@ object EventService {
     }
 
     /**
-     * Host "Make live again": bump a moment's scheduledTime to now so it becomes
-     * the newest filled slot → the live moment. Recovers an accidental lock.
+     * Host "Make live again": recovers an accidental lock.
+     *
+     * Two writes are needed now that liveMomentItem() requires FILLED AND UNLOCKED.
+     * Unlocking alone would not revive this moment if a newer unlocked one exists,
+     * and bumping scheduledTime alone stopped working the moment `locked` started
+     * being honored — so do both: unlock (which also pulls it and its POVs back out
+     * of Discovery) and make it the newest slot.
      */
     suspend fun reopenMoment(eventID: String, agendaItemID: String) {
         if (eventID.isBlank() || agendaItemID.isBlank()) throw EventException("Missing event or account details")
+        unlockMoment(eventID, agendaItemID)
         agendaRef(eventID).document(agendaItemID)
             .update("scheduledTime", Timestamp(Date()))
             .await()

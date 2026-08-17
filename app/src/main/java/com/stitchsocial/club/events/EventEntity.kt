@@ -297,9 +297,21 @@ data class EventAgendaItem(
     val caption: String? = null,
     val durationSeconds: Double? = null,
     val povCount: Int? = null,
+    // Publish-on-lock (iOS parity with EventEntity.swift:234). A moment is LIVE —
+    // collecting POVs, in-room only — until the host records the next one, which
+    // LOCKS it and pushes it plus its POVs to Discovery. Nullable so legacy
+    // agenda docs written before this field still read as unlocked.
+    val locked: Boolean? = null,
+    val lockedAt: Date? = null,
     val createdAt: Date = Date()
 ) {
     val isFilled: Boolean get() = momentVideoID != null
+
+    /** Locked = published to Discovery (the host moved on). Legacy docs -> false. */
+    val isLocked: Boolean get() = locked ?: false
+
+    /** The live, collecting moment: filled by the host and not yet locked. */
+    val isLiveMoment: Boolean get() = isFilled && !isLocked
 
     val timeLabel: String
         get() = SimpleDateFormat("h:mm a", Locale.getDefault()).format(scheduledTime)
@@ -328,6 +340,8 @@ data class EventAgendaItem(
                 caption = (map["caption"] as? String)?.takeIf { it.isNotBlank() },
                 durationSeconds = (map["durationSeconds"] as? Number)?.toDouble(),
                 povCount = (map["povCount"] as? Number)?.toInt(),
+                locked = map["locked"] as? Boolean,
+                lockedAt = (map["lockedAt"] as? Timestamp)?.toDate(),
                 createdAt = (map["createdAt"] as? Timestamp)?.toDate() ?: Date()
             )
         }
@@ -346,14 +360,28 @@ fun List<EventAgendaItem>.liveItem(now: Date = Date()): EventAgendaItem? =
     byTime().lastOrNull { it.scheduledTime <= now }
 
 /**
- * The LIVE moment = the newest FILLED slot (the most recent moment actually
- * posted). This — not [liveItem] — drives what's stitchable, the live hero, and
- * the lock state. An empty slot the host just created by tapping Go Live isn't
- * filled, so it can't steal liveness or prematurely lock the previous moment;
- * only recording a new moment in full replaces the live one (and locks the prior).
+ * The LIVE moment = the newest FILLED, UNLOCKED slot. This — not [liveItem] —
+ * drives what's stitchable, the live hero, and the lock state. An empty slot the
+ * host just created by tapping Go Live isn't filled, so it can't steal liveness
+ * or prematurely lock the previous moment; only recording a new moment in full
+ * replaces the live one (and locks the prior).
+ *
+ * The `!isLocked` half is iOS parity (EventEntity.swift:273). Without it Android
+ * treated the newest filled slot as live even after iOS had locked and published
+ * it, so an Android attendee could stitch a POV onto a closed moment — and that
+ * late POV never received eventMomentPublished, leaving it invisible in Discovery
+ * on both platforms while still counting toward povCount.
+ *
+ * Legacy agenda docs carry no `locked` key and read as unlocked, so this returns
+ * exactly what it did before for every event created prior to publish-on-lock.
+ * Nil between a lock and the next recording, which is intended.
  */
 fun List<EventAgendaItem>.liveMomentItem(): EventAgendaItem? =
-    filter { it.isFilled }.byTime().lastOrNull()
+    byTime().lastOrNull { it.isLiveMoment }
+
+/** Locked, filled moments — the published threads that make up the recap, newest first. */
+fun List<EventAgendaItem>.lockedMoments(): List<EventAgendaItem> =
+    byTime().filter { it.isFilled && it.isLocked }.reversed()
 
 // MARK: - Creation draft (collected by the create flow)
 

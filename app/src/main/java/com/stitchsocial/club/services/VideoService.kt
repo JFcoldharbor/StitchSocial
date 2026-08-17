@@ -250,7 +250,8 @@ class VideoServiceImpl {
                         convertFirebaseToVideoMetadata(snapshot.documents)
                             .filter {
                                 it.conversationDepth == 0 && !it.isDeleted &&
-                                    it.isPubliclyVisible && !it.isCollectionSegment
+                                    it.isPubliclyVisible && !it.isCollectionSegment &&
+                                        !it.isEventInternal
                             }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Chunk query failed: ${e.message}") }
@@ -279,7 +280,8 @@ class VideoServiceImpl {
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
                 .filter {
                     it.conversationDepth == 0 && !it.isDeleted &&
-                        it.isPubliclyVisible && !it.isCollectionSegment
+                        it.isPubliclyVisible && !it.isCollectionSegment &&
+                            !it.isEventInternal
                 }
                 .sortedByDescending { it.createdAt }
 
@@ -587,7 +589,8 @@ class VideoServiceImpl {
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
                 .filter {
                     it.conversationDepth == 0 && !it.isDeleted &&
-                        it.isPubliclyVisible && !it.isCollectionSegment
+                        it.isPubliclyVisible && !it.isCollectionSegment &&
+                            !it.isEventInternal
                 }
                 .sortedByDescending { it.trendingScore }
 
@@ -613,7 +616,8 @@ class VideoServiceImpl {
             val videos = convertFirebaseToVideoMetadata(snapshot.documents)
                 .filter {
                     it.conversationDepth == 0 && !it.isDeleted &&
-                        it.isPubliclyVisible && !it.isCollectionSegment
+                        it.isPubliclyVisible && !it.isCollectionSegment &&
+                            !it.isEventInternal
                 }
                 .sortedByDescending { it.engagementRatio }
 
@@ -892,6 +896,7 @@ class VideoServiceImpl {
                     eventID = data["eventId"] as? String,
                     isEventPromo = data["isEventPromo"] as? Boolean ?: false,
                     isEventRecap = data["isEventRecap"] as? Boolean ?: false,
+                    eventMomentPublished = data["eventMomentPublished"] as? Boolean ?: false,
                     publicVisibility = data["publicVisibility"] as? String
                 )
             } catch (e: Exception) {

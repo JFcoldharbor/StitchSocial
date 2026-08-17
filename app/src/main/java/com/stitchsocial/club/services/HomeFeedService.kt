@@ -228,6 +228,16 @@ class HomeFeedService(
                 // them or one episode fills the feed with N entries.
                 if (document.getBoolean("isCollectionSegment") == true) continue
 
+                // Event moments and the POVs stitched onto them are in-room only
+                // until the host records the next moment, which locks this one and
+                // publishes it. Recap and promo are public from the start.
+                val evID = document.getString("eventId")
+                if (!evID.isNullOrBlank() &&
+                    document.getBoolean("isEventRecap") != true &&
+                    document.getBoolean("isEventPromo") != true &&
+                    document.getBoolean("eventMomentPublished") != true
+                ) continue
+
                 // Skip blocked users' content (App Store Guideline 1.2 / Play UGC).
                 val creatorID = document.getString(FirebaseSchema.VideoDocument.CREATOR_ID) ?: ""
                 if (blockedIDs.contains(creatorID)) continue

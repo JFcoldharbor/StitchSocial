@@ -103,6 +103,10 @@ data class CoreVideoMetadata(
     val eventID: String? = null,
     val isEventPromo: Boolean = false,
     val isEventRecap: Boolean = false,
+    // Publish-on-lock (iOS parity with CoreVideoMetadata.swift:286). Flipped true
+    // by EventService.lockMoment on the moment head and every POV hanging off it.
+    // Until then the clip is in-room only — see [isEventInternal].
+    val eventMomentPublished: Boolean = false,
 
     // Moderation visibility (iOS parity — see foundation/PublicVisibility.swift):
     // "public" (passed) | "pending" (awaiting scan) | "hidden_from_public"
@@ -121,6 +125,15 @@ data class CoreVideoMetadata(
 
     /** True if this thread head is an event post. */
     val isEvent: Boolean get() = event != null
+
+    /**
+     * In-room only (iOS parity with CoreVideoMetadata.swift:291). An event moment
+     * or POV must stay OUT of Discovery and the home feeds while its moment is
+     * still live. Only the recap, the pre-event promo, and moments the host has
+     * LOCKED by recording the next one surface publicly.
+     */
+    val isEventInternal: Boolean
+        get() = !eventID.isNullOrBlank() && !isEventRecap && !isEventPromo && !eventMomentPublished
 
     /**
      * Single source of truth for which URL to hand a player. Precedence:
