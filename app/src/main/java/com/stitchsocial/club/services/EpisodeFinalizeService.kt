@@ -14,7 +14,10 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.stitchsocial.club.BuildConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -38,6 +41,10 @@ import kotlin.coroutines.resumeWithException
  * of feeds by `isCollectionSegment` + `collectionID` instead.
  */
 class EpisodeFinalizeService(private val context: Context) {
+
+    /** Outlives a publish: a transcode poll runs for minutes after the batch
+     *  commits, and must not be cancelled when the caller's scope ends. */
+    private val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val db = FirebaseFirestore.getInstance("stitchfin")
     private val storage = FirebaseStorage.getInstance()
@@ -102,6 +109,8 @@ class EpisodeFinalizeService(private val context: Context) {
             val batch = db.batch()
             val segmentIds = mutableListOf<String>()
             var firstThumbnailURL: String? = null
+            /** (docId, hlsURL) for segments awaiting transcode. */
+            val pendingPolls = mutableListOf<Pair<String, String>>()
 
             input.segments.forEachIndexed { i, seg ->
                 onProgress(Phase.Splitting(i + 1, input.segments.size))
@@ -110,7 +119,48 @@ class EpisodeFinalizeService(private val context: Context) {
 
                 onProgress(Phase.Uploading(i + 1, input.segments.size))
                 val segId = UUID.randomUUID().toString()
-                val videoURL = upload(cut, "collections/${input.episodeID}/$segId.mp4")
+
+                // Segments go through the CDN pipeline, exactly like posts.
+                //
+                // They never did — this uploaded each cut straight to Storage
+                // and never touched CdnUploadService, which exists here and is
+                // already used for ordinary posts in VideoCoordinator. That one
+                // omission is the whole collections bug, and it has two halves.
+                //
+                // No pipeline means no H.264 transcode, so the segment keeps the
+                // phone's own codec. On a recent Android that is HEVC, and AWS
+                // Rekognition cannot decode HEVC: the scan fails permanently,
+                // moderation parks the segment at error_permanent, and the
+                // visibility gate hides it. BOTH clients obey that gate, so a
+                // collection cut on Android was invisible on iOS too. It also
+                // means no HLS, so whatever did play, played as a raw file.
+                //
+                // Same fix as iOS commit "Collection segments go through the CDN
+                // pipeline, like posts do".
+                var segHlsURL = ""
+                var segMp4URL = ""
+                var segCdnId = ""
+                val videoURL: String = try {
+                    val ticket = CdnUploadService.requestTicket(segId)
+                    CdnUploadService.uploadSource(cut, ticket.uploadURL)
+                    segHlsURL = ticket.hlsURL
+                    segMp4URL = ticket.mp4URL
+                    segCdnId = segId
+                    // videoURL points at the faststart MP4, matching posts: it is
+                    // what legacy readers use AND what moderation scans, and the
+                    // pipeline's MP4 is H.264.
+                    ticket.mp4URL
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) {
+                        println("⚠️ FINALIZE: CDN upload failed for $segId — ${e.message}; falling back to Storage")
+                    }
+                    // Not fatal: a pipeline outage should not stop a creator
+                    // publishing. The path matches iOS and this file's own
+                    // documentation in CollectionService — the old
+                    // "collections/{id}/{segId}.mp4" wrote segments to a tree
+                    // neither the other client nor that comment knew about.
+                    upload(cut, "videoCollections/${input.episodeID}/segments/$segId.mp4")
+                }
 
                 if (firstThumbnailURL == null) firstThumbnailURL = input.coverImageURL
 
@@ -150,7 +200,25 @@ class EpisodeFinalizeService(private val context: Context) {
                     // Moderate-before-publish, same as every other video write.
                     "publicVisibility" to "pending"
                 )
-                batch.set(db.collection("videos").document(segId), segData)
+
+                // CDN fields, written the way a post writes them. status starts
+                // at "processing"; HlsReadinessPoller flips it to "published"
+                // once the ABR master is live.
+                //
+                // Omitted entirely on the Storage fallback: a doc claiming an
+                // hlsURL that was never produced would sit at "processing" for
+                // ever and read as broken.
+                val segDoc = if (segCdnId.isNotEmpty()) {
+                    segData + mapOf(
+                        "hlsURL" to segHlsURL,
+                        "mp4URL" to segMp4URL,
+                        "status" to "processing",
+                        "cdnVideoId" to segCdnId
+                    )
+                } else segData
+
+                batch.set(db.collection("videos").document(segId), segDoc)
+                if (segHlsURL.isNotEmpty()) pendingPolls += segId to segHlsURL
                 segmentIds += segId
             }
 
@@ -187,6 +255,19 @@ class EpisodeFinalizeService(private val context: Context) {
             )
 
             batch.commit().await()
+
+            // AFTER the commit: the poller flips status on documents, so it must
+            // not race the write that creates them. Detached on its own scope
+            // because it outlives this call by minutes — awaiting it here would
+            // hold the publish flow open while a transcode runs.
+            if (pendingPolls.isNotEmpty()) {
+                pollScope.launch {
+                    pendingPolls.forEach { (docId, hls) ->
+                        runCatching { HlsReadinessPoller.pollUntilReady(docId, hls) }
+                    }
+                }
+            }
+
             onProgress(Phase.Done(segmentIds.size))
             if (BuildConfig.DEBUG) {
                 println("🎬 FINALIZE: published ${input.episodeID} with ${segmentIds.size} segments")
