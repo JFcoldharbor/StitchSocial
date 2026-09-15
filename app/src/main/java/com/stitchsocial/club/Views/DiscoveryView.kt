@@ -48,9 +48,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -383,7 +389,12 @@ class DiscoveryViewModel(
             aspectRatio = (data["aspectRatio"] as? Number)?.toDouble() ?: (9.0 / 16.0),
             fileSize = (data["fileSize"] as? Long) ?: 0L,
             contentType = ContentType.THREAD,
-            temperature = Temperature.COOL,
+            // Read it. This was hardcoded COOL, and TRENDING filters on HOT or
+            // BLAZING — so the tab could only ever come back empty, whatever the
+            // documents said.
+            temperature = (data["temperature"] as? String)?.lowercase()
+                ?.let { raw -> Temperature.values().firstOrNull { it.rawValue == raw } }
+                ?: Temperature.COOL,
             qualityScore = (data["qualityScore"] as? Long)?.toInt() ?: 50,
             engagementRatio = if (hype + cool > 0) hype.toDouble() / (hype + cool) else 0.5,
             velocityScore = 0.0,
@@ -681,9 +692,14 @@ class DiscoveryViewModel(
     }
 
     private fun applyFilterAndShuffle() {
-        // Filter blocked creators — mirrors Swift applyBlockedCreatorFilter
+        // Filter blocked creators — mirrors Swift applyBlockedCreatorFilter.
+        // The set was read into a local and then never used: "don't show me this
+        // creator" went into the tracker, was persisted, and changed nothing about
+        // what the feed handed back.
         val blocked = DiscoveryEngagementTracker.blockedCreatorIDs()
-        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(_videos.value))
+        val visible = if (blocked.isEmpty()) _videos.value
+            else _videos.value.filter { it.creatorID !in blocked }
+        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(visible))
     }
 
     /**
@@ -749,6 +765,11 @@ fun DiscoveryView(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    val density = LocalDensity.current
+    // Height of the chrome floating over the feed, measured rather than assumed —
+    // the cell needs it to keep the overlay's top row clear of the tab rail.
+    var floatingChromeHeight by remember { mutableStateOf(0.dp) }
 
     // Services
     val authService = remember { AuthService() }
@@ -1171,9 +1192,18 @@ fun DiscoveryView(
 
         // Main Discovery Content
         if (!showVideoPlayer) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
+            // Full-bleed applies to the feed and nothing else. Grid stays boxed —
+            // it is a scanning surface and cannot be edge-to-edge — the takeover
+            // categories draw their own screens, and empty / loading / error states
+            // stay boxed too: a scrim over no video is just a dark band.
+            // (iOS parity — 5b281e5.)
+            val isFullBleedFeed = discoveryMode == DiscoveryMode.SWIPE &&
+                selectedCategory == DiscoveryCategory.FOR_YOU &&
+                selectedHashtag == null &&
+                errorMessage == null &&
+                videos.isNotEmpty()
+
+            val chromeContent: @Composable ColumnScope.() -> Unit = {
                 // Header with shuffle and mode toggle
                 DiscoveryHeader(
                     isLoading = isLoading,
@@ -1233,7 +1263,12 @@ fun DiscoveryView(
                         }
                     )
                 }
+            }
 
+            // The feed, and everything that stands in for it. Takes the clearance
+            // it needs under the floating chrome — zero when the chrome is stacked
+            // above it instead of over it.
+            val mainContent: @Composable (Dp) -> Unit = { topInset ->
                 // Content Area
                 val currentErrorMessage = errorMessage
                 when {
@@ -1279,64 +1314,47 @@ fun DiscoveryView(
                     else -> {
                         when (discoveryMode) {
                             DiscoveryMode.SWIPE -> {
-                                // Swipe Cards Mode (iOS style)
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    DiscoverySwipeCards(
-                                        videos = videos,
-                                        currentIndex = currentSwipeIndex,
-                                        collectionCardMap = viewModel.collectionCardMap,
-                                        sponsoredSlotMap = viewModel.sponsoredSlotMap,
-                                        onSponsoredCta = { slot -> openSponsoredSlot(slot) },
-                                        onIndexChange = { newIndex ->
-                                            currentSwipeIndex = newIndex
-                                        },
-                                        onVideoTap = { video ->
-                                            // Sponsored card — recordTap + open ctaURL, never the player
-                                            val slot = viewModel.sponsoredSlotMap[video.id]
-                                            if (slot != null) {
-                                                openSponsoredSlot(slot)
-                                                return@DiscoverySwipeCards
-                                            }
-                                            // Check if this is a collection card first — matches Swift
-                                            val collection = viewModel.collectionCardMap[video.id]
-                                            if (collection != null) {
-                                                selectedCollection = collection
-                                                showCollectionPlayer = true
-                                                return@DiscoverySwipeCards
-                                            }
-                                            if (BuildConfig.DEBUG) { println("DISCOVERY: Video tapped - ${video.title}") }
-                                            deckPosition = currentSwipeIndex
-                                            currentPlayingVideo = video
-
-                                            // Fetch thread data (parent + children)
-                                            scope.launch {
-                                                try {
-                                                    if (video.threadID != null) {
-                                                        val (parent, children) = videoService.getThreadData(video.threadID)
-                                                        allVideos = if (parent != null) {
-                                                            listOf(parent) + children  // Like HomeFeedView
-                                                        } else {
-                                                            listOf(video)
-                                                        }
-                                                    } else {
-                                                        allVideos = listOf(video)
-                                                    }
-                                                    currentVideoIndex = 0  // Start at parent
-                                                    showVideoPlayer = true
-                                                } catch (e: Exception) {
-                                                    if (BuildConfig.DEBUG) { println("DISCOVERY: Error fetching thread - ${e.message}") }
-                                                    allVideos = listOf(video)
-                                                    currentVideoIndex = 0
-                                                    showVideoPlayer = true
-                                                }
-                                            }
-                                        },
-                                        isAnnouncementShowing = isAnnouncementShowing,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-
-                                    // Next/Back/Fullscreen instruction pill removed per request.
-                                }
+                                // The feed. This was a stack of inset cards you
+                                // swiped sideways, where a tap opened the real
+                                // player — the video was a preview of itself. Now
+                                // the browsing surface IS the player: one vertical
+                                // pager, one video, full bleed, with the same
+                                // overlay, thread swipe and peeks the cover had.
+                                // (iOS parity — 60b1f77 / f91cf1a.)
+                                DiscoveryFullscreenDeck(
+                                    rootVideos = videos,
+                                    initialVideoID = videos.firstOrNull()?.id ?: "",
+                                    initialIndex = currentSwipeIndex,
+                                    hosted = true,
+                                    topInset = topInset,
+                                    currentUserID = currentUserID,
+                                    engagementViewModel = engagementViewModel,
+                                    iconManager = iconManager,
+                                    followManager = followManager,
+                                    navigationCoordinator = navigationCoordinator,
+                                    videoService = videoService,
+                                    isAnnouncementShowing = isAnnouncementShowing,
+                                    collectionCardMap = viewModel.collectionCardMap,
+                                    sponsoredSlotMap = viewModel.sponsoredSlotMap,
+                                    onSponsoredCta = { slot -> openSponsoredSlot(slot) },
+                                    onSponsoredShown = { slotID -> sponsoredSlotService.recordImpression(slotID) },
+                                    onCollectionTap = { collection ->
+                                        selectedCollection = collection
+                                        showCollectionPlayer = true
+                                    },
+                                    onSettledIndexChange = { idx -> currentSwipeIndex = idx },
+                                    // Hosted: no exit, and profile navigation keeps
+                                    // the cursor where the feed left it.
+                                    onDismiss = {},
+                                    onNavigateToProfile = { userID, settledIdx ->
+                                        currentSwipeIndex = settledIdx
+                                        onNavigateToProfile(userID)
+                                    },
+                                    onShowThreadView = { threadID, targetVideoID ->
+                                        onShowThreadView(threadID, targetVideoID)
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                             DiscoveryMode.GRID -> {
                                 DiscoveryGridView(
@@ -1384,6 +1402,43 @@ fun DiscoveryView(
                             }
                         }
                     }
+                }
+            }
+
+            if (isFullBleedFeed) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    mainContent(floatingChromeHeight)
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            // The scrim the floating chrome sits on. Same contract
+                            // as the player's own: chrome over video never depends
+                            // on the frame behind it being dark.
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.55f),
+                                        Color.Black.copy(alpha = 0.22f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                            // Measured, not guessed: the toolbar and tab rail are
+                            // one line of text each, and their height moves with
+                            // the device's font scale.
+                            .onGloballyPositioned { coords ->
+                                val h = with(density) { coords.size.height.toDp() }
+                                if (h != floatingChromeHeight) floatingChromeHeight = h
+                            },
+                        content = chromeContent
+                    )
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    chromeContent()
+                    mainContent(0.dp)
                 }
             }
         }
@@ -1544,38 +1599,64 @@ private fun DiscoveryCategorySelector(
     selectedCategory: DiscoveryCategory,
     onCategorySelected: (DiscoveryCategory) -> Unit
 ) {
+    // Underlined tabs, not pills. All five of these navigate, and a pill reads as
+    // a filter you toggle — an underline reads as a place you are. Type carries the
+    // hierarchy, so the row costs one line of height instead of a band of chrome,
+    // and the icons go: five glyphs next to five words is the same information
+    // twice. (iOS parity — 5bd9770.)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            // The rail sits on video now, so the right edge fades instead of
+            // cutting the last tab flat against nothing — a hard-clipped
+            // "Trending" reads as the row simply ending.
+            .graphicsLayer { alpha = 0.99f }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Black,
+                            0.82f to Color.Black,
+                            1f to Color.Transparent
+                        )
+                    ),
+                    blendMode = BlendMode.DstIn
+                )
+            }
+            .padding(horizontal = Spacing.lg)
+            .padding(top = 8.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(19.dp)
     ) {
-        // Capsule pills: SELECTED = solid magenta fill + white text/icon (filled
-        // highlight indicator); unselected = white 0.5 on a faint fill.
         DiscoveryCategory.values().forEach { category ->
             val selected = selectedCategory == category
-            val accent = StitchColors.primary
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                // Intrinsic width so the rule below matches the label it underlines.
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .background(if (selected) accent else Color.White.copy(alpha = 0.06f))
+                    .width(IntrinsicSize.Max)
                     .clickable { onCategorySelected(category) }
-                    .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
             ) {
-                Icon(
-                    imageVector = category.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = if (selected) Color.White else Color.White.copy(alpha = 0.5f)
-                )
                 Text(
-                    text = category.displayName,
-                    fontSize = 13.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selected) Color.White else Color.White.copy(alpha = 0.5f)
+                    text = category.displayName.uppercase(),
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                    maxLines = 1,
+                    color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+                    // Every label carries its own contrast floor rather than
+                    // borrowing one from a chip background that no longer exists.
+                    style = LocalTextStyle.current.copy(
+                        shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)
+                    )
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.5.dp)
+                        .background(if (selected) DashPalette.railAccent else Color.Transparent)
                 )
             }
         }
@@ -2138,10 +2219,20 @@ private fun DiscoveryHashtagChip(
 
 // MARK: - Fullscreen Video Deck (TikTok-style VerticalPager)
 //
-// Replaces the old hand-rolled Animatable deck. Sponsored / collection
-// pseudo-cards carry a blank videoURL and are filtered out so they never reach
-// an ExoPlayer. beyondBoundsPageCount = 1 keeps one neighbor on each side
-// composed, so the next video's player is prepared before it scrolls in.
+// Replaces the old hand-rolled Animatable deck. beyondBoundsPageCount = 1 keeps
+// one neighbor on each side composed, so the next video's player is prepared
+// before it scrolls in.
+//
+// Two hosts, one deck. `hosted = true` is Discovery's own feed: the deck IS the
+// browsing surface, chrome floats over it, and there is no way out because there
+// is nothing to exit to. Unhosted it is a cover opened from the grid or search,
+// which owns a close button and a dismiss index. iOS made the same call in
+// f91cf1a — a browsing deck and a fullscreen deck that differ only in chrome are
+// one composable, not two, or they drift.
+//
+// Sponsored / collection pseudo-cards carry a blank videoURL. They are pages
+// here rather than being filtered out: dropping them is what kept ads and
+// collections out of the fullscreen feed entirely.
 @Composable
 private fun DiscoveryFullscreenDeck(
     rootVideos: List<CoreVideoMetadata>,
@@ -2157,13 +2248,37 @@ private fun DiscoveryFullscreenDeck(
     onDismiss: (settledIndex: Int) -> Unit,
     onNavigateToProfile: (userID: String, settledIndex: Int) -> Unit,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    /** Discovery's own feed: no close button, chrome floats above, tap pauses. */
+    hosted: Boolean = false,
+    /** Height of that floating chrome, so the overlay's top row clears it. */
+    topInset: Dp = 0.dp,
+    /** Where to open. Takes precedence over initialVideoID when hosted. */
+    initialIndex: Int? = null,
+    collectionCardMap: Map<String, VideoCollection> = emptyMap(),
+    sponsoredSlotMap: Map<String, SponsoredSlot> = emptyMap(),
+    onSponsoredCta: (SponsoredSlot) -> Unit = {},
+    onSponsoredShown: (String) -> Unit = {},
+    onCollectionTap: (VideoCollection) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val playable = remember(rootVideos) { rootVideos.filter { it.videoURL.isNotBlank() } }
+    // A page is playable if it has a video, or if it is a pseudo-card that draws
+    // itself. Anything else — a decode that produced neither — would be a blank
+    // page you can swipe onto.
+    val playable = remember(rootVideos, collectionCardMap, sponsoredSlotMap) {
+        rootVideos.filter {
+            it.videoURL.isNotBlank() ||
+                sponsoredSlotMap.containsKey(it.id) ||
+                collectionCardMap.containsKey(it.id)
+        }
+    }
     if (playable.isEmpty()) return
 
-    val initialPage = remember(playable, initialVideoID) {
-        playable.indexOfFirst { it.id == initialVideoID }.coerceAtLeast(0)
+    val initialPage = remember(playable, initialVideoID, initialIndex) {
+        val byIndex = initialIndex
+            ?.let { idx -> rootVideos.getOrNull(idx)?.id }
+            ?.let { id -> playable.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+        byIndex ?: playable.indexOfFirst { it.id == initialVideoID }.coerceAtLeast(0)
     }
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { playable.size })
 
@@ -2172,10 +2287,29 @@ private fun DiscoveryFullscreenDeck(
         return rootVideos.indexOfFirst { it.id == settled.id }.coerceAtLeast(0)
     }
 
+    // Discovery's signal tracker used to live on the card deck. The deck is gone,
+    // so the feed carries it: same four calls, driven by the pager's settled page
+    // instead of a swipe gesture. Only when hosted — a cover opened from the grid
+    // is not a browsing session and would start a second one on top of this.
+    val tracker = DiscoveryEngagementTracker
+    var lastTrackedPage by remember { mutableStateOf(-1) }
+    LaunchedEffect(hosted) { if (hosted) tracker.startNewSession() }
+
     // Sync the settled page back to the caller's full-list index (hidden swipe
     // cursor + dismiss) and warm the neighbor byte-caches.
     LaunchedEffect(pagerState.currentPage, playable) {
         onSettledIndexChange(currentFullIndex())
+        if (hosted) {
+            val settled = playable.getOrNull(pagerState.currentPage)
+            if (settled != null && pagerState.currentPage != lastTrackedPage) {
+                // The first page of a session was never swiped away from anything.
+                if (lastTrackedPage >= 0) {
+                    tracker.cardSwipedAway(wasSwipeBack = pagerState.currentPage < lastTrackedPage)
+                }
+                lastTrackedPage = pagerState.currentPage
+                tracker.cardBecameActive(videoID = settled.id, creatorID = settled.creatorID)
+            }
+        }
         val warm = listOfNotNull(
             playable.getOrNull(pagerState.currentPage + 1)?.videoURL,
             playable.getOrNull(pagerState.currentPage - 1)?.videoURL
@@ -2193,10 +2327,38 @@ private fun DiscoveryFullscreenDeck(
         ) { page ->
             val root = playable[page]
             val isCurrentPage = pagerState.currentPage == page
+            val sponsored = sponsoredSlotMap[root.id]
+            val collection = collectionCardMap[root.id]
             key(root.id) {
-                DiscoveryFullscreenCard(
+                if (sponsored != null) {
+                    // Full-bleed, not the inset card the deck used to draw. A
+                    // sponsored page is a page like any other now.
+                    Box(Modifier.fillMaxSize().background(Color.Black)) {
+                        SponsoredSwipeCard(
+                            slot = sponsored,
+                            onCtaClick = { onSponsoredCta(sponsored) },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    // A page you have settled on is an impression. Session-deduped
+                    // by the service, so a swipe back does not count twice.
+                    LaunchedEffect(isCurrentPage) {
+                        if (isCurrentPage) onSponsoredShown(sponsored.id)
+                    }
+                } else if (collection != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                            .clickable { onCollectionTap(collection) }
+                    ) {
+                        CollectionSwipeCard(collection = collection, modifier = Modifier.fillMaxSize())
+                    }
+                } else DiscoveryFullscreenCard(
                     root = root,
                     isCurrentPage = isCurrentPage,
+                    hosted = hosted,
+                    topInset = topInset,
                     isAnnouncementShowing = isAnnouncementShowing,
                     currentUserID = currentUserID,
                     engagementViewModel = engagementViewModel,
@@ -2233,6 +2395,10 @@ private fun DiscoveryFullscreenDeck(
 private fun DiscoveryFullscreenCard(
     root: CoreVideoMetadata,
     isCurrentPage: Boolean,
+    /** Discovery's own feed — no exit button, and the tab bar is still there. */
+    hosted: Boolean = false,
+    /** Clearance for the floating chrome above this cell. */
+    topInset: Dp = 0.dp,
     isAnnouncementShowing: Boolean,
     currentUserID: String?,
     engagementViewModel: EngagementViewModel,
@@ -2390,11 +2556,16 @@ private fun DiscoveryFullscreenCard(
         ) {
             key(currentVideo.id) {
                 var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
+                // Hosted, a tap pauses. It used to open this very deck, which is
+                // now what you are already looking at — so the gesture is free,
+                // and pause-on-tap is what every other feed surface does.
+                var tapPaused by remember(currentVideo.id) { mutableStateOf(false) }
 
                 VideoPlayerComposable(
                     video = currentVideo,
-                    isActive = isActive,
+                    isActive = isActive && !tapPaused,
                     modifier = Modifier.fillMaxSize(),
+                    onVideoClick = if (hosted) ({ tapPaused = !tapPaused }) else null,
                     onPlaybackStarted = { showPoster = false }
                 )
 
@@ -2410,6 +2581,11 @@ private fun DiscoveryFullscreenCard(
                 }
             }
 
+            // Hosted, the chrome above is Discovery's own and the tab bar is still
+            // below, so the overlay keeps HomeFeed's bottom clearance and is pushed
+            // down past the toolbar and tabs. Top padding only — the bottom edge of
+            // this box is still the bottom of the screen, so nothing moves up.
+            Box(modifier = Modifier.fillMaxSize().padding(top = if (hosted) topInset else 0.dp)) {
             ContextualVideoOverlay(
                 video = currentVideo,
                 overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
@@ -2422,11 +2598,13 @@ private fun DiscoveryFullscreenCard(
                 // Hide the overlay while the pager moves, so it doesn't ride
                 // across the incoming video.
                 isVisible = !isDragging,
-                // Fullscreen hides the tab bar; drop the metadata + actions lower and
-                // let the overlay's scrim sit flush to the screen edge.
-                bottomPaddingOverride = 42.dp,
-                showShareInTop = true,
-                onExit = onExit,
+                // A cover hides the tab bar: drop the metadata + actions lower and
+                // let the overlay's scrim sit flush to the screen edge. Hosted, the
+                // tab bar is there and the default clearance is the right one.
+                bottomPaddingOverride = if (hosted) null else 42.dp,
+                // No close button on the browsing feed — there is nothing to close.
+                showShareInTop = !hosted,
+                onExit = if (hosted) null else onExit,
                 onAction = { action ->
                     when (action) {
                         is OverlayAction.NavigateToProfile -> onNavigateToProfile(action.userID)
@@ -2439,6 +2617,7 @@ private fun DiscoveryFullscreenCard(
                     }
                 }
             )
+            }
 
             // Edge peeks. This deck has had a horizontal reply swipe since it
             // was rewritten to a pager, but NOTHING on screen said so — no
