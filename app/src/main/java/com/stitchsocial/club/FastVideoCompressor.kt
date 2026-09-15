@@ -441,23 +441,49 @@ class FastVideoCompressor private constructor(private val context: Context) {
         if (videoTrackIndex == -1) {
             throw CompressionError.NoVideoTrack
         }
-        
+
+        // Read the source audio format up front. MediaMuxer requires every
+        // addTrack() to land before start(), and the video track can only be added
+        // once the encoder reports its output format — so the audio format has to
+        // already be in hand at that moment.
+        val audioFormat = if (audioTrackIndex >= 0) {
+            extractor.getTrackFormat(audioTrackIndex)
+        } else {
+            null
+        }
+
+        val startTimeUs = (trimStartMs ?: 0L) * 1000
+        val endTimeUs = (trimEndMs ?: (sourceInfo.duration * 1000).toLong()) * 1000
+
         // Create muxer
         val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        
+
         try {
             // Transcode video
-            transcodeVideo(
+            val audioMuxerTrack = transcodeVideo(
                 extractor = extractor,
                 muxer = muxer,
                 videoTrackIndex = videoTrackIndex,
+                audioFormat = audioFormat,
                 settings = settings,
-                sourceInfo = sourceInfo,
-                trimStartMs = trimStartMs,
-                trimEndMs = trimEndMs,
+                startTimeUs = startTimeUs,
+                endTimeUs = endTimeUs,
                 progressCallback = progressCallback
             )
-            
+
+            // Remux the audio untouched. Without this the muxer only ever received
+            // the encoder's video track, so everything this compressor produced was
+            // silent — and since VideoExportService always takes FULL_PROCESS, that
+            // is every post without captions.
+            if (audioMuxerTrack >= 0) {
+                copyAudio(
+                    sourceUri = sourceUri,
+                    muxer = muxer,
+                    muxerTrackIndex = audioMuxerTrack,
+                    startTimeUs = startTimeUs,
+                    endTimeUs = endTimeUs
+                )
+            }
         } finally {
             extractor.release()
             muxer.stop()
@@ -467,23 +493,25 @@ class FastVideoCompressor private constructor(private val context: Context) {
         Uri.fromFile(outputFile)
     }
     
+    /**
+     * Encodes the video track into [muxer] and, when [audioFormat] is non-null,
+     * adds the audio track alongside it so the caller can remux the audio after.
+     *
+     * @return the muxer track index for audio, or -1 when the source has none.
+     */
     private fun transcodeVideo(
         extractor: MediaExtractor,
         muxer: MediaMuxer,
         videoTrackIndex: Int,
+        audioFormat: MediaFormat?,
         settings: CompressionSettings,
-        sourceInfo: VideoInfo,
-        trimStartMs: Long?,
-        trimEndMs: Long?,
+        startTimeUs: Long,
+        endTimeUs: Long,
         progressCallback: (Double) -> Unit
-    ) {
+    ): Int {
         extractor.selectTrack(videoTrackIndex)
         val inputFormat = extractor.getTrackFormat(videoTrackIndex)
-        
-        // Set up start/end times
-        val startTimeUs = (trimStartMs ?: 0) * 1000
-        val endTimeUs = (trimEndMs ?: (sourceInfo.duration * 1000).toLong()) * 1000
-        
+
         if (startTimeUs > 0) {
             extractor.seekTo(startTimeUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
         }
@@ -515,6 +543,7 @@ class FastVideoCompressor private constructor(private val context: Context) {
         
         // Muxer track
         var muxerTrackIndex = -1
+        var audioMuxerTrackIndex = -1
         var muxerStarted = false
         
         val bufferInfo = MediaCodec.BufferInfo()
@@ -577,6 +606,12 @@ class FastVideoCompressor private constructor(private val context: Context) {
                     outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
                             muxerTrackIndex = muxer.addTrack(encoder.outputFormat)
+                            // Both tracks must be added before start(). This is the
+                            // only point where the encoder's format is known, so the
+                            // audio track goes in here too.
+                            if (audioFormat != null) {
+                                audioMuxerTrackIndex = muxer.addTrack(audioFormat)
+                            }
                             muxer.start()
                             muxerStarted = true
                         }
@@ -601,12 +636,92 @@ class FastVideoCompressor private constructor(private val context: Context) {
         }
         
         progressCallback(1.0)
-        
+
         decoder.stop()
         decoder.release()
         encoder.stop()
         encoder.release()
         inputSurface.release()
+
+        return audioMuxerTrackIndex
+    }
+
+    /**
+     * Remuxes the source audio into an already-started [muxer] without re-encoding.
+     *
+     * Uses its own MediaExtractor: the caller's still has the video track selected,
+     * and selecting a second track on it would interleave both into one read loop.
+     *
+     * Sample timestamps are written through unchanged so they stay on the same
+     * timeline as the encoder's output, which carries the source presentation times
+     * straight through the decode-to-surface path. A trimmed clip therefore starts
+     * at a non-zero offset on both tracks, which keeps them in sync.
+     */
+    private fun copyAudio(
+        sourceUri: Uri,
+        muxer: MediaMuxer,
+        muxerTrackIndex: Int,
+        startTimeUs: Long,
+        endTimeUs: Long
+    ) {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, sourceUri, null)
+
+            var audioTrack = -1
+            for (i in 0 until extractor.trackCount) {
+                val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) {
+                    audioTrack = i
+                    break
+                }
+            }
+            if (audioTrack == -1) return
+
+            extractor.selectTrack(audioTrack)
+            if (startTimeUs > 0) {
+                extractor.seekTo(startTimeUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            }
+
+            val maxInputSize = extractor.getTrackFormat(audioTrack)
+                .takeIf { it.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) }
+                ?.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                ?.coerceAtLeast(64 * 1024)
+                ?: (256 * 1024)
+            val buffer = ByteBuffer.allocate(maxInputSize)
+            val bufferInfo = MediaCodec.BufferInfo()
+
+            while (true) {
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+
+                val sampleTime = extractor.sampleTime
+                if (sampleTime > endTimeUs) break
+
+                if (sampleTime >= startTimeUs) {
+                    bufferInfo.offset = 0
+                    bufferInfo.size = sampleSize
+                    bufferInfo.presentationTimeUs = sampleTime
+                    // MediaExtractor reports SAMPLE_FLAG_*; the muxer wants
+                    // BUFFER_FLAG_*. Only the sync-frame bit matters for audio.
+                    bufferInfo.flags =
+                        if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                            MediaCodec.BUFFER_FLAG_KEY_FRAME
+                        } else {
+                            0
+                        }
+                    muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
+                }
+
+                if (!extractor.advance()) break
+            }
+        } catch (e: Exception) {
+            // A source with unreadable audio should still produce a usable video
+            // rather than failing the whole export.
+            if (BuildConfig.DEBUG) { println("🔊 COMPRESS: audio remux failed - ${e.message}") }
+        } finally {
+            extractor.release()
+        }
     }
     
     // MARK: - Helper Methods
