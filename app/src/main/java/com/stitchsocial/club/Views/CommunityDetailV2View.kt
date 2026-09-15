@@ -138,6 +138,18 @@ fun CommunityDetailV2View(
      * banner being visible — and the notification promised the stream.
      */
     autoOpenStreamID: String? = null,
+    /**
+     * Open the live stream as soon as this view can, for a caller that knows only
+     * that the community is live and has no stream id — Dash's LIVE NOW avatars.
+     *
+     * A bool rather than an id on purpose. The stream, the effective feature level
+     * and the viewer's current username are all resolved here and nowhere else, so
+     * a caller that assembled the viewer itself would reproduce the faults this
+     * file already guards against: a community flagged live with no stream behind
+     * it, a raw community level in place of the effective one, and the
+     * denormalised membership username that is never refreshed after a rename.
+     */
+    autoJoinLive: Boolean = false,
     onAutoOpenConsumed: () -> Unit = {},
     onDismiss: () -> Unit,
     /**
@@ -331,6 +343,20 @@ fun CommunityDetailV2View(
             isCreatorLiveRealtime = false
             liveStreamID = null
         }
+    }
+
+    // Auto-join, for a caller that only knows the community is live.
+    //
+    // Goes through openLiveStream() rather than waiting for the listener: the id
+    // arrives asynchronously and may never arrive at all, and that function already
+    // falls back to the source of truth and takes the banner down if the stream
+    // turns out to be a ghost. Latched, so a later listener update cannot drag
+    // someone back into a stream they have already left.
+    var autoJoinConsumed by remember(communityID) { mutableStateOf(false) }
+    LaunchedEffect(autoJoinLive, communityID) {
+        if (!autoJoinLive || autoJoinConsumed) return@LaunchedEffect
+        autoJoinConsumed = true
+        openLiveStream()
     }
 
     // Data load

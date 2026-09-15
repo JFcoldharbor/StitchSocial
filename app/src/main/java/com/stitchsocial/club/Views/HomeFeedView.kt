@@ -24,6 +24,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,6 +92,10 @@ fun HomeFeedView(
     navigationCoordinator: NavigationCoordinator?,
     isAnnouncementShowing: Boolean = false,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit = { _, _ -> },
+    /** Reports which surface is up, so the globally-mounted streak banner can
+     *  stand down on Dash — the banner is what FRIENDS has INSTEAD of Dash's
+     *  streak tile, not as well as it. */
+    onDashActiveChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -196,7 +204,14 @@ fun HomeFeedView(
         }
     }
 
+    // Which half of Home is showing. FRIENDS is the default: iOS made Dash the
+    // landing surface in 51fbe51, but that decides the first screen every user
+    // sees and is a product call, not a parity detail.
+    var homeSurface by remember { mutableStateOf(HomeSurface.FRIENDS) }
+    LaunchedEffect(homeSurface) { onDashActiveChange(homeSurface == HomeSurface.DASH) }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+        if (homeSurface == HomeSurface.FRIENDS) {
         when {
             isLoading -> LoadingView()
             errorMessage != null -> ErrorView(errorMessage!!) {
@@ -368,6 +383,24 @@ fun HomeFeedView(
                 }
             }
         }
+        } else {
+            DashView(
+                userID = userID,
+                onCreate = { navigationCoordinator?.showModal(ModalState.RECORDING) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // The tabs are the only way between the two surfaces — no swipe, no third
+        // tab-bar item. Underlined rather than pills because a pill reads as a
+        // filter you toggle and an underline reads as a place you are. Every label
+        // carries its own shadow: on FRIENDS this sits on video, and chrome over
+        // video never borrows contrast from a background it doesn't have.
+        HomeSurfaceTabs(
+            selected = homeSurface,
+            onSelect = { homeSurface = it },
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
 
         if (showingCreatorProfileID != null) {
             ProfileView(
@@ -771,6 +804,61 @@ private fun SocialSignalCardView(
                     Text(signal.videoTitle, color = Color.White, fontSize = 13.sp, maxLines = 1)
                     Text("by @${signal.videoCreatorName}", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
                 }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Home surfaces
+// ─────────────────────────────────────────────
+
+enum class HomeSurface(val label: String) {
+    FRIENDS("FRIENDS"),
+    DASH("DASH")
+}
+
+@Composable
+private fun HomeSurfaceTabs(
+    selected: HomeSurface,
+    onSelect: (HomeSurface) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            // NOT statusBarsPadding(). MainActivity hides the system bars, so that
+            // inset is zero and the tabs sat flush against the physical top edge —
+            // under the cutout on a device that has one. The app has no bars to
+            // respect, so it uses a fixed offset (LoginView's 22.dp) and pads the
+            // cutout explicitly.
+            .displayCutoutPadding()
+            .padding(top = 22.dp)
+            .zIndex(50f),
+        // Centred: two tabs left-aligned read as a longer row that got cut off.
+        horizontalArrangement = Arrangement.spacedBy(19.dp)
+    ) {
+        HomeSurface.values().forEach { surface ->
+            val isOn = surface == selected
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clickable { onSelect(surface) }
+            ) {
+                Text(
+                    surface.label,
+                    color = if (isOn) Color.White else Color.White.copy(alpha = 0.55f),
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = LocalTextStyle.current.copy(
+                        shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(0f, 1f), 3f)
+                    )
+                )
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .height(2.5.dp)
+                        .width(if (isOn) 28.dp else 0.dp)
+                        .background(DashPalette.railAccent, RoundedCornerShape(50))
+                )
             }
         }
     }

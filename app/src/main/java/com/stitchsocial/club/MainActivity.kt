@@ -874,6 +874,8 @@ fun MainScreen() {
                     // Streak "or die" banner — loaded once per session, shown
                     // globally (every tab) when the streak is at risk, until dismissed.
                     var streakBannerDismissed by remember { mutableStateOf(false) }
+                    // Set by Home's FRIENDS / DASH toggle.
+                    var isDashActive by remember { mutableStateOf(false) }
                     val streakCurrent by StreakService.shared.current.collectAsState()
                     LaunchedEffect(currentUser?.id) { StreakService.shared.load() }
 
@@ -911,6 +913,7 @@ fun MainScreen() {
                                 selectedCommunityItem = community
                                 isShowingCommunity = true
                             },
+                            onDashActiveChange = { isDashActive = it },
                             onTabBarVisibilityChange = { visible ->
                                 isShowingCollectionPlayer = !visible
                             }
@@ -932,7 +935,10 @@ fun MainScreen() {
                     // modals / thread view / announcements / the collection player.
                     // (streakCurrent is read here so this recomposes once load()
                     // populates the streak — isAtRisk alone reads the raw value.)
-                    if (streakCurrent >= 1 && currentModal == ModalState.NONE && !isShowingThreadView &&
+                    // Dash carries its own streak tile, so the banner stands
+                    // down there — it is what FRIENDS has instead of that tile,
+                    // not as well as it.
+                    if (streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
                         !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
                         StreakBanner(
@@ -1537,7 +1543,9 @@ private fun TabContent(
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
     onShowProfileView: (userId: String) -> Unit,
     onShowCommunity: (CommunityListItem) -> Unit = {},
-    onTabBarVisibilityChange: (Boolean) -> Unit = {}
+    onTabBarVisibilityChange: (Boolean) -> Unit = {},
+    /** Home reports which of its two surfaces is up. */
+    onDashActiveChange: (Boolean) -> Unit = {}
 ) {
     when (selectedTab) {
         MainAppTab.HOME -> {
@@ -1546,6 +1554,7 @@ private fun TabContent(
                 navigationCoordinator = navigationCoordinator,
                 isAnnouncementShowing = isAnnouncementShowing,
                 onShowThreadView = onShowThreadView,
+                onDashActiveChange = onDashActiveChange,
                 modifier = Modifier.fillMaxSize()
             )
         }
