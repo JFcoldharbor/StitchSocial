@@ -621,9 +621,24 @@ fun ProfileView(
                             isOwnProfile = isOwnProfile,
                             onAddTap = { /* TODO: navigate to ShowEditorView */ },
                             onShowTap = { showId: String, eps: List<VideoCollection> ->
-                                selectedShowId = showId
-                                selectedShowEpisodes = eps
-                                showingShowDetail = true
+                                // A tap plays. Playback lived only on the standalone-
+                                // collection branch, and every published collection
+                                // carries a showId, so nothing on a real profile ever
+                                // reached it — the playing path was dead code against
+                                // real data. Episodes arrive sorted by episodeNumber
+                                // from ProfileCollectionsRow, so the first is episode
+                                // one. An empty show still falls back to the detail
+                                // screen, the only surface that can explain one.
+                                // (iOS parity — 311c107.)
+                                val firstEpisode = eps.firstOrNull()
+                                if (firstEpisode != null) {
+                                    selectedCollection = firstEpisode
+                                    showCollectionPlayer = true
+                                } else {
+                                    selectedShowId = showId
+                                    selectedShowEpisodes = eps
+                                    showingShowDetail = true
+                                }
                             },
                             onCollectionTap = { collection: VideoCollection ->
                                 selectedCollection = collection
@@ -1069,10 +1084,19 @@ fun ProfileView(
                             ShowCard(
                                 episodes = eps,
                                 onTap = {
+                                    // Same rule as the profile row: a tap plays
+                                    // episode one, and only an empty show falls
+                                    // through to the detail screen.
                                     showingAllCollections = false
-                                    selectedShowId = showId
-                                    selectedShowEpisodes = eps
-                                    showingShowDetail = true
+                                    val firstEpisode = eps.firstOrNull()
+                                    if (firstEpisode != null) {
+                                        selectedCollection = firstEpisode
+                                        showCollectionPlayer = true
+                                    } else {
+                                        selectedShowId = showId
+                                        selectedShowEpisodes = eps
+                                        showingShowDetail = true
+                                    }
                                 }
                             )
                         }

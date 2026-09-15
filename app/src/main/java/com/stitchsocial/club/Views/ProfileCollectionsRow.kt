@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -181,94 +182,58 @@ fun ShowCard(
             .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(CollectionCardMetrics.corner))
             .clickable { onTap() }
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Cover image if available
-            val coverURL = firstEp?.coverImageURL
-            if (!coverURL.isNullOrBlank()) {
-                AsyncImage(
-                    model = coverURL,
-                    contentDescription = title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(CollectionCardMetrics.media)
-                )
-            }
+        // The cover IS the card. It used to be a 72dp slice sitting above a stack
+        // of five elements at four type sizes — a content-type badge, the title,
+        // an episode count, a strip of up to four EP cells and a "+N" tile, most
+        // of it at 7-8sp. The cover is what identifies a show, so it takes the
+        // whole card and only the two things a viewer needs sit on top of it.
+        // The badge went because the row is already grouped by creator; the strip
+        // went because four 7sp "EP1" labels say nothing the count does not.
+        // (iOS parity — 311c107.)
+        val coverURL = firstEp?.coverImageURL
+        if (!coverURL.isNullOrBlank()) {
+            AsyncImage(
+                model = coverURL,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-            // Badge + title + count
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-                    .padding(top = 7.dp, bottom = 5.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                // Content type badge
-                Surface(
-                    color = color.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(3.dp)
-                ) {
-                    Text(
-                        contentTypeLabel(contentType),
-                        color = color,
-                        fontSize = 7.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+        // Scrim — the cover is arbitrary artwork, so the text needs its own ground.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.78f)
                     )
-                }
-
-                Text(
-                    title,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
                 )
+        )
 
-                val epWord = if (episodes.size == 1) "episode" else "episodes"
-                Text(
-                    "${episodes.size} $epWord",
-                    color = Color.White.copy(alpha = 0.45f),
-                    fontSize = 8.sp
-                )
-            }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
 
-            // Mini episode strip
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp)
-                    .padding(bottom = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                episodes.take(4).forEachIndexed { idx, ep ->
-                    val isNewest = idx == episodes.size - 1 && episodes.size > 1
-                    MiniEpisodeCell(
-                        label = "EP${ep.episodeNumber ?: (idx + 1)}",
-                        color = color,
-                        isNewest = isNewest,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                if (episodes.size > 4) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(Color.White.copy(alpha = 0.06f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "+${episodes.size - 4}",
-                            color = Color.White.copy(alpha = 0.35f),
-                            fontSize = 7.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
+            val epWord = if (episodes.size == 1) "episode" else "episodes"
+            Text(
+                "${episodes.size} $epWord",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 10.sp
+            )
         }
     }
 }
