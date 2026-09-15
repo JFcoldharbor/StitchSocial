@@ -50,6 +50,12 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import com.stitchsocial.club.foundation.InteractionType
 import com.stitchsocial.club.VideoManager
 
+/** How many times a failed cell re-tries before it stays on the error placeholder. */
+private const val MAX_PLAYBACK_RETRIES = 3
+
+/** Base backoff between retries; multiplied by the attempt number. */
+private const val PLAYBACK_RETRY_DELAY_MS = 1_500L
+
 /**
  * ExoPlayer-powered video player for TikTok-style feed
  * ✅ Listens for pause broadcasts from stitch button
@@ -79,7 +85,6 @@ fun VideoPlayerComposable(
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var showPlayButton by remember { mutableStateOf(false) }
-    var isError by remember { mutableStateOf(false) }
 
     // Extract video properties. Prefer the model's computed playbackURL
     // (live HLS -> faststart MP4 -> legacy videoURL) — that's a computed getter
@@ -106,6 +111,11 @@ fun VideoPlayerComposable(
     val videoTitle = getVideoProperty(video, "title") ?: "Unknown Video"
     val videoId = getVideoProperty(video, "id") ?: "unknown_id"
 
+    // Keyed on videoId like the recovery state below. Unkeyed, a recycled slot
+    // carried a previous video's error into the next one — and it would have been
+    // inconsistent with retryCount/retryToken, which do reset.
+    var isError by remember(videoId) { mutableStateOf(false) }
+
     // Optimistic playback: if this doc was just uploaded and its local file is
     // still cached, play it instantly, then swap to HLS once the readiness poller
     // reports the master is live (iOS parity — project_stitch_cdn_integration).
@@ -113,8 +123,14 @@ fun VideoPlayerComposable(
     var currentURL by remember(videoId) { mutableStateOf(localPath ?: remoteURL) }
     val hlsSwapURL = videoModel?.hlsURL
 
+    // Recovery state. Bumping retryToken rebuilds the player even when the URL is
+    // unchanged; retryCount bounds it so a genuinely dead URL is not retried for
+    // ever. See the recovery effect below for why this exists at all.
+    var retryToken by remember(videoId) { mutableStateOf(0) }
+    var retryCount by remember(videoId) { mutableStateOf(0) }
+
     // Create ExoPlayer instance
-    val exoPlayer = remember(currentURL) {
+    val exoPlayer = remember(currentURL, retryToken) {
         // Use CacheDataSource if VideoDiskCache is initialised — falls back to default
         val playerBuilder = try {
             val cacheFactory = com.stitchsocial.club.services.VideoDiskCache.buildCacheDataSourceFactory()
@@ -185,6 +201,7 @@ fun VideoPlayerComposable(
                         Player.STATE_READY -> {
                             Log.d("VIDEO_PLAYER", "✅ $videoId ready to play")
                             isError = false
+                            retryCount = 0
                         }
                         Player.STATE_BUFFERING -> {
                             Log.d("VIDEO_PLAYER", "⏳ $videoId buffering")
@@ -262,8 +279,42 @@ fun VideoPlayerComposable(
         }
     }
 
-    // Video Manager control - play when active
-    LaunchedEffect(isActive) {
+    // A CELL COULD STAY BLACK FOR EVER. onPlayerError latched isError, playback
+    // below is gated on !isError, and currentURL is seeded once per videoId — so a
+    // cell that failed never tried again, even after the doc had resolved to a URL
+    // that works. The common cause is a fresh post: VideoCoordinator writes the CDN
+    // hlsURL/mp4URL before MediaConvert has produced them, so both 404 for the first
+    // seconds and the poster's own device is the only one that plays (LocalVideoCache).
+    // Re-reading remoteURL here is the point — CoreVideoMetadata.playbackURL resolves
+    // differently once status flips to published, or once the doc is old enough to
+    // self-heal. Bounded, and with a delay, because the object usually appears within
+    // seconds and a tight loop would just hammer the CDN. (iOS parity — c5bbc85.)
+    LaunchedEffect(isActive, isError) {
+        if (!isActive) {
+            // Coming back to a cell deliberately deserves a fresh set of attempts.
+            retryCount = 0
+            return@LaunchedEffect
+        }
+        if (!isError || retryCount >= MAX_PLAYBACK_RETRIES) return@LaunchedEffect
+
+        kotlinx.coroutines.delay(PLAYBACK_RETRY_DELAY_MS * (retryCount + 1))
+        retryCount++
+
+        val freshest = remoteURL
+        if (freshest.isNotEmpty() && freshest != currentURL) {
+            Log.i("VIDEO_PLAYER", "🔁 RETRY $videoId on a newer URL (attempt $retryCount)")
+            currentURL = freshest
+        } else {
+            Log.i("VIDEO_PLAYER", "🔁 RETRY $videoId on the same URL (attempt $retryCount)")
+            retryToken++
+        }
+        isError = false
+    }
+
+    // Video Manager control - play when active.
+    // Keyed on exoPlayer too: a recovery rebuilds the instance, and without that key
+    // the new player would sit there never told to start.
+    LaunchedEffect(isActive, exoPlayer) {
         Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive")
         if (isActive && !isError) {
             if (managed) VideoManager.setActivePlayer(exoPlayer, videoId)
@@ -277,8 +328,10 @@ fun VideoPlayerComposable(
         }
     }
 
-    // Clean up on disposal
-    DisposableEffect(Unit) {
+    // Clean up on disposal. Keyed on exoPlayer, not Unit: a URL swap or a recovery
+    // builds a new instance, and with Unit the replaced one was never released —
+    // it kept its codecs and buffers until the whole composable went away.
+    DisposableEffect(exoPlayer) {
         onDispose {
             Log.d("VIDEO_PLAYER", "🗑️ Disposing player for $videoId")
             // Remember where this video was BEFORE the player goes away, so
