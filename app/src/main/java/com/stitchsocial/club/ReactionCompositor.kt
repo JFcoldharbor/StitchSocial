@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.Effect
@@ -127,6 +128,10 @@ object ReactionCompositor {
             val mainHandler = Handler(Looper.getMainLooper())
             mainHandler.post {
                 val transformer = Transformer.Builder(context)
+                    // Pin H.264. Without an explicit output MIME type Transformer keeps the
+                    // source codec, so an HEVC recording stays HEVC — decodable on iOS but
+                    // black on web players and older Android clients. See FastVideoCompressor.
+                    .setVideoMimeType(MimeTypes.VIDEO_H264)
                     .addListener(object : Transformer.Listener {
                         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                             if (BuildConfig.DEBUG) { println("🎬 REACTION COMP: complete — ${outputFile.length() / 1024} KB") }
