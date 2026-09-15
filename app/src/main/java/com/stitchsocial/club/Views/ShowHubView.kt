@@ -55,6 +55,11 @@ private enum class EpisodeState {
     companion object {
         fun of(ep: VideoCollection): EpisodeState = when {
             ep.status == CollectionStatus.PUBLISHED -> PUBLISHED
+            // Ask the status first. This inferred "scheduled" from having segments
+            // because SCHEDULED was not a case and the decoder turned it into
+            // DRAFT, so there was nothing to ask. The inference stays below as the
+            // fallback for rows written before the case existed. (iOS parity.)
+            ep.status == CollectionStatus.SCHEDULED -> SCHEDULED
             ep.segmentCount == 0 -> NO_VIDEO
             else -> SCHEDULED
         }

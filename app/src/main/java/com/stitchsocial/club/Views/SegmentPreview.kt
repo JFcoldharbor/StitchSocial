@@ -156,6 +156,7 @@ class CollectionRowViewModel(
     val statusBadgeText: String?
         get() = when (_collection.value.status) {
             CollectionStatus.DRAFT -> "Draft"
+            CollectionStatus.SCHEDULED -> "Scheduled"
             CollectionStatus.PROCESSING -> "Processing"
             CollectionStatus.ARCHIVED -> "Archived"
             CollectionStatus.PUBLISHED, CollectionStatus.DELETED -> null
@@ -164,6 +165,9 @@ class CollectionRowViewModel(
     val statusBadgeColor: Color
         get() = when (_collection.value.status) {
             CollectionStatus.DRAFT -> Color(0xFFFF9F0A)
+            // Cyan, not the draft orange it used to fall through to — a scheduled
+            // episode is finished work with a date on it, not an unfinished one.
+            CollectionStatus.SCHEDULED -> Color(0xFF64D2FF)
             CollectionStatus.PROCESSING -> Color(0xFF0A84FF)
             CollectionStatus.ARCHIVED -> Color.Gray
             CollectionStatus.PUBLISHED -> Color(0xFF30D158)

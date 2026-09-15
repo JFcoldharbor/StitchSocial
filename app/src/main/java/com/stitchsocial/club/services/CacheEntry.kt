@@ -194,9 +194,11 @@ class ShowService private constructor() {
      */
     fun nextAvailableSlot(show: Show, existingEpisodes: List<VideoCollection>): Date? {
         val config = show.scheduleConfig ?: return null
-        val scheduled = existingEpisodes.filter {
-            it.status == CollectionStatus.PUBLISHED || it.status.rawValue == "scheduled"
-        }
+        // Was `status.rawValue == "scheduled"`, written that way because there was
+        // nothing to compare against. It could never be true — the decoder had
+        // already replaced the value with DRAFT, whose rawValue is "draft" — so the
+        // planner saw zero scheduled episodes and handed out slots already taken.
+        val scheduled = existingEpisodes.filter { it.status.isCommitted }
         return ScheduleService.nextAvailableSlot(config, scheduled)
     }
 

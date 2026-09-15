@@ -23,11 +23,26 @@ import java.util.Date
 enum class CollectionStatus(val rawValue: String) {
     DRAFT("draft"),
     PROCESSING("processing"),
+    // PublishIntent.statusString has written "scheduled" since scheduling was
+    // built, but it was never a case here — and from() falls back to DRAFT, so a
+    // scheduled episode came back as a draft everywhere. Not late: never
+    // scheduled at all. The creator saw a draft, the cadence planner counted
+    // none, and Discovery asks for "published" so it never saw one either.
+    // (iOS parity — ef506ef.)
+    SCHEDULED("scheduled"),
     PUBLISHED("published"),
     ARCHIVED("archived"),
     DELETED("deleted");
 
+    /** Visible to an audience. A scheduled episode is a promise, not a release. */
     val isPublic: Boolean get() = this == PUBLISHED
+
+    /**
+     * The creator has finished with this — published or scheduled. Use it wherever
+     * the question is "is this still being worked on", so scheduled work stops
+     * being counted as a draft.
+     */
+    val isCommitted: Boolean get() = this == PUBLISHED || this == SCHEDULED
 
     companion object {
         fun from(raw: String?): CollectionStatus =
