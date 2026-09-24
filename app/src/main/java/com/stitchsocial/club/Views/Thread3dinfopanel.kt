@@ -1076,7 +1076,7 @@ private fun StatsRow(
         StatItem(
             icon = Icons.Default.AcUnit,
             value = totalCool,
-            label = "COOL",
+            label = "COOLDOWN",
             color = BrandCyan
         )
 

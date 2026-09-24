@@ -65,7 +65,7 @@ enum class Temperature(val rawValue: String) {
  */
 enum class InteractionType(val displayName: String) {
     HYPE("Hype"),
-    COOL("Cool"),
+    COOL("Cooldown"),
     VIEW("View"),
     SHARE("Share"),
     REPLY("Reply");

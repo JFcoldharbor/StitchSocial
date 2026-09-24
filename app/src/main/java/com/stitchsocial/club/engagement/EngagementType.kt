@@ -27,7 +27,7 @@ enum class EngagementAnimationType {
         get() = when (this) {
             NONE -> ""
             STANDARD_HYPE -> "Hype!"
-            STANDARD_COOL -> "Cool"
+            STANDARD_COOL -> "Cooldown"
             FOUNDER_EXPLOSION -> "Founder Boost!"
             PREMIUM_BOOST -> "Premium Boost!"
             TIER_BOOST -> "Tier Boost!"

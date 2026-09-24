@@ -197,7 +197,7 @@ fun ProgressiveCoolButton3D(
             // Snowflake icon
             Icon(
                 imageVector = if (showSlashedIcon) Icons.Default.DoNotDisturb else Icons.Default.AcUnit,
-                contentDescription = "Cool",
+                contentDescription = "Cooldown",
                 tint = if (shouldBlockSelfEngagement) Color.Gray else Color.White,
                 modifier = Modifier.size(20.dp)
             )
@@ -274,7 +274,7 @@ fun ProgressiveCoolButton3D(
                             if (BuildConfig.DEBUG) { println("🔵 COOL TAP FIRED - videoID: $videoID, disabled: $isDisabled, selfBlock: $shouldBlockSelfEngagement, engCap: $hasHitEngagementCap, creatorID: $creatorID, currentUserID: $currentUserID, tier: $userTier") }
 
                             if (shouldBlockSelfEngagement) {
-                                showError("You can't cool your own content")
+                                showError("You can't cool down your own content")
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 return@clickable
                             }
@@ -343,17 +343,25 @@ fun ProgressiveCoolButton3D(
             }
         }
 
-        // Cool count below button
+        // The word, not the number — iOS parity.
+        //
+        // This drew the count and nothing else, including a bare "0" on every
+        // video nobody had cooled down. Two problems in one: the button never
+        // said what it does, which is how "cool" got read as praise, and the
+        // count is a public tally of the one signal that least deserves a
+        // scoreboard. Cooldowns are private to the ranker now.
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = formatCoolCount(displayCount),
-            fontSize = 12.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
+            text = "Cooldown",
+            fontSize = 10.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
         )
     }
 }
 
+@Suppress("unused") // kept: the count still exists, it is simply not shown
 private fun formatCoolCount(count: Int): String {
     return when {
         count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)

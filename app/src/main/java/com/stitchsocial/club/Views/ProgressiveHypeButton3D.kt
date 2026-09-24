@@ -334,21 +334,39 @@ fun ProgressiveHypeButton3D(
             }
         }
 
-        // Hype count below button
+        // Count and word together, and the word alone until there is a count —
+        // a rail reading "0" says nothing about what the button is for.
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = formatHypeCount(displayCount),
-            fontSize = 12.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
+            text = if (displayCount > 0) "${formatHypeCount(displayCount)} Hype" else "Hype",
+            fontSize = 10.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
         )
     }
 }
 
+/**
+ * Three digits, hard.
+ *
+ * The old version had no ceiling and did not strip a trailing zero, so it read
+ * "1.0K" where every other counter in the app reads "1K", and a big number
+ * pushed its own column wide enough to shove the rail's neighbours off centre.
+ */
 private fun formatHypeCount(count: Int): String {
+    fun trim(value: Double, suffix: String): String {
+        val rounded = kotlin.math.floor(value * 10) / 10
+        return if (rounded == kotlin.math.floor(rounded)) "${rounded.toInt()}$suffix"
+               else String.format("%.1f%s", rounded, suffix)
+    }
     return when {
-        count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)
-        count >= 1_000 -> String.format("%.1fK", count / 1_000.0)
-        else -> count.toString()
+        count < 0 -> "0"
+        count < 1_000 -> count.toString()
+        count < 10_000 -> trim(count / 1_000.0, "K")
+        count < 1_000_000 -> "${count / 1_000}K"
+        count < 10_000_000 -> trim(count / 1_000_000.0, "M")
+        count < 1_000_000_000 -> "${count / 1_000_000}M"
+        else -> "${minOf(count / 1_000_000_000, 999)}B"
     }
 }

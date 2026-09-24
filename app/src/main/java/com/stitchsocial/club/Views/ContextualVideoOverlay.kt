@@ -1094,7 +1094,7 @@ private fun CarouselOverlay(
             } else {
                 OverlayActionButton(
                     icon = Icons.Default.AcUnit,
-                    label = "Cool",
+                    label = "Cooldown",
                     ringColor = Color.Blue,
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1502,7 +1502,7 @@ private fun BottomSection(
                 } else {
                     OverlayActionButton(
                         icon = Icons.Default.AcUnit,
-                        label = "Cool",
+                        label = "Cooldown",
                         ringColor = Color.Blue,
                         onClick = {
                             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)

@@ -641,7 +641,7 @@ enum class StitchNotificationType(val rawValue: String) {
     val displayName: String
         get() = when (this) {
             HYPE -> "Hype"
-            COOL -> "Cool"
+            COOL -> "Cooldown"
             REPLY -> "Reply"
             FOLLOW -> "New Follower"
             MENTION -> "Mention"

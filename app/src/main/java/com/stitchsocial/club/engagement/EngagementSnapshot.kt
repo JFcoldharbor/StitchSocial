@@ -66,7 +66,7 @@ data class ContentQualityScore(
 enum class VideoTemperature(val displayName: String, val emoji: String, val boostFactor: Double) {
     HOT("Hot", "🔥", 2.0),
     WARM("Warm", "🌡️", 1.5),
-    COOL("Cool", "❄️", 1.0),
+    COOL("Cooldown", "❄️", 1.0),
     COLD("Cold", "🧊", 0.8)
 }
 
