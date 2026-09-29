@@ -1164,7 +1164,7 @@ fun ProfileView(
 
     // ===== SETTINGS =====
     if (showingSettings && currentUser != null) {
-        SettingsView(
+        SettingsHost(
             currentUser = currentUser!!,
             authService = authService,
             onDismiss = { showingSettings = false },
