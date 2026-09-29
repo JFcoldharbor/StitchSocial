@@ -101,10 +101,12 @@ fun ProfileVideoGrid(
 
                 videoRows.forEachIndexed { rowIndex, rowVideos ->
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 1.dp, vertical = 1.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        // Edge-to-edge, 1dp gutters — iOS uses a 3-column
+                        // LazyVGrid with spacing 1 and no horizontal padding,
+                        // so the thumbnails read as one sheet of work rather
+                        // than a set of cards.
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(1.dp)
                     ) {
                         rowVideos.forEachIndexed { columnIndex, video ->
                             val videoIndex = rowIndex * 3 + columnIndex
@@ -121,7 +123,7 @@ fun ProfileVideoGrid(
                                 onVideoDelete = onVideoDelete,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .aspectRatio(0.75f)
+                                    .aspectRatio(9f / 16f)
                             )
                         }
 
@@ -133,12 +135,12 @@ fun ProfileVideoGrid(
 
                     // Small spacing between rows
                     if (rowIndex < videoRows.size - 1) {
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(1.dp))
                     }
                 }
 
-                // Bottom padding
-                Spacer(modifier = Modifier.height(50.dp))
+                // Clearance for the floating tab bar (iOS uses 100).
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }
@@ -509,17 +511,10 @@ private fun EmptyVideosView(tabTitle: String) {
                 fontWeight = FontWeight.SemiBold
             )
 
-            Text(
-                text = when (tabTitle.lowercase()) {
-                    "videos" -> "Start creating videos to see them here"
-                    "threads" -> "Create thread videos to see them here"
-                    "likes" -> "Videos you like will appear here"
-                    else -> "No content available"
-                },
-                color = Color.Gray,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
-            )
+            // The subtitle is gone, as on iOS. Two of its three branches fell
+            // through to "No content available" — "No Stitches / No content
+            // available" says the same thing twice and the second time worse.
+            // "Videos"/"Likes" were tab names this screen has never had.
         }
     }
 }

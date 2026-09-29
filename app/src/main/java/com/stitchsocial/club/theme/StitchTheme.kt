@@ -40,7 +40,13 @@ data class StitchSemanticColors(
     val textTertiary: Color,
     val surface: Color,
     val surfaceStrong: Color,
-    val hairline: Color
+    val hairline: Color,
+    /**
+     * Destroying something, and nothing else — iOS parity with
+     * Theme.destructive. Adaptive because the system red that reads as a
+     * warning on black is too light to read as one on white.
+     */
+    val destructive: Color
 )
 
 /** Dark scheme — matches iOS Theme dark values. */
@@ -51,7 +57,8 @@ val DarkSemanticColors = StitchSemanticColors(
     textTertiary = Color.White.copy(alpha = 0.30f),
     surface = Color.White.copy(alpha = 0.06f),
     surfaceStrong = Color.White.copy(alpha = 0.10f),
-    hairline = Color.White.copy(alpha = 0.12f)
+    hairline = Color.White.copy(alpha = 0.12f),
+    destructive = Color(0xFFFF453A)
 )
 
 /** Light scheme — matches iOS Theme light values. */
@@ -62,7 +69,8 @@ val LightSemanticColors = StitchSemanticColors(
     textTertiary = Color.Black.copy(alpha = 0.30f),
     surface = Color.Black.copy(alpha = 0.04f),
     surfaceStrong = Color.Black.copy(alpha = 0.06f),
-    hairline = Color.Black.copy(alpha = 0.12f)
+    hairline = Color.Black.copy(alpha = 0.12f),
+    destructive = Color(0xFFD70015)
 )
 
 /** Provided by StitchSocialClubTheme; defaults to dark. */

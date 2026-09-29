@@ -342,6 +342,8 @@ fun ProfileView(
     var isLoadingMore by remember { mutableStateOf(false) }
     var hasMoreVideos by remember { mutableStateOf(true) }
     var moderationHiddenVideoIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showingReportUser by remember { mutableStateOf(false) }
+    var showingBlockConfirm by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // UI state
@@ -605,9 +607,15 @@ fun ProfileView(
                         ProfileTopBar(
                             isOwnProfile = isOwnProfile,
                             username = currentUser?.username ?: "",
+                            userTier = currentUser?.tier ?: UserTier.ROOKIE,
+                            isBusiness = currentUser?.isBusiness == true,
+                            targetUserID = if (isOwnProfile) "" else userID,
                             onSaved = { showingSavedVideos = true },
                             onSettings = { showingSettings = true },
-                            onEdit = { showingEditProfile = true }
+                            onEdit = { showingEditProfile = true },
+                            onAdOpportunities = { showingAdOpportunities = true },
+                            onReportUser = { showingReportUser = true },
+                            onBlockUser = { showingBlockConfirm = true }
                         )
                     }
                     // Header
@@ -690,6 +698,19 @@ fun ProfileView(
                     }
 
                     // Video grid
+                    // "N posts" above the grid, as on iOS. It reads the tab
+                    // that is actually showing, so switching tabs changes it.
+                    item {
+                        Text(
+                            text = "${filteredVideos.size} ${if (filteredVideos.size == 1) "post" else "posts"}",
+                            fontSize = 12.sp,
+                            color = AppTheme.colors.textSecondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.md)
+                                .padding(top = Spacing.sm, bottom = Spacing.xs)
+                        )
+                    }
                     item {
                         val currentUserId = authService.getCurrentUserId()
                         val isOwn = (userID == currentUserId)
@@ -1151,6 +1172,19 @@ fun ProfileView(
         )
     }
 
+    // ===== REPORT / BLOCK =====
+    // Opened from the single overflow menu in the top bar.
+    if (!isOwnProfile) {
+        ProfileModerationSheets(
+            targetUserID = userID,
+            targetUsername = currentUser?.username ?: "",
+            showReport = showingReportUser,
+            showBlockConfirm = showingBlockConfirm,
+            onDismissReport = { showingReportUser = false },
+            onDismissBlock = { showingBlockConfirm = false },
+        )
+    }
+
     // ===== SAVED VIDEOS =====
     // Own-profile bookmark grid; zIndexed above the profile like BadgePageView.
     if (showingSavedVideos) {
@@ -1336,7 +1370,7 @@ private fun ProfileHeader(
                     }
                 }
 
-                Text("@${user.username}", fontSize = 13.sp, color = AppTheme.colors.textSecondary)
+                Text("@${user.username}", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
 
                 // Bio sits directly under the handle, not under the badges (iOS parity).
                 BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
@@ -1360,7 +1394,9 @@ private fun ProfileHeader(
         StatsRow(user = user, videoCount = videos.size, onFollowersClick = onFollowersClick)
 
         // Action buttons
-        ActionButtonsRow(
+        // Visitors only. An empty Row would still take the header VStack's
+        // 16dp of spacing and leave a gap where buttons used to be.
+        if (!isOwnProfile) ActionButtonsRow(
             isOwnProfile = isOwnProfile,
             isFollowing = isFollowing,
             isFollowLoading = isFollowLoading,
@@ -1543,25 +1579,24 @@ private fun HypeMeter(user: BasicUserInfo, videos: List<CoreVideoMetadata> = emp
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .background(AppTheme.colors.surface, RoundedCornerShape(12.dp))
-            .border(1.dp, AppTheme.colors.hairline, RoundedCornerShape(12.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .background(AppTheme.colors.surface, RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(14.dp))
-                Text("Hype Rating", color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hype Rating", color = AppTheme.colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("${hypeRating.toInt()}%", color = AppTheme.colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("${hypeRating.toInt()}%", color = StitchColors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        Box(modifier = Modifier.fillMaxWidth().height(10.dp)) {
-            Box(Modifier.fillMaxSize().background(AppTheme.colors.textSecondary.copy(alpha = 0.2f), RoundedCornerShape(5.dp)))
+        Box(modifier = Modifier.fillMaxWidth().height(7.dp)) {
+            Box(Modifier.fillMaxSize().background(AppTheme.colors.surfaceStrong, RoundedCornerShape(4.dp)))
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
                     .background(
                         Brush.horizontalGradient(listOf(StitchColors.gradientStart, StitchColors.gradientEnd)),
-                        RoundedCornerShape(5.dp)
+                        RoundedCornerShape(4.dp)
                     )
             )
         }
@@ -1589,7 +1624,7 @@ private fun StatCard(count: Int, label: String, modifier: Modifier, onClick: () 
             .clip(RoundedCornerShape(13.dp))
             .background(AppTheme.colors.surface)
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
@@ -1604,12 +1639,21 @@ private fun StatCard(count: Int, label: String, modifier: Modifier, onClick: () 
 private fun ProfileTopBar(
     isOwnProfile: Boolean,
     username: String,
+    userTier: UserTier = UserTier.ROOKIE,
+    isBusiness: Boolean = false,
+    targetUserID: String = "",
     onSaved: () -> Unit,
     onSettings: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onAdOpportunities: () -> Unit = {},
+    onReportUser: () -> Unit = {},
+    onBlockUser: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
+    val blockedIDs by com.stitchsocial.club.services.BlockService.shared.blockedUserIds.collectAsState()
+    val isBlocked = targetUserID.isNotEmpty() && blockedIDs.contains(targetUserID)
+    val scope = rememberCoroutineScope()
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.xs),
         horizontalArrangement = Arrangement.End,
@@ -1630,20 +1674,78 @@ private fun ProfileTopBar(
             Icon(Icons.Default.Share, "Share", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
         }
 
-        // Overflow (own profile: Saved / Settings / Edit)
-        if (isOwnProfile) {
-            Spacer(Modifier.width(Spacing.xs))
-            Box {
-                Box(
-                    modifier = Modifier.size(34.dp).clip(CircleShape).background(AppTheme.colors.surface).clickable { menuOpen = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.MoreHoriz, "More", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("Saved videos") }, onClick = { menuOpen = false; onSaved() })
-                    DropdownMenuItem(text = { Text("Settings") }, onClick = { menuOpen = false; onSettings() })
-                    DropdownMenuItem(text = { Text("Edit profile") }, onClick = { menuOpen = false; onEdit() })
+        // One overflow menu on the screen, for everybody. A visitor's Report
+        // and Block used to live in a SECOND 3-dot button down in the action
+        // row, so the profile had two of them in different places meaning
+        // different things. iOS put both audiences in this one.
+        Spacer(Modifier.width(Spacing.xs))
+        Box {
+            Box(
+                modifier = Modifier.size(34.dp).clip(CircleShape).background(AppTheme.colors.surface).clickable { menuOpen = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.MoreHoriz, "More", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                if (isOwnProfile) {
+                    // The money item comes first, as on iOS: Advertise for a
+                    // business, Ad opportunities for an eligible creator.
+                    if (isBusiness) {
+                        DropdownMenuItem(
+                            text = { Text("Advertise") },
+                            leadingIcon = { Icon(Icons.Default.Campaign, null) },
+                            onClick = { menuOpen = false; onAdOpportunities() }
+                        )
+                    } else if (AdRevenueShare.canAccessAds(userTier)) {
+                        DropdownMenuItem(
+                            text = { Text("Ad opportunities") },
+                            leadingIcon = { Icon(Icons.Default.AttachMoney, null) },
+                            onClick = { menuOpen = false; onAdOpportunities() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Saved videos") },
+                        leadingIcon = { Icon(Icons.Default.BookmarkBorder, null) },
+                        onClick = { menuOpen = false; onSaved() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        leadingIcon = { Icon(Icons.Default.Settings, null) },
+                        onClick = { menuOpen = false; onSettings() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Edit profile") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = { menuOpen = false; onEdit() }
+                    )
+                } else {
+                    DropdownMenuItem(
+                        text = { Text("Report user") },
+                        leadingIcon = { Icon(Icons.Default.Flag, null) },
+                        onClick = { menuOpen = false; onReportUser() }
+                    )
+                    if (isBlocked) {
+                        DropdownMenuItem(
+                            text = { Text("Unblock") },
+                            leadingIcon = { Icon(Icons.Default.LockOpen, null) },
+                            onClick = {
+                                menuOpen = false
+                                scope.launch {
+                                    runCatching {
+                                        com.stitchsocial.club.services.BlockService.shared.unblockUser(targetUserID)
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Block user", color = AppTheme.colors.destructive) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Block, null, tint = AppTheme.colors.destructive)
+                            },
+                            onClick = { menuOpen = false; onBlockUser() }
+                        )
+                    }
                 }
             }
         }
@@ -1671,30 +1773,15 @@ private fun ActionButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         if (isOwnProfile) {
-            // Edit profile and Settings used to be two buttons here AND two
-            // items in the ⋯ menu at the top of the screen — the same two
-            // actions, twice, on the one screen. They belong under the ⋯,
-            // which is where iOS put them: a profile is for showing people
-            // your work, and the controls for changing it are housekeeping.
+            // Nothing. Your own profile has no button row at all, which is
+            // what iOS settled on: every account action — Edit profile,
+            // Settings, Saved videos, Ad opportunities, Advertise — is now
+            // under the ⋯ in the top bar. Leaving one lone green $ button
+            // behind would have made the row look broken rather than
+            // deliberate.
             //
-            // What is left in this row is the thing an owner acts on rather
-            // than administers.
-
-            // Ad opportunities — green $ button, Influencer+ personal only (iOS parity).
-            if (!isBusiness && AdRevenueShare.canAccessAds(userTier)) {
-                Button(
-                    onClick = onAdOpportunities,
-                    modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33C759)),
-                    shape = RoundedCornerShape(13.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Icon(Icons.Default.AttachMoney, "Ad opportunities", tint = Color(0xFF053610), modifier = Modifier.size(20.dp))
-                }
-            }
-
-            // Settings button removed — see above. It is in the ⋯ menu.
-            // Saved moved to the top-bar ⋯ menu (iOS parity).
+            // Other people's profiles keep their row, because Follow is not
+            // an account action; it is the reason you are on the page.
         } else {
             Button(
                 onClick = onFollowToggle,
@@ -1729,121 +1816,65 @@ private fun ActionButtonsRow(
                 Text("Subscribe", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
             }
 
-            // More menu (Report / Block) — App Store Guideline 1.2 / Play Store UGC
-            ProfileMoreMenu(
-                targetUserID = targetUserID,
-                targetUsername = targetUsername
-            )
         }
     }
 }
 
-// ===== PROFILE MORE MENU (Report / Block) =====
+// ===== MODERATION SHEETS (Report / Block) =====
 //
-// Self-contained: hosts its own DropdownMenu, ReportSheet, and Block
-// confirmation AlertDialog so ActionButtonsRow only needs to drop it in.
+// The 3-dot button that used to live here is gone. Report and Block moved
+// into the single overflow menu in the top bar, where the owner's actions
+// already were — the profile had two 3-dot buttons in two places meaning two
+// different things, which is one more than a screen should ever have.
 //
+// What is left is the two surfaces those items open, hosted once and driven
+// by state in ProfileView.
 @Composable
-private fun ProfileMoreMenu(
+private fun ProfileModerationSheets(
     targetUserID: String,
-    targetUsername: String
+    targetUsername: String,
+    showReport: Boolean,
+    showBlockConfirm: Boolean,
+    onDismissReport: () -> Unit,
+    onDismissBlock: () -> Unit,
 ) {
     if (targetUserID.isBlank()) return
-
-    var menuExpanded by remember { mutableStateOf(false) }
-    var showReportSheet by remember { mutableStateOf(false) }
-    var showBlockConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val blockedIds by com.stitchsocial.club.services.BlockService.shared
-        .blockedUserIds.collectAsState()
-    val isBlocked = blockedIds.contains(targetUserID)
 
-    Box {
-        Button(
-            onClick = { menuExpanded = true },
-            modifier = Modifier.size(36.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.textSecondary.copy(alpha = 0.8f)),
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = PaddingValues(0.dp)
-        ) {
-            Icon(
-                Icons.Default.MoreHoriz,
-                contentDescription = "More",
-                tint = AppTheme.colors.textPrimary,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        DropdownMenu(
-            expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Report user") },
-                leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
-                onClick = {
-                    menuExpanded = false
-                    showReportSheet = true
-                }
-            )
-            if (isBlocked) {
-                DropdownMenuItem(
-                    text = { Text("Unblock @$targetUsername") },
-                    leadingIcon = { Icon(Icons.Default.LockOpen, contentDescription = null) },
-                    onClick = {
-                        menuExpanded = false
-                        scope.launch {
-                            com.stitchsocial.club.services.BlockService.shared
-                                .unblockUser(targetUserID)
-                        }
-                    }
-                )
-            } else {
-                DropdownMenuItem(
-                    text = { Text("Block @$targetUsername") },
-                    leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
-                    onClick = {
-                        menuExpanded = false
-                        showBlockConfirm = true
-                    }
-                )
-            }
-        }
-    }
-
-    if (showReportSheet) {
+    if (showReport) {
         ReportSheet(
             targetType = "user",
             targetID = targetUserID,
-            onDismiss = { showReportSheet = false }
+            onDismiss = onDismissReport
         )
     }
 
     if (showBlockConfirm) {
         AlertDialog(
-            onDismissRequest = { showBlockConfirm = false },
+            onDismissRequest = onDismissBlock,
             title = { Text("Block @$targetUsername?") },
             text = {
-                Text(
-                    "You won't see their videos, replies, or stitches. They won't be notified."
-                )
+                Text("You won't see their videos, replies, or stitches. They won't be notified.")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showBlockConfirm = false
+                        onDismissBlock()
                         scope.launch {
-                            com.stitchsocial.club.services.BlockService.shared
-                                .blockUser(targetUserID)
+                            runCatching {
+                                com.stitchsocial.club.services.BlockService.shared.blockUser(targetUserID)
+                            }
                         }
                     }
-                ) { Text("Block", color = Color.Red) }
+                ) { Text("Block", color = AppTheme.colors.destructive) }
             },
             dismissButton = {
-                TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = onDismissBlock) { Text("Cancel") }
             }
         )
     }
 }
+
 
 // ===== COLLECTIONS ROW PLACEHOLDER =====
 
@@ -1889,25 +1920,54 @@ private fun CollectionsRowPlaceholder(isOwnProfile: Boolean, tier: UserTier) {
 
 @Composable
 private fun ProfileTabBar(selectedTab: Int, tabCounts: List<Int>, onTabSelected: (Int) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().background(AppTheme.colors.bg).padding(top = 20.dp)) {
+    // iOS styles the selection as a filled pill, not an underline, and it uses
+    // the profile accent rather than cyan — cyan is the link colour elsewhere
+    // in the app, so an underline in it read as "these are links".
+    //
+    // The count is appended to the label ("Threads 12") rather than
+    // parenthesised on its own line, which is what let the row drop from three
+    // stacked elements to one.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.colors.bg)
+            .padding(horizontal = Spacing.md)
+            .padding(top = Spacing.md),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+    ) {
         profileTabs.forEachIndexed { index, tab ->
             val isSelected = selectedTab == index
+            val count = tabCounts.getOrNull(index) ?: 0
             Column(
-                modifier = Modifier.weight(1f).clickable { onTabSelected(index) }.height(50.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        tab.icon, null,
-                        tint = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else AppTheme.colors.textSecondary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(14.dp)
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(if (isSelected) AppTheme.colors.surfaceStrong else Color.Transparent)
+                    .then(
+                        if (isSelected) Modifier.border(
+                            1.dp,
+                            StitchColors.primary.copy(alpha = 0.5f),
+                            RoundedCornerShape(11.dp)
+                        ) else Modifier
                     )
-                    Text(tab.title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (isSelected) Color.Cyan else AppTheme.colors.textSecondary)
-                    Text("(${tabCounts.getOrNull(index) ?: 0})", fontSize = 10.sp, color = if (isSelected) Color.Cyan.copy(alpha = 0.8f) else AppTheme.colors.textSecondary.copy(alpha = 0.6f))
-                }
-                Spacer(Modifier.height(8.dp))
-                Box(Modifier.fillMaxWidth().height(2.dp).background(if (isSelected) Color.Cyan else Color.Transparent))
+                    .clickable { onTabSelected(index) }
+                    .padding(vertical = Spacing.xs),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.xxs)
+            ) {
+                Icon(
+                    tab.icon,
+                    contentDescription = null,
+                    tint = if (isSelected) StitchColors.primary else AppTheme.colors.textSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = if (count > 0) "${tab.title} $count" else tab.title,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) AppTheme.colors.textPrimary else AppTheme.colors.textSecondary,
+                    maxLines = 1
+                )
             }
         }
     }
