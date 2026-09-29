@@ -5,7 +5,7 @@
  * Matches LoginView.swift exactly:
  *   - Personal / Business account type picker
  *   - Business: brandName, websiteURL, AdCategory picker
- *   - Personal: username, displayName
+ *   - Personal: username only — the display name defaults to the handle
  *   - Referral code (optional, auto-uppercase)
  *   - Terms + Safety + Privacy acceptance checkbox (required)
  *   - saveTermsAcceptance — single merge write post-auth
@@ -67,6 +67,9 @@ import com.stitchsocial.club.foundation.AccountType
 import com.stitchsocial.club.foundation.PendingReferral
 import com.stitchsocial.club.services.AdCategory
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.PasswordPolicy
+import com.stitchsocial.club.services.PasswordStrength
+import com.stitchsocial.club.services.UsernameService
 import com.stitchsocial.club.services.ReferralService
 import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.delay
@@ -128,6 +131,9 @@ fun LoginView(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
+    var usernameState by remember { mutableStateOf(UsernameService.Availability.IDLE) }
+    // Still here for the social paths, which arrive with a name from Apple or
+    // Google. Email signup no longer asks for one.
     var displayName by remember { mutableStateOf("") }
     var pwVisible by remember { mutableStateOf(false) }
     var cpwVisible by remember { mutableStateOf(false) }
@@ -178,14 +184,37 @@ fun LoginView(
         }
     }
 
+    // Debounced availability. A handle is typed one letter at a time and each
+    // check is a read; 400ms is long enough to stop paying for every keystroke
+    // and short enough that the answer arrives while you are still looking.
+    LaunchedEffect(username, mode, accountType) {
+        if (mode != AuthMode.SIGN_UP || accountType != AccountType.PERSONAL || username.isEmpty()) {
+            usernameState = UsernameService.Availability.IDLE
+            return@LaunchedEffect
+        }
+        UsernameService.validate(username)?.let {
+            usernameState = it
+            return@LaunchedEffect
+        }
+        usernameState = UsernameService.Availability.CHECKING
+        delay(400)
+        usernameState = UsernameService.availability(username)
+    }
+
     val validEmail = email.contains("@") && email.contains(".")
-    val validPw = password.length >= 6
+    // Sign-in keeps the old floor: an existing password is whatever it already
+    // is, and enforcing the new one there would lock out every account made
+    // before today.
+    val validPw = if (mode == AuthMode.SIGN_IN) password.length >= 6
+                  else PasswordPolicy.isAcceptable(password)
     val pwMatch = password == confirmPassword
     val formValid = acceptedTerms && when (mode) {
         AuthMode.SIGN_IN -> validEmail && validPw
         AuthMode.SIGN_UP -> when (accountType) {
             AccountType.BUSINESS -> validEmail && brandName.isNotBlank() && validPw && pwMatch
-            else -> validEmail && username.length >= 3 && displayName.isNotBlank() && validPw && pwMatch
+            else -> validEmail && username.length >= 3 &&
+                    usernameState != UsernameService.Availability.TAKEN &&
+                    validPw && pwMatch
         }
     }
 
@@ -246,12 +275,15 @@ fun LoginView(
             errorMsg = when {
                 !acceptedTerms -> "Please accept the Terms & Conditions to continue"
                 !validEmail -> "Please enter a valid email address"
-                !validPw -> "Password must be at least 6 characters"
+                !validPw && !PasswordPolicy.meetsLength(password) ->
+                    "Password must be at least ${PasswordPolicy.MIN_LENGTH} characters"
+                !validPw -> "Password needs at least ${PasswordPolicy.REQUIRED_SYMBOLS} symbols, like ! ? # or $"
                 mode == AuthMode.SIGN_UP && !pwMatch -> "Passwords do not match"
                 mode == AuthMode.SIGN_UP && accountType == AccountType.PERSONAL && username.length < 3 ->
                     "Username must be at least 3 characters"
-                mode == AuthMode.SIGN_UP && accountType == AccountType.PERSONAL && displayName.isBlank() ->
-                    "Please enter your display name"
+                mode == AuthMode.SIGN_UP && accountType == AccountType.PERSONAL &&
+                    usernameState == UsernameService.Availability.TAKEN ->
+                    "@${UsernameService.normalise(username)} is taken. Please choose another."
                 mode == AuthMode.SIGN_UP && accountType == AccountType.BUSINESS && brandName.isBlank() ->
                     "Please enter your brand name"
                 else -> "Please fill in all fields"
@@ -266,7 +298,10 @@ fun LoginView(
                     if (r.success) { showSuccess = true; delay(1500); showSuccess = false; onLoginSuccess() }
                 } else {
                     val resolvedUsername = if (accountType == AccountType.BUSINESS) brandName else username.trim().lowercase()
-                    val resolvedDN = if (accountType == AccountType.BUSINESS) brandName else displayName.trim()
+                    // Falls back to the handle rather than asking for a second
+                    // name nobody had a different answer for.
+                    val resolvedDN = if (accountType == AccountType.BUSINESS) brandName
+                                     else displayName.trim().ifBlank { resolvedUsername }
                     val r = authService.signUp(
                         email = email.trim(), password = password,
                         displayName = resolvedDN, username = resolvedUsername,
@@ -276,6 +311,18 @@ fun LoginView(
                         businessCategory = if (accountType == AccountType.BUSINESS) category else null
                     )
                     if (r.success) {
+                        // Claim the handle. usernames/{handle} allows create and
+                        // denies update, so this is where a race between two
+                        // people choosing the same name is decided — the check
+                        // in the field is only a courtesy.
+                        if (accountType == AccountType.PERSONAL) {
+                            try {
+                                UsernameService.reserve(resolvedUsername, r.userId)
+                            } catch (e: Exception) {
+                                android.util.Log.w("LOGIN", "username reserve failed: ${e.message}")
+                            }
+                        }
+
                         // Save terms acceptance — mirrors iOS saveTermsAcceptance()
                         try {
                             FirebaseFirestore.getInstance("stitchfin").collection("users").document(r.userId)
@@ -474,12 +521,19 @@ fun LoginView(
                         // Personal fields
                         if (accountType == AccountType.PERSONAL) {
                             LTextField(username,
-                                { username = it.filter { c -> c.isLetterOrDigit() || c == '_' }; errorMsg = null },
-                                "Username", "Choose a username",
-                                KeyboardType.Text, ImeAction.Next, { fDN.requestFocus() }, fUser)
-                            LTextField(displayName, { displayName = it; errorMsg = null },
-                                "Display Name", "Your display name",
-                                KeyboardType.Text, ImeAction.Next, { fPw.requestFocus() }, fDN)
+                                { username = it.filter { c -> c.isLetterOrDigit() || c == '_' || c == '.' }.lowercase()
+                                  errorMsg = null },
+                                "Username", "yourhandle",
+                                KeyboardType.Text, ImeAction.Next, { fPw.requestFocus() }, fUser)
+
+                            UsernameStatusLine(username, usernameState)
+
+                            // The display-name field is gone, as on iOS. Two
+                            // adjacent fields asked for "a username" and "your
+                            // display name" with nothing saying which one people
+                            // see, and for a new account the answer is almost
+                            // always the same word twice. The handle becomes the
+                            // name; Edit Profile is where you choose another.
                         }
                     }
 
@@ -501,7 +555,15 @@ fun LoginView(
 
                     // Password requirements
                     if (mode == AuthMode.SIGN_UP && password.isNotEmpty()) {
-                        PasswordRequirementRow("At least 6 characters", password.length >= 6)
+                        PasswordRequirementRow(
+                            "At least ${PasswordPolicy.MIN_LENGTH} characters",
+                            PasswordPolicy.meetsLength(password)
+                        )
+                        PasswordRequirementRow(
+                            "At least ${PasswordPolicy.REQUIRED_SYMBOLS} symbols (! ? # $ …)",
+                            PasswordPolicy.meetsSymbols(password)
+                        )
+                        PasswordStrengthBar(password)
                     }
 
                     // Confirm password + referral
@@ -846,6 +908,64 @@ fun PasswordRequirementRow(text: String, isMet: Boolean) {
         Text(text, fontSize = 12.sp, color = if (isMet) StitchColors.success else StitchColors.textSecondary)
     }
 }
+/**
+ * What the handle field says about itself while you type — iOS parity.
+ */
+@Composable
+fun UsernameStatusLine(username: String, state: UsernameService.Availability) {
+    val handle = UsernameService.normalise(username)
+    val (text, color) = when (state) {
+        UsernameService.Availability.IDLE -> return
+        UsernameService.Availability.CHECKING ->
+            "Checking…" to StitchColors.textSecondary
+        UsernameService.Availability.AVAILABLE ->
+            "@$handle is available" to StitchColors.success
+        UsernameService.Availability.TAKEN ->
+            "@$handle is taken" to StitchColors.error
+        UsernameService.Availability.TOO_SHORT ->
+            "At least 3 characters" to StitchColors.textSecondary
+        UsernameService.Availability.INVALID_CHARACTERS ->
+            "Letters, numbers, dots and underscores only" to StitchColors.error
+        UsernameService.Availability.ERROR ->
+            "Couldn't check that one — you can still continue" to StitchColors.textSecondary
+    }
+    Text(text, fontSize = 12.sp, color = color, modifier = Modifier.padding(top = 2.dp))
+}
+
+/**
+ * Three segments and a word. The ticks above say whether a password is allowed;
+ * this says whether it is any good, which is not the same question.
+ */
+@Composable
+fun PasswordStrengthBar(password: String) {
+    if (password.isEmpty()) return
+    val strength = PasswordStrength.of(password)
+    val color = when (strength) {
+        PasswordStrength.WEAK -> StitchColors.error
+        PasswordStrength.FAIR -> Color(0xFFFF9500)
+        PasswordStrength.STRONG -> StitchColors.success
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(top = 4.dp)
+    ) {
+        repeat(3) { segment ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(3.dp)
+                    .background(
+                        if (segment < strength.filledSegments) color
+                        else StitchColors.textSecondary.copy(alpha = 0.25f),
+                        RoundedCornerShape(2.dp)
+                    )
+            )
+        }
+        Text(strength.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color)
+    }
+}
+
 // MARK: - Welcome Landing (iOS parity)
 
 /**
