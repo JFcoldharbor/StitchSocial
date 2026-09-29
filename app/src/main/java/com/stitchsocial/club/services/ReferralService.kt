@@ -4,6 +4,7 @@ import com.google.firebase.Timestamp
 import com.stitchsocial.club.AppConfig
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 import com.stitchsocial.club.BuildConfig
@@ -85,84 +86,45 @@ class ReferralService {
         )
     }
 
+    /**
+     * The reward is the server's — iOS parity.
+     *
+     * This ran the whole thing from the new user's phone: a transaction writing
+     * referralCount, referralCloutEarned, an absolute clout total,
+     * hypeRatingBonus and followerCount onto the REFERRER's user document. The
+     * account being paid was edited by somebody else's client and the amount was
+     * decided there, so anyone could call it naming themselves as referrer.
+     *
+     * completeReferral decides who is paid, how much, and whether it already
+     * happened. The auto-follow goes with it as follow documents only —
+     * onFollowWritten derives the counts from those.
+     */
     suspend fun processReferralSignup(
         referralCode: String, newUserID: String,
         platform: String = "android", sourceType: String = "manual"
     ): ReferralProcessingResult {
-        if (BuildConfig.DEBUG) { println("🔥 REFERRAL: Processing $referralCode for $newUserID") }
-
         if (!isValidCodeFormat(referralCode)) return fail("Invalid code format", "INVALID_CODE_FORMAT")
 
-        val referrerQuery = db.collection("users").whereEqualTo("referralCode", referralCode).limit(1).get().await()
-        if (referrerQuery.isEmpty) return fail("Code not found", "CODE_NOT_FOUND")
-
-        val referrerDoc = referrerQuery.documents.first()
-        val referrerID: String = referrerDoc.id
-        if (referrerID == newUserID) return fail("Cannot refer yourself", "SELF_REFERRAL")
-
-        val newUserDoc = db.collection("users").document(newUserID).get().await()
-        val newUserData = newUserDoc.data
-        if (newUserData != null) {
-            val existingInvitedBy = getString(newUserData, "invitedBy")
-            if (existingInvitedBy.isNotBlank()) return fail("Already referred", "ALREADY_REFERRED")
-        }
-
-        val rd = referrerDoc.data
-        val currentReferralCount = if (rd != null) toLong(rd["referralCount"]).toInt() else 0
-        val currentCloutEarned = if (rd != null) toLong(rd["referralCloutEarned"]).toInt() else 0
-        val currentClout = if (rd != null) toLong(rd["clout"]).toInt() else 0
-        val currentHypeBonus = if (rd != null) rd["hypeRatingBonus"] as? Double ?: 0.0 else 0.0
-        val rewardsAlreadyMaxed = if (rd != null) rd["referralRewardsMaxed"] as? Boolean ?: false else false
-
-        val cloutToAward = if (rewardsAlreadyMaxed || currentCloutEarned >= maxCloutFromReferrals) 0
-        else minOf(cloutPerReferral, maxCloutFromReferrals - currentCloutEarned)
-        val newCloutEarned = currentCloutEarned + cloutToAward
-        val newHypeBonus = currentHypeBonus + hypeRatingBonusPerReferral
-        val newReferralCount = currentReferralCount + 1
-        val rewardsMaxed = newCloutEarned >= maxCloutFromReferrals
-        val referralID = "ref_${newUserID}_$referrerID"
-
         return try {
-            val referralRef = db.collection("referrals").document(referralID)
-            val referrerRef = db.collection("users").document(referrerID)
-            val newUserRef = db.collection("users").document(newUserID)
-            val followingRef = db.collection("users").document(referrerID).collection("following").document(newUserID)
-            val followersRef = db.collection("users").document(newUserID).collection("followers").document(referrerID)
+            val result = FirebaseFunctions.getInstance("us-central1")
+                .getHttpsCallable("completeReferral")
+                .call(mapOf("referralCode" to referralCode, "platform" to platform))
+                .await()
 
-            val referralData = hashMapOf<String, Any>(
-                "id" to referralID, "referrerID" to referrerID, "refereeID" to newUserID,
-                "referralCode" to referralCode, "status" to ReferralStatus.COMPLETED.rawValue,
-                "cloutAwarded" to cloutToAward, "platform" to platform, "sourceType" to sourceType,
-                "createdAt" to Timestamp.now(), "completedAt" to Timestamp.now()
+            @Suppress("UNCHECKED_CAST")
+            val data = (result.data as? Map<String, Any?>) ?: emptyMap()
+            ReferralProcessingResult(
+                success = data["success"] as? Boolean ?: false,
+                referralID = null,
+                cloutAwarded = (data["cloutAwarded"] as? Number)?.toInt() ?: 0,
+                hypeBonus = 0.0,
+                rewardsMaxed = data["rewardsMaxed"] as? Boolean ?: false,
+                message = "Referral applied",
+                error = null,
+                referrerID = data["referrerID"] as? String
             )
-            val referrerUpdate = hashMapOf<String, Any>(
-                "referralCount" to newReferralCount, "referralCloutEarned" to newCloutEarned,
-                "clout" to (currentClout + cloutToAward), "hypeRatingBonus" to newHypeBonus,
-                "referralRewardsMaxed" to rewardsMaxed, "followerCount" to FieldValue.increment(1L),
-                "updatedAt" to Timestamp.now()
-            )
-            val newUserUpdate = hashMapOf<String, Any>(
-                "invitedBy" to referrerID, "followingCount" to FieldValue.increment(1L)
-            )
-            val followingData = hashMapOf<String, Any>("userID" to newUserID, "followedAt" to Timestamp.now())
-            val followersData = hashMapOf<String, Any>("userID" to referrerID, "followedAt" to Timestamp.now())
-
-            db.runTransaction { tx ->
-                tx.set(referralRef, referralData)
-                tx.update(referrerRef, referrerUpdate)
-                tx.update(newUserRef, newUserUpdate)
-                tx.set(followingRef, followingData)
-                tx.set(followersRef, followersData)
-                null
-            }.await()
-
-            if (BuildConfig.DEBUG) { println("✅ REFERRAL: $referralCode done — $referrerID +$cloutToAward clout") }
-            ReferralProcessingResult(true, referralID, cloutToAward, hypeRatingBonusPerReferral, rewardsMaxed,
-                if (rewardsMaxed) "Processed! (Cap reached)" else "Success! +$cloutToAward clout", null, referrerID)
-
         } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("❌ REFERRAL: Transaction failed — ${e.message}") }
-            ReferralProcessingResult(false, null, 0, 0.0, false, "Transaction failed", e.message, null)
+            fail(e.message ?: "Referral failed", "SERVER_ERROR")
         }
     }
 

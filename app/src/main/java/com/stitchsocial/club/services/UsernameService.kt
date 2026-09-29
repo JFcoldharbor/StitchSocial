@@ -62,18 +62,9 @@ object UsernameService {
         }
     }
 
-    /** Claim it. Throws when somebody else got there first. */
-    suspend fun reserve(raw: String, userID: String) {
-        val handle = normalise(raw)
-        if (handle.isEmpty()) return
-        db.collection("usernames").document(handle).set(
-            mapOf(
-                "username" to handle,
-                "userID" to userID,
-                "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-            )
-        ).await()
-    }
+    // reserve() lived here and has moved to the server —
+    // reserveUsernameOnUserCreate in index.js. The rule refuses client writes to
+    // usernames/{handle} outright now.
 }
 
 /**

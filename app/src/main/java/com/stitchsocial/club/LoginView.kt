@@ -311,17 +311,10 @@ fun LoginView(
                         businessCategory = if (accountType == AccountType.BUSINESS) category else null
                     )
                     if (r.success) {
-                        // Claim the handle. usernames/{handle} allows create and
-                        // denies update, so this is where a race between two
-                        // people choosing the same name is decided — the check
-                        // in the field is only a courtesy.
-                        if (accountType == AccountType.PERSONAL) {
-                            try {
-                                UsernameService.reserve(resolvedUsername, r.userId)
-                            } catch (e: Exception) {
-                                android.util.Log.w("LOGIN", "username reserve failed: ${e.message}")
-                            }
-                        }
+                        // The handle is claimed by the server —
+                        // reserveUsernameOnUserCreate fires on the user document
+                        // and writes usernames/{handle} itself, so there is no
+                        // window where an account exists without owning its name.
 
                         // Save terms acceptance — mirrors iOS saveTermsAcceptance()
                         try {

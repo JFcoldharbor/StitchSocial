@@ -584,15 +584,9 @@ class UserService(private val context: Context) {
                 .set(followerData)
                 .await()
 
-            // Update follower count atomically
-            db.collection("users").document(followeeID)
-                .update("followerCount", FieldValue.increment(1))
-                .await()
-
-            // Update following count atomically
-            db.collection("users").document(followerID)
-                .update("followingCount", FieldValue.increment(1))
-                .await()
+            // The counts are the server's: onFollowWritten derives both from
+            // the follow document written just above. Writing followerCount here
+            // meant a client editing somebody else's account.
 
             updateUserCaches(followerID, followeeID)
             if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Follow relationship created") }
@@ -638,15 +632,9 @@ class UserService(private val context: Context) {
                 .delete()
                 .await()
 
-            // Update follower count atomically
-            db.collection("users").document(followeeID)
-                .update("followerCount", FieldValue.increment(-1))
-                .await()
-
-            // Update following count atomically
-            db.collection("users").document(followerID)
-                .update("followingCount", FieldValue.increment(-1))
-                .await()
+            // The counts are the server's: onFollowWritten derives both from
+            // the follow document written just above. Writing followerCount here
+            // meant a client editing somebody else's account.
 
             updateUserCaches(followerID, followeeID)
             if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Unfollow completed") }
