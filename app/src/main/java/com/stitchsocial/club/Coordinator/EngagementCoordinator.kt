@@ -13,6 +13,7 @@ import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.SocialSignalService
+import com.stitchsocial.club.services.EngagementService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.Date
@@ -136,41 +137,34 @@ class EngagementCoordinator(
                 return@withContext false
             }
 
-            // Capture state BEFORE completion
-            val isFirstEngagement = state.isFirstEngagement()
-            val tapNumber = state.getCurrentTapNumber()
-            val currentCloutFromUser = state.cloutGivenToVideo
-
-            // Calculate clout
-            val cloutAwarded = EngagementCalculator.calculateCloutReward(
-                userTier = userTier,
-                tapNumber = tapNumber,
-                isFirstEngagement = isFirstEngagement,
-                currentCloutFromUser = currentCloutFromUser
+            // One call replaces the two writes that used to be here: the
+            // counter write, which firestore.rules has refused for months, and
+            // the clout payment, which used a tier this phone chose to pay a
+            // creatorID this phone named. The server reads both from documents.
+            //
+            // The tap number, first-engagement flag and running clout total
+            // that used to be captured here fed a local calculateCloutReward.
+            // The server keeps that state per viewer and per video now, which
+            // is the only place it can be trusted — this phone's copy resets
+            // when the app does.
+            val serverResult = EngagementService.process(
+                videoID = videoID,
+                engagementType = "hype",
+                isBurst = false
             )
-
-            val isFounderFirstTap = isFirstEngagement &&
-                    (userTier == UserTier.FOUNDER || userTier == UserTier.CO_FOUNDER)
-            val isPremiumBoost = isFirstEngagement &&
-                    EngagementCalculator.hasFirstTapBonus(userTier) && !isFounderFirstTap
-
-            // Update Firebase
-            try {
-                videoService.updateEngagementCounts(videoID, video.hypeCount + 1, video.coolCount)
-            } catch (e: Exception) {
+            if (serverResult == null) {
                 state.resetHypeTaps()
                 return@withContext false
             }
 
+            val cloutAwarded = serverResult.cloutAwarded
+
             // A hype is a qualifying daily action -> feed the engagement streak.
             StreakService.shared.recordAction(StreakAction.HYPE)
 
-            // Award clout
-            if (cloutAwarded > 0) {
-                try {
-                    userService.awardClout(video.creatorID, cloutAwarded)
-                } catch (e: Exception) { }
-            }
+            // Clout is paid by stitchnoti_processEngagement above, which also
+            // advances the tier and gives accepted collaborators their third.
+            // awardClout() used to be called here and is now unreachable.
 
             // Notification (Cloud Function handles username)
             sendEngagementNotificationToCreator(
@@ -236,9 +230,8 @@ class EngagementCoordinator(
                 return@withContext false
             }
 
-            try {
-                videoService.updateEngagementCounts(videoID, video.hypeCount, video.coolCount + 1)
-            } catch (e: Exception) {
+            // Same as hype: the server owns the counter and the clout penalty.
+            if (EngagementService.process(videoID, engagementType = "cool") == null) {
                 state.resetCoolTaps()
                 return@withContext false
             }

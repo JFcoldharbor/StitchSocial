@@ -768,80 +768,23 @@ class UserService(private val context: Context) {
     }
 
     // ===== ENGAGEMENT STATS & CLOUT SYSTEM =====
-
-    /**
-     * Update user engagement statistics (clout, views, etc.)
-     */
-    suspend fun updateEngagementStats(
-        userID: String,
-        cloutChange: Int = 0,
-        viewsChange: Int = 0,
-        hypesChange: Int = 0,
-        coolsChange: Int = 0
-    ): Boolean {
-        return try {
-            val updates = hashMapOf<String, Any>()
-
-            if (cloutChange != 0) updates["clout"] = FieldValue.increment(cloutChange.toLong())
-            if (viewsChange != 0) updates["totalViews"] = FieldValue.increment(viewsChange.toLong())
-            if (hypesChange != 0) updates["totalHypes"] = FieldValue.increment(hypesChange.toLong())
-            if (coolsChange != 0) updates["totalCools"] = FieldValue.increment(coolsChange.toLong())
-
-            if (updates.isNotEmpty()) {
-                updates["updatedAt"] = FieldValue.serverTimestamp()
-                db.collection("users").document(userID).update(updates).await()
-                invalidateUserCache(userID)
-                if (BuildConfig.DEBUG) { println("USER SERVICE: ✅ Engagement stats updated for $userID") }
-                true
-            } else {
-                false
-            }
-
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("USER SERVICE: Error updating engagement stats: ${e.message}") }
-            false
-        }
-    }
-
-    /**
-     * Award clout to a user and check for tier advancement
-     */
-    suspend fun awardClout(userID: String, amount: Int): Boolean {
-        val result = updateEngagementStats(userID = userID, cloutChange = amount)
-        if (result) {
-            checkAndAdvanceTier(userID)
-        }
-        return result
-    }
-
-    /**
-     * Check if user qualifies for a higher tier and update if so
-     */
-    private suspend fun checkAndAdvanceTier(userID: String) {
-        try {
-            val userDoc = db.collection("users").document(userID).get().await()
-            val currentClout = (userDoc.getLong("clout") ?: 0).toInt()
-            val currentTierRaw = userDoc.getString("tier") ?: "rookie"
-            val currentTier = UserTier.fromRawValue(currentTierRaw) ?: UserTier.ROOKIE
-
-            // Don't change founder/co-founder tiers
-            if (currentTier.isFounderTier) return
-
-            val correctTier = UserTier.tierForClout(currentClout)
-            if (correctTier != currentTier && correctTier.level > currentTier.level) {
-                db.collection("users").document(userID).update(
-                    mapOf(
-                        "tier" to correctTier.rawValue,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-                invalidateUserCache(userID)
-                if (BuildConfig.DEBUG) { println("USER SERVICE: Tier advanced for $userID: ${currentTier.displayName} -> ${correctTier.displayName} (clout: $currentClout)") }
-            }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("USER SERVICE: Tier check failed (non-fatal): ${e.message}") }
-        }
-    }
+    //
+    // updateEngagementStats(), awardClout() and checkAndAdvanceTier() lived
+    // here and are gone. All three wrote standing — clout, then the tier that
+    // clout buys — from a phone, onto whichever user document the caller
+    // named. The amount came from a tier the client chose, so a modified
+    // client could pay anyone anything and promote them for it.
+    //
+    // stitchnoti_processEngagement does all of it now: it reads the sender's
+    // tier from their own document, the recipient from the video's, computes
+    // the clout, pays it, advances the tier, and gives accepted collaborators
+    // their third. firestore.rules refuses these fields from a client, so
+    // leaving the functions here would only have meant writes that fail
+    // silently — which is exactly how the counter write next door went
+    // unnoticed for months.
+    //
+    // The view/hype/cool totals they also maintained belong with the same
+    // trigger and are not yet written; that is the remaining gap.
 
     /**
      * Get user's current clout score

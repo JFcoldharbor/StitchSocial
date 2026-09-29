@@ -68,20 +68,12 @@ class VideoServiceImpl {
         }
     }
 
-    suspend fun updateEngagementCounts(videoID: String, hypeCount: Int, coolCount: Int) {
-        try {
-            val updates = hashMapOf<String, Any>(
-                "hypeCount" to hypeCount,
-                "coolCount" to coolCount,
-                "lastEngagementAt" to (com.google.firebase.firestore.FieldValue.serverTimestamp() as Any)
-            )
-            db.collection("videos").document(videoID).update(updates).await()
-            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Updated engagement counts for $videoID") }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to update counts: ${e.message}") }
-            throw e
-        }
-    }
+    // updateEngagementCounts() was here. It wrote hypeCount and coolCount
+    // straight onto the video document, and firestore.rules has refused a
+    // client write to either field for as long as the rule has existed — so
+    // every hype and cool Android recorded was rejected, and nobody knew,
+    // because the write result was discarded. stitchnoti_processEngagement
+    // owns both counters; see services/EngagementService.kt.
 
     /**
      * Delete a video (hard delete - matches iOS implementation)
