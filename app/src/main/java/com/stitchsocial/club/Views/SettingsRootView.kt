@@ -168,11 +168,7 @@ fun SettingsRootView(
             item {
                 SettingsSectionHeader("Creator")
                 SettingsGroupCard {
-                    // Hype Coins sits here rather than under YOU. iOS's commit
-                    // message argues for YOU — "the balance is an account
-                    // fact" — and its code puts the row in Creator. Matching
-                    // the code, because that is what a user of either app
-                    // actually sees.
+                    // Hype Coins belongs in CREATOR, on both platforms.
                     SettingsRow(
                         title = "Hype Coins",
                         icon = Icons.Default.LocalFireDepartment,
