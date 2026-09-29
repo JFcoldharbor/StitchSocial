@@ -399,8 +399,12 @@ class VideoServiceImpl {
             // Order server-side so we fetch the NEWEST `limit` deterministically —
             // an unordered fetch returned an arbitrary slice, which starved the
             // Stitches (depth 1) and Replies (depth 2) tabs.
+            // participantIDs rather than creatorID: a collab post belongs on
+            // the grid of everyone whose name is on it. onVideoCreated seeds
+            // the field with the creator alone, so an ordinary post still
+            // matches exactly one profile.
             val snapshot = db.collection("videos")
-                .whereEqualTo("creatorID", userID)
+                .whereArrayContains("participantIDs", userID)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get()
@@ -889,7 +893,12 @@ class VideoServiceImpl {
                     isEventPromo = data["isEventPromo"] as? Boolean ?: false,
                     isEventRecap = data["isEventRecap"] as? Boolean ?: false,
                     eventMomentPublished = data["eventMomentPublished"] as? Boolean ?: false,
-                    publicVisibility = data["publicVisibility"] as? String
+                    publicVisibility = data["publicVisibility"] as? String,
+                    // Collab: who else is on this post, and what their acceptance bought.
+                    collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    collaborators = Collaborator.list(data["collaborators"]),
+                    collabBoost = CollabBoost.from(data["collabBoost"])
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }

@@ -365,7 +365,12 @@ class SearchService {
                     discoverabilityScore = data["discoverabilityScore"] as? Double ?: 0.5,
                     isPromoted = data["isPromoted"] as? Boolean ?: false,
                     isProcessing = data["isProcessing"] as? Boolean ?: false,
-                    isDeleted = data["isDeleted"] as? Boolean ?: false
+                    isDeleted = data["isDeleted"] as? Boolean ?: false,
+                    // Collab: who else is on this post.
+                    collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    collaborators = com.stitchsocial.club.services.Collaborator.list(data["collaborators"]),
+                    collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"])
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("⚠️ SEARCH: Failed to process video ${doc.id}: ${e.message}") }

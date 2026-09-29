@@ -80,6 +80,8 @@ import com.stitchsocial.club.foundation.RecentUser
 import com.stitchsocial.club.foundation.LeaderboardVideo
 
 // Services
+import com.stitchsocial.club.services.CollabException
+import com.stitchsocial.club.services.CollabService
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.NotificationService
@@ -871,6 +873,12 @@ private fun NotificationRow(
     val isFollowing = if (userId.isNotEmpty()) followingStates[userId] ?: false else false
     val isLoadingFollow = if (userId.isNotEmpty()) loadingStates.contains(userId) else false
 
+    // Set once this row has been answered, so the buttons do not reappear
+    // while the list still holds the old unanswered document.
+    var collabAnswer by remember(notification.id) { mutableStateOf<String?>(null) }
+    var collabWorking by remember(notification.id) { mutableStateOf(false) }
+    val collabScope = rememberCoroutineScope()
+
     // Revamped to iOS's shape (NotificationRowView). Padding was never the
     // problem — the row carried THREE stacked text lines (title, message,
     // timestamp) plus a separate 24dp type chip in its own column. That's a
@@ -1028,6 +1036,63 @@ private fun NotificationRow(
                                 )
                             }
                         }
+                    }
+                }
+
+                // A collab invite is the only notification carrying a
+                // decision, so it answers in place. Sending somebody to
+                // another screen to press yes is how an invite sits until it
+                // expires — tapping the row still opens the post itself.
+                if (notification.type == NotificationType.COLLAB_INVITE) {
+                    val inviteID = notification.actionData["inviteID"] as? String ?: ""
+                    if (collabAnswer == null && inviteID.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    collabScope.launch {
+                                        collabWorking = true
+                                        collabAnswer = try {
+                                            CollabService.respond(inviteID, true); "Joined"
+                                        } catch (e: CollabException) {
+                                            e.userMessage
+                                        } finally { collabWorking = false }
+                                    }
+                                },
+                                enabled = !collabWorking,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA726)),
+                                shape = RoundedCornerShape(16.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Accept", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(
+                                onClick = {
+                                    collabScope.launch {
+                                        collabWorking = true
+                                        collabAnswer = try {
+                                            CollabService.respond(inviteID, false); "Declined"
+                                        } catch (e: CollabException) {
+                                            e.userMessage
+                                        } finally { collabWorking = false }
+                                    }
+                                },
+                                enabled = !collabWorking,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("Decline", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
+                            }
+                        }
+                    } else if (collabAnswer != null) {
+                        Text(
+                            text = collabAnswer ?: "",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AppTheme.colors.textSecondary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
                     }
                 }
 
@@ -1263,6 +1328,7 @@ private fun EmptyStateView(
 
 private fun getNotificationColor(type: NotificationType): Color {
     return when (type) {
+        NotificationType.COLLAB_INVITE, NotificationType.COLLAB_ACCEPTED -> Color(0xFFFFA726)
         NotificationType.HYPE_RECEIVED -> Color(0xFFFF6B6B)
         NotificationType.REPLY_RECEIVED -> Color(0xFF4ECDC4)
         NotificationType.NEW_FOLLOWER -> Color(0xFF95E1D3)
@@ -1316,6 +1382,9 @@ private fun formatCount(count: Int): String {
 @Composable
 private fun notificationIconRes(type: NotificationType): Int {
     val name = when (type) {
+        // No collab drawable yet; the follow glyph is the closest thing the
+        // set has to "a person and you".
+        NotificationType.COLLAB_INVITE, NotificationType.COLLAB_ACCEPTED -> "ic_notif_follow"
         NotificationType.HYPE_RECEIVED -> "ic_notif_hype"
         NotificationType.REPLY_RECEIVED -> "ic_notif_stitch"
         NotificationType.SHARE_RECEIVED -> "ic_notif_thread"

@@ -433,7 +433,12 @@ class HomeFeedService(
                 freeBoostExpiresAt = (data["freeBoostExpiresAt"] as? com.google.firebase.Timestamp)?.toDate(),
                 primaryCategory = data["primaryCategory"] as? String,
                 isProcessing = data["isProcessing"] as? Boolean ?: false,
-                isDeleted = data["isDeleted"] as? Boolean ?: false
+                isDeleted = data["isDeleted"] as? Boolean ?: false,
+                // Collab: who else is on this post.
+                collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                collaborators = com.stitchsocial.club.services.Collaborator.list(data["collaborators"]),
+                collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"])
             )
 
             return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())

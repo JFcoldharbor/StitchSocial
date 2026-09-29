@@ -139,7 +139,19 @@ class DiscoveryViewModel(
         val boost = BoostCalculator.activeMagnitude(v.boostCoins, v.boostExpiresAt, v.freeBoostExpiresAt)
         val challengeBoost = if (v.isChallengeActive) 0.15 else 0.0
         val affinity = 0.0
-        return (v.discoverabilityScore + boost + challengeBoost) * (1.0 + affinity * 0.5)
+        // The collab lift: earned by the OWNER when somebody further up the
+        // tier ladder accepted their invite, expressed as a fraction and
+        // time-bounded by the server. It multiplies rather than adds, because
+        // it rewards who joined the post rather than claiming the post is
+        // good — a weak post reaching up should still rank below a strong one.
+        //
+        // collabBoost has been written since the collab functions shipped and
+        // read by nothing on either platform, which made the whole reach-up
+        // trade inert.
+        val collab = if (v.collabBoost?.isActive == true) v.collabBoost.multiplier else 0.0
+        return (v.discoverabilityScore + boost + challengeBoost) *
+                (1.0 + affinity * 0.5) *
+                (1.0 + collab)
     }
 
     /**

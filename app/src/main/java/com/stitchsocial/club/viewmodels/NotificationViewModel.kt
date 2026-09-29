@@ -224,6 +224,8 @@ class NotificationViewModel(
      */
     private fun mapNotificationType(firebaseType: StitchNotificationType): NotificationType {
         return when (firebaseType) {
+            StitchNotificationType.COLLAB_INVITE -> NotificationType.COLLAB_INVITE
+            StitchNotificationType.COLLAB_ACCEPTED -> NotificationType.COLLAB_ACCEPTED
             StitchNotificationType.HYPE -> NotificationType.HYPE_RECEIVED
             StitchNotificationType.COOL -> NotificationType.COOL_RECEIVED
             StitchNotificationType.REPLY -> NotificationType.REPLY_RECEIVED
@@ -676,10 +678,13 @@ enum class NotificationType {
     STREAK,
     SUBSCRIPTION,
     NEW_VIDEO,
-    RSVP;
+    RSVP,
+    COLLAB_INVITE,
+    COLLAB_ACCEPTED;
 
     val emoji: String
         get() = when (this) {
+            COLLAB_INVITE, COLLAB_ACCEPTED -> "\uD83E\uDD1D"
             HYPE_RECEIVED -> "ðŸ”¥"
             REPLY_RECEIVED -> "ðŸ’¬"
             SHARE_RECEIVED -> "ðŸ“¤"
@@ -728,6 +733,8 @@ val NotificationType.bucket: NotificationFilter
         NotificationType.FOLLOWING_VIDEO,
         NotificationType.NEW_VIDEO,
         NotificationType.GO_LIVE,
+        NotificationType.COLLAB_INVITE,
+        NotificationType.COLLAB_ACCEPTED,
         NotificationType.RSVP -> NotificationFilter.SOCIAL
 
         // The app talking to you about your account.

@@ -415,7 +415,12 @@ class DiscoveryViewModel(
             eventID = data["eventId"] as? String,
             isEventPromo = data["isEventPromo"] as? Boolean ?: false,
             isEventRecap = data["isEventRecap"] as? Boolean ?: false,
-            eventMomentPublished = data["eventMomentPublished"] as? Boolean ?: false
+            eventMomentPublished = data["eventMomentPublished"] as? Boolean ?: false,
+            // Collab: who else is on this post, and what their acceptance bought.
+            collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            collaborators = com.stitchsocial.club.services.Collaborator.list(data["collaborators"]),
+            collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"])
         )
     }
 

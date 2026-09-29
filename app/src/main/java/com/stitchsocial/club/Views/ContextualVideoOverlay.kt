@@ -812,6 +812,7 @@ private fun MoreOptionsMenu(
     val canHighlight = com.stitchsocial.club.services.AnnouncementService.shared
         .isAuthorizedCreator(adminEmail)
     var showHighlightSheet by remember { mutableStateOf(false) }
+    var showCollabSheet by remember { mutableStateOf(false) }
 
     Box {
         // 32dp circle to match the share + exit buttons in the vertical top stack.
@@ -861,6 +862,18 @@ private fun MoreOptionsMenu(
                     }
                 )
             }
+            // Owner only: createCollabInvite refuses anybody else, so offering
+            // the item to a viewer would be offering a button that cannot work.
+            if (isUserVideo) {
+                DropdownMenuItem(
+                    text = { Text("Collaborators") },
+                    leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        showCollabSheet = true
+                    }
+                )
+            }
             if (!isUserVideo) {
             DropdownMenuItem(
                 text = { Text("Report video") },
@@ -904,6 +917,10 @@ private fun MoreOptionsMenu(
             }
             }  // if (!isUserVideo)
         }
+    }
+
+    if (showCollabSheet) {
+        CollabSheet(video = video, onDismiss = { showCollabSheet = false })
     }
 
     if (showHighlightSheet) {
@@ -1286,6 +1303,7 @@ private fun TopSection(
                 profileImageURL = displayCreatorProfileImageURL,
                 temperatureColor = temperatureColor,
                 isThread = false,
+                collaborators = video.collaborators,
                 onClick = {
                     pauseAllVideos(context)
                     onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
@@ -1566,12 +1584,31 @@ private fun BottomSection(
 
 // MARK: - Creator Pill
 
+/**
+ * "with @a", "with @a and @b", "with @a and 2 others" — the last because four
+ * handles do not fit on a phone next to a name.
+ */
+private fun collaboratorCredit(
+    collaborators: List<com.stitchsocial.club.services.Collaborator>
+): String {
+    val handles = collaborators.map { it.handle }
+    return when (handles.size) {
+        0 -> ""
+        1 -> "with ${handles[0]}"
+        2 -> "with ${handles[0]} and ${handles[1]}"
+        else -> "with ${handles[0]} and ${handles.size - 1} others"
+    }
+}
+
 @Composable
 private fun CreatorPill(
     displayName: String,
     profileImageURL: String?,
     temperatureColor: Color,
     isThread: Boolean,
+    /// Accepted collaborators, for the "with @x" credit. Empty on nearly every
+    /// post, so the line simply does not render rather than reserving space.
+    collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
     onClick: () -> Unit
 ) {
     val imageSize: Dp = if (isThread) OverlaySizes.PROFILE_IMAGE_THREAD else OverlaySizes.PROFILE_IMAGE
@@ -1661,6 +1698,18 @@ private fun CreatorPill(
                         color = Color.White.copy(alpha = 0.6f)
                     )
                 }
+            }
+            // Credit, once somebody has accepted. Under the creator rather
+            // than beside them, because a collaborator shares the clout and
+            // the reach, not the authorship.
+            if (collaborators.isNotEmpty()) {
+                Text(
+                    text = collaboratorCredit(collaborators),
+                    fontSize = threadLabelSize,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.6f),
+                    maxLines = 1
+                )
             }
         }
     }

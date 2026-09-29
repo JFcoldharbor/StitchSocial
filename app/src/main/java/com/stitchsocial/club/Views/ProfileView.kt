@@ -419,8 +419,15 @@ fun ProfileView(
             // Owner-aware moderation gate: the owner sees all their own videos
             // (incl. pending/flagged with the "under review" banner); visitors see
             // public + pending but NOT hidden_from_public (flagged/blocked/error).
-            userVideos = if (isOwnProfile) fetched
-                         else fetched.filter { (it.publicVisibility ?: "public") != "hidden_from_public" }
+            // Whether a moderation-hidden post is visible depends on who MADE
+            // it, not whose grid this is. Keying that off isOwnProfile was
+            // safe while a grid only held its owner's posts; with collabs it
+            // would show a collaborator somebody else's flagged video.
+            val viewerID = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            userVideos = fetched.filter {
+                (it.publicVisibility ?: "public") != "hidden_from_public" ||
+                        (viewerID != null && it.creatorID == viewerID)
+            }
             hasMoreVideos = userVideos.size >= 150
         } catch (_: Exception) { } finally {
             isLoadingVideos = false

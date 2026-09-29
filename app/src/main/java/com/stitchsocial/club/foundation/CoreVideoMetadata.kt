@@ -112,7 +112,22 @@ data class CoreVideoMetadata(
     // "public" (passed) | "pending" (awaiting scan) | "hidden_from_public"
     // (flagged/blocked/error) | null (legacy -> public). Gate public surfaces
     // with `isPubliclyVisible`.
-    val publicVisibility: String? = null
+    val publicVisibility: String? = null,
+
+    // Collab (iOS parity — Collab/CollabModels.swift). Populated only once an
+    // invitee accepts; before that the post is live and earning and none of
+    // this is set, which is the design: publishing does not wait on an answer,
+    // but credit does. All four are written by the collab Cloud Functions
+    // alone — firestore.rules refuses them from a client, because each decides
+    // something worth forging: whose name is on a post, whose profile it
+    // appears on, and how much reach that bought.
+    val collaboratorIDs: List<String> = emptyList(),
+    /// Owner plus accepted collaborators. What the merged profile grid queries
+    /// on. Seeded with the creator alone by onVideoCreated, so an ordinary
+    /// post still matches exactly one profile.
+    val participantIDs: List<String> = emptyList(),
+    val collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
+    val collabBoost: com.stitchsocial.club.services.CollabBoost? = null
 ) {
     // Computed properties
 

@@ -636,10 +636,17 @@ enum class StitchNotificationType(val rawValue: String) {
     NEW_VIDEO("newVideo"),
     RSVP("rsvp"),
     BADGE("badge"),
-    STREAK("streak");
+    STREAK("streak"),
+
+    // Collab. The invite is the only notification with a decision attached,
+    // so its row carries Accept and Decline.
+    COLLAB_INVITE("collabInvite"),
+    COLLAB_ACCEPTED("collabAccepted");
 
     val displayName: String
         get() = when (this) {
+            COLLAB_INVITE -> "Collab invite"
+            COLLAB_ACCEPTED -> "Collab"
             HYPE -> "Hype"
             COOL -> "Cooldown"
             REPLY -> "Reply"
@@ -664,6 +671,7 @@ enum class StitchNotificationType(val rawValue: String) {
 
     val iconName: String
         get() = when (this) {
+            COLLAB_INVITE, COLLAB_ACCEPTED -> "group"
             HYPE -> "favorite"
             COOL -> "ac_unit"
             REPLY -> "reply"
