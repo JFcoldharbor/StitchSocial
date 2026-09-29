@@ -311,6 +311,10 @@ class DiscoveryViewModel(
                         // reached Discovery here. Missing = "public" so legacy
                         // docs are unaffected. See foundation/PublicVisibility.kt.
                         if (!isVideoPubliclyVisible(data)) return@mapNotNull null
+                        // Discovery builds its own list here rather than going
+                        // through DiscoveryService, so it needs the teen rule
+                        // of its own. See services/TeenSafety.kt.
+                        if (!com.stitchsocial.club.services.TeenSafety.allows(data)) return@mapNotNull null
                         val url = data["videoURL"] as? String ?: return@mapNotNull null
                         if (url.isBlank()) return@mapNotNull null
                         decodeVideo(data, doc.id)

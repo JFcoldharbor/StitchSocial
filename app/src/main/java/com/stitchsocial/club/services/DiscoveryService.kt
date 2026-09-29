@@ -78,6 +78,11 @@ class DiscoveryService(private val context: Context) {
                     // Skip private accounts
                     if (isPrivate) return@mapNotNull null
 
+                    // A teen is not offered an adult account as somebody to
+                    // find or follow — the half of this that has nothing to do
+                    // with video.
+                    if (!TeenSafety.allowsAccount(data)) return@mapNotNull null
+
                     // Filter by date
                     if (createdAt.before(cutoffDate)) return@mapNotNull null
 
@@ -152,6 +157,9 @@ class DiscoveryService(private val context: Context) {
                     // older docs default to "public" so they continue to surface.
                     val publicVisibility = data["publicVisibility"] as? String ?: "public"
                     if (publicVisibility != "public") return@mapNotNull null
+
+                    // The leaderboard is a feed like any other.
+                    if (!TeenSafety.allows(data)) return@mapNotNull null
 
                     val video = LeaderboardVideo(
                         id = doc.id,

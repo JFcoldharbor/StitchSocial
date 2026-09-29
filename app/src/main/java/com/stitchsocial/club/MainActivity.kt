@@ -686,7 +686,7 @@ fun MainScreen() {
     //   "checking"  — read in flight, show splash
     //   "prompt"    — birthdate missing, show BirthdayPromptView
     //   "blocked"   — under-13, show Under13BlockedView
-    //   "teen"      — show TeenLockedView until the teen lane is built
+    //   "teen"      — 13-17: the app, filtered (see services/TeenSafety.kt)
     //   "ok"        — adult, render the main app
     var ageGateState by remember { mutableStateOf("checking") }
     // Bind analytics identity to the signed-in user (cleared on sign-out) so
@@ -718,11 +718,21 @@ fun MainScreen() {
                         age < 18 -> "teen"
                         else     -> "ok"
                     }
+                    // The one read this screen already makes is also the read
+                    // every feed needs, so the lane is set from it rather than
+                    // fetched again per surface.
+                    TeenSafety.setLane(if (ageGateState == "teen") "teen" else "adult")
                 }
             }
         } catch (e: Exception) {
             // Network / read failure — fall through to "ok" so users aren't
             // hard-blocked by a transient error.  Next launch retries.
+            //
+            // The CONTENT lane does not follow it there. Letting an adult into
+            // the app on a failed read costs nothing if they turn out to be an
+            // adult; showing unfiltered video to someone who turns out to be
+            // thirteen is the mistake this exists to prevent, so TeenSafety
+            // keeps its cautious default until a read succeeds.
             ageGateState = "ok"
         }
     }
@@ -844,15 +854,11 @@ fun MainScreen() {
                     ageGateState = "checking"
                 })
             }
-            currentUser != null && ageGateState == "teen" -> {
-                com.stitchsocial.club.views.TeenLockedView(
-                    displayName = currentUser?.displayName ?: "there",
-                    onSignedOut = {
-                        currentUser = null
-                        ageGateState = "checking"
-                    }
-                )
-            }
+            // "teen" no longer has a branch of its own: a 13-17 viewer gets
+            // the app, with every feed filtered through TeenSafety and the tab
+            // bar showing only the surfaces that have been made safe for them
+            // (MainAppTab.teenLaneTabs). TeenLockedView was what stood in for
+            // that while none of it existed.
             currentUser != null && ageGateState == "prompt" -> {
                 val uid = currentUser!!.id
                 com.stitchsocial.club.views.BirthdayPromptView(
@@ -863,6 +869,12 @@ fun MainScreen() {
                             is com.stitchsocial.club.views.AgeGateOutcome.Teen            -> "teen"
                             is com.stitchsocial.club.views.AgeGateOutcome.Under13Blocked  -> "blocked"
                         }
+                        // The birthdate just arrived, so this is the first
+                        // moment the lane is actually known — the read at
+                        // launch found nothing and left it at teen.
+                        com.stitchsocial.club.services.TeenSafety.setLane(
+                            if (ageGateState == "ok") "adult" else "teen"
+                        )
                     }
                 )
             }

@@ -82,6 +82,7 @@ import androidx.compose.foundation.BorderStroke
 import com.stitchsocial.club.ui.theme.Spacing
 import com.stitchsocial.club.ui.theme.StitchColors
 import com.stitchsocial.club.services.StreakService
+import com.stitchsocial.club.services.TeenSafety
 import com.stitchsocial.club.services.SubscriptionService
 import com.stitchsocial.club.ui.theme.color
 
@@ -367,7 +368,8 @@ fun ProfileView(
     // Age gate state — own profile only
     var showingBirthdayPrompt by remember { mutableStateOf(false) }
     var showingUnder13Block by remember { mutableStateOf(false) }
-    var teenLocked by remember { mutableStateOf(false) }
+    // teenLocked is gone: a teen's own profile is the one surface that was
+    // never the problem, and the lane is enforced in the feeds now.
     var ageGateChecked by remember { mutableStateOf(false) }
 
     // Collections state
@@ -505,7 +507,7 @@ fun ProfileView(
                             }
                             when {
                                 age < 13 -> showingUnder13Block = true
-                                age < 18 -> teenLocked = true
+                                age < 18 -> TeenSafety.setLane("teen")
                             }
                         }
                     }
@@ -767,11 +769,6 @@ fun ProfileView(
                 Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
                     Under13BlockedView(onAcknowledged = { showingUnder13Block = false })
                 }
-            } else if (teenLocked) {
-                val name = currentUser?.displayName ?: "there"
-                Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
-                    TeenLockedView(displayName = name, onSignedOut = { teenLocked = false })
-                }
             } else if (showingBirthdayPrompt) {
                 Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
                     BirthdayPromptView(
@@ -780,7 +777,7 @@ fun ProfileView(
                             showingBirthdayPrompt = false
                             when (outcome) {
                                 is AgeGateOutcome.Adult -> { /* allow */ }
-                                is AgeGateOutcome.Teen  -> teenLocked = true
+                                is AgeGateOutcome.Teen  -> TeenSafety.setLane("teen")
                                 is AgeGateOutcome.Under13Blocked -> showingUnder13Block = true
                             }
                         }

@@ -85,8 +85,30 @@ enum class MainAppTab(
     companion object {
         val leftSideTabs = listOf(HOME, DISCOVERY)
         val rightSideTabs = listOf(PROGRESSION, NOTIFICATIONS)
+
+        /**
+         * What a 13-17 viewer gets — iOS parity (MainAppTab.teenLaneTabs).
+         *
+         * Home, Discovery and Search filter every video through TeenSafety,
+         * Profile is their own and Inbox is their own activity. Nothing is
+         * removed today; the set exists so the next tab has to be added to it
+         * deliberately rather than appearing in a teen's bar by default. On
+         * iOS that already matters — Events is excluded there, because an
+         * event is a live room with guest POVs that nothing scans before they
+         * appear, which is a supervision problem rather than a filtering one.
+         */
+        val teenLaneTabs = setOf(HOME, DISCOVERY, PROGRESSION, NOTIFICATIONS)
     }
 }
+
+/**
+ * A teen's bar is the same bar with fewer doors, rather than a second design —
+ * the surfaces they can reach look exactly like everyone else's.
+ */
+private fun visibleTabs(tabs: List<MainAppTab>): List<MainAppTab> =
+    if (com.stitchsocial.club.services.TeenSafety.viewerIsTeen) {
+        tabs.filter { it in MainAppTab.teenLaneTabs }
+    } else tabs
 
 // MARK: - Glassmorphism Tab Bar
 @Composable
@@ -208,7 +230,7 @@ fun CustomDippedTabBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left side tabs
-            MainAppTab.leftSideTabs.forEach { tab ->
+            visibleTabs(MainAppTab.leftSideTabs).forEach { tab ->
                 GlassTabItem(
                     tab = tab,
                     isSelected = selectedTab == tab,
@@ -224,7 +246,7 @@ fun CustomDippedTabBar(
             Spacer(modifier = Modifier.width(createButtonSize + 16.dp))
 
             // Right side tabs
-            MainAppTab.rightSideTabs.forEach { tab ->
+            visibleTabs(MainAppTab.rightSideTabs).forEach { tab ->
                 GlassTabItem(
                     tab = tab,
                     isSelected = selectedTab == tab,

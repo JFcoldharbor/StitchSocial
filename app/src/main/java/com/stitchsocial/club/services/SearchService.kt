@@ -309,7 +309,9 @@ class SearchService {
     // MARK: - Document Processing
 
     private fun processUserDocs(docs: List<DocumentSnapshot>, currentUID: String?): List<BasicUserInfo> =
-        docs.mapNotNull { BasicUserInfo.fromFirebaseDocument(it) }.filter { it.id != currentUID }
+        docs.filter { TeenSafety.allowsAccount(it.data) }
+            .mapNotNull { BasicUserInfo.fromFirebaseDocument(it) }
+            .filter { it.id != currentUID }
 
     private fun processVideoDocs(docs: List<DocumentSnapshot>): List<CoreVideoMetadata> {
         return docs.mapNotNull { doc ->
@@ -319,6 +321,10 @@ class SearchService {
             // Default to "public" for legacy docs without the field.
             val publicVisibility = data["publicVisibility"] as? String ?: "public"
             if (publicVisibility != "public") return@mapNotNull null
+
+            // Search is the surface a teen reaches deliberately, which is
+            // exactly why it needs the same rule as the feeds.
+            if (!TeenSafety.allows(data)) return@mapNotNull null
 
             try {
                 val temperature = try { Temperature.valueOf((data["temperature"] as? String ?: "WARM").uppercase()) }

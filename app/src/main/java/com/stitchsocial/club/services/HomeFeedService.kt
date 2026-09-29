@@ -223,6 +223,11 @@ class HomeFeedService(
                 val publicVisibility = document.getString("publicVisibility") ?: "public"
                 if (publicVisibility != "public") continue
 
+                // Teens see only what moderation marked teen-safe. Checked here
+                // as well as in the decode so a skipped video never counts
+                // against the page size.
+                if (!TeenSafety.allows(document.data)) continue
+
                 // Episode parts, not posts. They're written to top-level `videos`
                 // so engagement can reach them, so every post list has to exclude
                 // them or one episode fills the feed with N entries.
@@ -349,6 +354,11 @@ class HomeFeedService(
 
     private fun createThreadFromDocument(document: DocumentSnapshot): ThreadData? {
         val data = document.data ?: return null
+
+        // The teen lane, at the one place every home-feed video is decoded —
+        // the post loop above and the reply loader below both come through
+        // here, so neither has to remember. No-op for an adult viewer.
+        if (!TeenSafety.allows(data)) return null
 
         try {
             val id = data[FirebaseSchema.VideoDocument.ID] as? String ?: document.id

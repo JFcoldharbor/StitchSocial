@@ -314,6 +314,10 @@ class AuthService {
     suspend fun signOut() {
         try {
             _authState.value = AuthState.SIGNING_OUT
+            // The lane is per-account and cached for the session. Left alone,
+            // an adult signing out would hand their lane to whoever signs in
+            // next, before the age gate has read anything.
+            TeenSafety.reset()
             auth.signOut()
             if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User signed out successfully") }
         } catch (e: Exception) {
