@@ -341,6 +341,7 @@ fun ProfileView(
     var isLoadingVideos by remember { mutableStateOf(false) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var hasMoreVideos by remember { mutableStateOf(true) }
+    var moderationHiddenVideoIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // UI state
@@ -428,6 +429,13 @@ fun ProfileView(
                 (it.publicVisibility ?: "public") != "hidden_from_public" ||
                         (viewerID != null && it.creatorID == viewerID)
             }
+            // The grid can draw an "Under review" badge and never did, because
+            // nothing ever passed it the set. A creator whose post was hidden
+            // by moderation saw it sitting on their profile looking published.
+            moderationHiddenVideoIDs = userVideos
+                .filter { (it.publicVisibility ?: "public") == "hidden_from_public" }
+                .map { it.id }
+                .toSet()
             hasMoreVideos = userVideos.size >= 150
         } catch (_: Exception) { } finally {
             isLoadingVideos = false
@@ -693,6 +701,7 @@ fun ProfileView(
                             isLoading = isLoadingVideos,
                             isCurrentUserProfile = isOwn,
                             pinnedVideoIDs = pinnedVideos.map { it.id }.toSet(),
+                            moderationHiddenVideoIDs = moderationHiddenVideoIDs,
                             onVideoTap = { basicVideo, index, _ ->
                                 val coreVideo = filteredVideos.find { it.id == basicVideo.id }
                                 if (coreVideo != null) {
@@ -1335,15 +1344,20 @@ private fun ProfileHeader(
         }
 
         // Streak (own profile only) — above the hype meter; opens the streak sheet.
-        if (isOwnProfile) {
-            ProfileStreakSection()
-        }
+        // ProfileStreakSection was here and is gone, as it is on iOS. A streak
+        // is a prompt to post today; a profile is what you have already made.
+        // It also sat between the identity row and the hype meter, which put a
+        // nag in the one place a creator shows other people.
 
         // Hype meter
         HypeMeter(user = user, videos = videos)
 
         // Stats
-        StatsRow(user = user, videoCount = videos.size + pinnedVideoCount, onFollowersClick = onFollowersClick)
+        // videos already contains the pinned ones — tab 0 pulls them to the
+        // front rather than fetching them separately — so adding
+        // pinnedVideoCount counted every pinned video twice in the headline
+        // number.
+        StatsRow(user = user, videoCount = videos.size, onFollowersClick = onFollowersClick)
 
         // Action buttons
         ActionButtonsRow(
@@ -1657,17 +1671,14 @@ private fun ActionButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
         if (isOwnProfile) {
-            // Edit profile — surface fill + magenta hairline (iOS: Theme.surface + accent stroke)
-            Button(
-                onClick = onEditProfile,
-                modifier = Modifier.weight(1f).height(44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
-                border = BorderStroke(1.5.dp, StitchColors.primary),
-                shape = RoundedCornerShape(13.dp),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Text("Edit profile", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
-            }
+            // Edit profile and Settings used to be two buttons here AND two
+            // items in the ⋯ menu at the top of the screen — the same two
+            // actions, twice, on the one screen. They belong under the ⋯,
+            // which is where iOS put them: a profile is for showing people
+            // your work, and the controls for changing it are housekeeping.
+            //
+            // What is left in this row is the thing an owner acts on rather
+            // than administers.
 
             // Ad opportunities — green $ button, Influencer+ personal only (iOS parity).
             if (!isBusiness && AdRevenueShare.canAccessAds(userTier)) {
@@ -1682,17 +1693,7 @@ private fun ActionButtonsRow(
                 }
             }
 
-            // Settings — surface fill + neutral hairline.
-            Button(
-                onClick = onSettingsClick,
-                modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surface),
-                border = BorderStroke(1.dp, AppTheme.colors.hairline),
-                shape = RoundedCornerShape(13.dp),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Icon(Icons.Default.Settings, "Settings", tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
-            }
+            // Settings button removed — see above. It is in the ⋯ menu.
             // Saved moved to the top-bar ⋯ menu (iOS parity).
         } else {
             Button(
@@ -1979,85 +1980,6 @@ private fun CoreVideoMetadata.toBasicVideoInfo(): BasicVideoInfo {
 
 // ===== STREAK (button + slide-up sheet) =====
 
-@Composable
-private fun ProfileStreakSection() {
-    val streak = StreakService.shared
-    val current by streak.current.collectAsState()
-    var showSheet by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) { streak.load() }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(AppTheme.colors.surface)
-            .clickable { showSheet = true }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(18.dp))
-        Text(
-            if (current > 0) "$current day streak" else "Start your streak",
-            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppTheme.colors.textPrimary,
-            modifier = Modifier.weight(1f)
-        )
-        Icon(Icons.Default.ChevronRight, null, tint = AppTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
-    }
-
-    if (showSheet) {
-        StreakSheet(onDismiss = { showSheet = false })
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StreakSheet(onDismiss: () -> Unit) {
-    val streak = StreakService.shared
-    val current by streak.current.collectAsState()
-
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color(0xFF0A0B0D)) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier.size(88.dp).clip(CircleShape)
-                    .background(StitchColors.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.Whatshot, null, tint = StitchColors.primary, modifier = Modifier.size(44.dp)) }
-
-            Text(
-                "$current ${if (current == 1) "day" else "days"}",
-                fontSize = 34.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
-            )
-
-            // Streak-or-die: the bar to keep it escalates by week.
-            if (streak.todaySecured) {
-                Text("\u2705 secured today \u00B7 come back tomorrow",
-                    fontSize = 13.sp, color = Color(0xFFF572A6))
-            } else {
-                Text("Today to keep your streak", fontSize = 12.sp, color = AppTheme.colors.textSecondary)
-                Text(streak.todayRequirementLabel, fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold, color = Color(0xFFF572A6))
-            }
-
-            if (streak.hasWeeklyBoost) {
-                Text("\uD83D\uDE80 ${streak.weeklyBoostDays}-day boost active",
-                    fontSize = 13.sp, color = StitchColors.secondary)
-            } else {
-                streak.daysToNextTier?.let { d ->
-                    Text("$d ${if (d == 1) "day" else "days"} to your next boost",
-                        fontSize = 12.sp, color = AppTheme.colors.textSecondary)
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Text("Maybe later", fontSize = 13.sp, color = AppTheme.colors.textSecondary,
-                modifier = Modifier.clickable { onDismiss() }.padding(8.dp))
-        }
-    }
-}
+// ProfileStreakSection and StreakSheet lived here. Both are gone with the
+// profile row that opened them — StreakService still drives the streak
+// everywhere else it belongs, which is Home.
