@@ -1532,7 +1532,12 @@ private fun DiscoveryHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            .padding(horizontal = Spacing.lg)
+            // Top tightened to 2dp against 16 — iOS parity. This sits straight
+            // under the status-bar inset, which is already generous, so the
+            // padding read as a gap rather than as breathing room. The inset is
+            // the floor; below it the wordmark meets the clock.
+            .padding(top = 2.dp, bottom = Spacing.md),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1635,7 +1640,7 @@ private fun DiscoveryCategorySelector(
                 )
             }
             .padding(horizontal = Spacing.lg)
-            .padding(top = 8.dp, bottom = 6.dp),
+            .padding(top = 4.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(19.dp)
     ) {
         DiscoveryCategory.values().forEach { category ->
