@@ -45,6 +45,10 @@ class HomeFeedService(
     private var currentFeed: MutableList<ThreadData> = mutableListOf()
     private val currentFeedVideoIDs: MutableSet<String> = mutableSetOf()
     private var hasMoreContent: Boolean = true
+
+    /** Consecutive pages that filtered down to nothing — see loadMoreContent. */
+    private var emptyPasses: Int = 0
+    private val MAX_EMPTY_PASSES = 3
     private var isLoading: Boolean = false
 
     // Follower rotation
@@ -316,11 +320,24 @@ class HomeFeedService(
                     removed.forEach { currentFeedVideoIDs.remove(it.parentVideo.id) }
                 }
 
+                emptyPasses = 0
                 if (BuildConfig.DEBUG) { println("✅ DEEP DISCOVERY: Added ${shuffledNew.size} diverse threads") }
             } else {
-                // No new content — recycle existing feed shuffled
-                // Never dead-end. Endless scroll.
-                recycleExistingFeed()
+                // An empty page is not an empty library.
+                //
+                // Every tier filters AFTER fetching — moderation, blocks, and
+                // TeenSafety. For a teen that filter is brutal: 124 of 1650
+                // videos are teen-safe today, so a page can easily contain none
+                // of them. Recycling on the first such page means a teen sees
+                // the same handful of clips loop, which reads as a bug rather
+                // than as a thin feed.
+                //
+                // Give it a few more pages before falling back to recycling.
+                emptyPasses += 1
+                if (emptyPasses >= MAX_EMPTY_PASSES) {
+                    // Never dead-end. Endless scroll.
+                    recycleExistingFeed()
+                }
             }
 
             return currentFeed
@@ -551,6 +568,7 @@ class HomeFeedService(
         currentFeed.clear()
         currentFeedVideoIDs.clear()
         hasMoreContent = true
+        emptyPasses = 0
         childrenCache.clear()
     }
 
