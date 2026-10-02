@@ -685,17 +685,28 @@ class DiscoveryViewModel(
 
     /**
      * Deterministically place sponsored cards into an organic feed:
-     * first sponsored card within the first 7 items (index 6), then one every 20.
-     * Any prior placements are stripped first, so reshuffles re-space instead of
-     * duplicating — sponsored cards NEVER participate in any shuffle.
+     * first sponsored card within the first few items, then roughly one every
+     * twenty. Any prior placements are stripped first, so reshuffles re-space
+     * instead of duplicating — sponsored cards NEVER participate in any shuffle.
+     *
+     * The positions are RANGES, not fixed indices. They were 6 and 20 exactly,
+     * so the same ad sat on card 7 of every session for every user, which reads
+     * as furniture rather than as a placement and is the first thing a regular
+     * learns to swipe past without looking.
+     *
+     * Never index 0 or 1: a feed that opens on an ad feels like a different
+     * product.
      */
     private fun injectSponsoredCards(feed: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
         if (sponsoredCards.isEmpty()) return feed
         val organic = feed.filterNot { sponsoredSlotMap.containsKey(it.id) }.toMutableList()
         if (organic.isEmpty()) return organic  // no ads in empty/special feeds
-        sponsoredCards.forEachIndexed { i, card ->
-            val position = minOf(6 + i * 20, organic.size)
-            organic.add(position, card)
+        // Drawn fresh per shuffle, and kept monotonic so two cards cannot land
+        // on the same index or out of order.
+        var cursor = (3..9).random()
+        sponsoredCards.forEach { card ->
+            organic.add(minOf(cursor, organic.size), card)
+            cursor += (15..25).random()
         }
         return organic
     }
