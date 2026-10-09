@@ -8,7 +8,8 @@
  * Backend contract:
  *   - Authenticated read; client writes may ONLY increment impressionCount/tapCount
  *     (creative fields are admin-locked by security rules).
- *   - imageURL is a 9:16 creative; videoURL is reserved and currently empty.
+ *   - imageURL is a 9:16 creative; a non-empty videoURL makes it a video ad and
+ *     the image becomes its poster. Created from the web admin's Sponsored page.
  */
 package com.stitchsocial.club.foundation
 
@@ -22,11 +23,44 @@ data class SponsoredSlot(
     val ctaText: String = "Learn More",
     val ctaURL: String = "",
     val imageURL: String = "",
-    val videoURL: String = "",          // reserved — never handed to a player
+    val videoURL: String = "",          // set = video ad, played inside SponsoredSwipeCard
     val isActive: Boolean = false,
     val startAt: Date? = null,
     val endAt: Date? = null
 ) {
+    val hasVideo: Boolean get() = videoURL.isNotBlank()
+
+    /** The creative as something VideoPlayerComposable can play. Never a feed item. */
+    fun playerMetadata(): CoreVideoMetadata = CoreVideoMetadata(
+        id = "sponsored_$id",
+        title = title,
+        description = "",
+        videoURL = videoURL,
+        thumbnailURL = imageURL,
+        creatorID = "",
+        creatorName = advertiserName,
+        createdAt = Date(),
+        threadID = null,
+        replyToVideoID = null,
+        conversationDepth = 0,
+        viewCount = 0, hypeCount = 0, coolCount = 0,
+        replyCount = 0, shareCount = 0,
+        temperature = Temperature.WARM,
+        qualityScore = 75,
+        engagementRatio = 0.5,
+        velocityScore = 0.0, trendingScore = 0.0,
+        duration = 0.0, aspectRatio = 9.0 / 16.0, fileSize = 0L,
+        discoverabilityScore = 0.0,
+        isPromoted = true,
+        lastEngagementAt = null,
+        collectionID = null,
+        segmentNumber = null, segmentTitle = null,
+        isCollectionSegment = false,
+        contentType = ContentType.THREAD,
+        isProcessing = false, isDeleted = false,
+        recordingSource = ""
+    )
+
     /** Active flag AND now inside the optional [startAt, endAt] window. */
     val isLiveNow: Boolean
         get() {

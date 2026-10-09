@@ -85,12 +85,13 @@ object ShareService {
         context: Context,
         video: ShareableVideo,
         creatorUsername: String,
-        threadID: String? = null
+        threadID: String? = null,
+        promoMode: Boolean = false
     ): ShareResult = withContext(Dispatchers.IO) {
         try {
             withContext(Dispatchers.Main) {
                 _isExporting.value = true
-                _exportProgress.value = "Preparing video..."
+                _exportProgress.value = if (promoMode) "Building promo..." else "Preparing video..."
             }
 
             Log.d(TAG, "📤 Starting share for video: ${video.id}")
@@ -115,9 +116,28 @@ object ShareService {
 
             Log.d(TAG, "✅ Video file ready: ${localFile.absolutePath} (${localFile.length() / 1024}KB)")
 
+            // Step 2a: Promo mode → 30s stats clip (iOS parity). It carries its own
+            // watermark and end card; on failure fall through to the regular share.
+            val promoFile = if (promoMode) {
+                _exportProgress.value = "Building 30s promo..."
+                val result = PromoVideoExporter.getInstance(context).exportPromo(
+                    sourceUri = Uri.fromFile(localFile),
+                    creatorUsername = creatorUsername,
+                    stats = PromoVideoExporter.PromoStats(
+                        viewCount = video.viewCount,
+                        hypeCount = video.hypeCount,
+                        coolCount = video.coolCount,
+                        temperature = video.temperature
+                    ),
+                    onProgress = { p -> _exportProgress.value = "Building 30s promo... ${(p * 100).toInt()}%" }
+                )
+                if (!result.success) Log.w(TAG, "⚠️ Promo export failed — regular share: ${result.error}")
+                result.outputFile?.takeIf { result.success }
+            } else null
+
             // Step 2: Burn the share watermark + end screen (iOS parity). On any
             // failure, fall back to the raw download so sharing still works.
-            val shareFile = try {
+            val shareFile = promoFile ?: try {
                 _exportProgress.value = "Adding watermark…"
                 val wmUri = VideoWatermarkService.exportWithWatermark(
                     context = context,
@@ -157,7 +177,8 @@ object ShareService {
                     context = context,
                     videoFile = shareFile,
                     creatorUsername = creatorUsername,
-                    threadID = threadID ?: video.threadID
+                    threadID = threadID ?: video.threadID,
+                    videoID = video.id
                 )
             }
 
@@ -179,7 +200,8 @@ object ShareService {
         context: Context,
         videoFile: File,
         creatorUsername: String,
-        threadID: String?
+        threadID: String?,
+        videoID: String
     ) {
         try {
             // FileProvider URI for share sheet (gallery save already done on IO thread)
@@ -194,7 +216,9 @@ object ShareService {
             // Share text with deep link
             val shareText = buildString {
                 append("Check out this video by @$creatorUsername on StitchSocial!")
-                threadID?.let { append("\n\nstitch://thread/$it") }
+                // The real link — stitch://thread/… was not this app's scheme and
+                // no messaging app makes a custom scheme tappable.
+                append("\n\n${watchURL(videoID)}")
                 append("\n\nDownload StitchSocial: https://play.google.com/store/apps/details?id=com.stitchsocial.club")
             }
 
@@ -457,7 +481,7 @@ object ShareService {
         val shareText = buildString {
             append("Check out this video by @$creatorUsername on StitchSocial!")
             video?.title?.let { append("\n\n$it") }
-            threadID?.let { append("\n\nstitch://thread/$it") }
+            video?.id?.let { append("\n\n${watchURL(it)}") }
             append("\n\nDownload StitchSocial: https://play.google.com/store/apps/details?id=com.stitchsocial.club")
         }
 
@@ -476,15 +500,39 @@ object ShareService {
         Log.d(TAG, "📤 Link-only fallback share (download failed)")
     }
 
-    // MARK: - Public Link Share
+    // MARK: - Public Link Share (the default)
 
-    fun shareLink(
-        context: Context,
-        video: ShareableVideo,
-        creatorUsername: String,
-        threadID: String? = null
-    ) {
-        shareLinkFallback(context, video, creatorUsername, threadID)
+    /**
+     * The video's public page, https://stitchsocial.me/v/{id}, carrying the
+     * sharer as `ref` so views from this share are credited to them. Opens the
+     * video in Stitch where it's installed (app links, AndroidManifest /v/);
+     * elsewhere it's a watch page with a preview card. iOS parity:
+     * ShareService.watchURL.
+     */
+    fun watchURL(videoID: String): String {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        return "https://stitchsocial.me/v/$videoID" + (uid?.let { "?ref=$it" } ?: "")
+    }
+
+    /**
+     * Share a link to the video rather than a copy of it. The file share sent
+     * every view of a shared video into someone else's app, where Stitch never
+     * saw it. The watermarked file is still offered as "Save video".
+     *
+     * The share is recorded when the chooser opens: Android's chooser doesn't
+     * reliably report completion. The server counts one per person per video
+     * per day, so a cancelled share can't inflate anything beyond that.
+     */
+    fun shareLink(context: Context, videoID: String, creatorUsername: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Watch @$creatorUsername on Stitch\n${watchURL(videoID)}")
+        }
+        context.startActivity(Intent.createChooser(intent, "Share video").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        com.google.firebase.functions.FirebaseFunctions.getInstance("us-central1")
+            .getHttpsCallable("recordVideoShare")
+            .call(mapOf("videoID" to videoID, "channel" to "android_chooser"))
+            .addOnFailureListener { Log.w(TAG, "recordVideoShare failed: ${it.message}") }
     }
 
     // MARK: - Helpers

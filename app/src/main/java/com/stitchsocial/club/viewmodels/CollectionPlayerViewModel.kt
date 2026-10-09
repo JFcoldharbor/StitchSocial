@@ -136,6 +136,11 @@ class CollectionPlayerViewModel(
 
     fun setSubscribed(value: Boolean) { _isSubscribed.value = value }
 
+    /** The episode's SHOW is marked free — that frees every episode in it.
+     *  The show-level toggle used to be saved and read nowhere. */
+    private val _showIsFree = MutableStateFlow(false)
+    fun setShowFree(value: Boolean) { _showIsFree.value = value }
+
     /** Set when playback stops at the paywall, so the view can say why. */
     private val _paywallHit = MutableStateFlow(false)
     val paywallHit: StateFlow<Boolean> = _paywallHit.asStateFlow()
@@ -155,7 +160,7 @@ class CollectionPlayerViewModel(
      */
     fun isLocked(index: Int): Boolean {
         val col = _collection.value ?: return false
-        if (col.isFree || _isSubscribed.value) return false
+        if (col.isFree || _showIsFree.value || _isSubscribed.value) return false
         if (currentUserID.isNotEmpty() && currentUserID == col.creatorID) return false  // creators see their own
         // Founders review paid content they'd otherwise be locked out of.
         if (SpecialUsersConfig.detectSpecialUser(currentUserEmail)?.isFounder == true) return false
@@ -194,6 +199,33 @@ class CollectionPlayerViewModel(
 
         saveProgress(updated)
         if (BuildConfig.DEBUG) { println("⏭️ COLLECTION PLAYER: Advanced to segment ${idx + 1}/${segs.size}") }
+    }
+
+    /**
+     * The last part played to its end: the whole episode is watched.
+     *
+     * Nothing did this before. Parts were only marked watched when you moved
+     * PAST them, and there is no part past the last one — so a finished
+     * episode stopped at (n-1)/n and sat in "in progress" for good. iOS
+     * marks completion the same way (saveProgress(completedAll:)).
+     */
+    fun markCollectionCompleted() {
+        val segs = _segments.value
+        val collID = _collection.value?.id ?: return
+        val last = segs.lastOrNull() ?: return
+        val base = _progress.value ?: CollectionProgress.start(currentUserID, collID, segs.first().id)
+        val updated = base.copy(
+            completedSegmentIDs = (base.completedSegmentIDs + segs.map { it.id }).distinct(),
+            currentSegmentID = last.id,
+            currentSegmentIndex = segs.size - 1,
+            // "Watched to the end" restarts from the top, not the last 2 seconds.
+            currentTimestamp = 0.0,
+            lastWatchedAt = java.util.Date()
+        ).withPercentUpdated(segs.size)
+        _progress.value = updated
+        currentTimestamp = 0.0
+        saveProgress(updated)
+        if (BuildConfig.DEBUG) { println("✅ COLLECTION PLAYER: Episode completed ($collID)") }
     }
 
     /** Go back to previous segment. */

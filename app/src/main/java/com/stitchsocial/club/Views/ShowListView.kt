@@ -64,6 +64,8 @@ fun ShowListView(
     var settingsFor by remember { mutableStateOf<Show?>(null) }
     // showId / seasonId / episodeNumber for the composer.
     var composerFor by remember { mutableStateOf<Triple<String, String, Int>?>(null) }
+    /** The existing episode the composer is finishing or adding parts to. */
+    var composerEpisode by remember { mutableStateOf<VideoCollection?>(null) }
 
     LaunchedEffect(creatorID) { vm.loadShows(creatorID) }
 
@@ -119,8 +121,14 @@ fun ShowListView(
                 ShowHubView(
                     showId = show.id,
                     onBack = { selectedShow = null },
-                    onOpenEpisode = { /* episode detail — existing player route */ },
+                    // Opens the episode in the composer: a draft gets finished,
+                    // a live one gets parts added. Drafts had no way back in.
+                    onOpenEpisode = { ep ->
+                        composerEpisode = ep
+                        composerFor = Triple(show.id, ep.seasonId ?: "", ep.episodeNumber ?: 1)
+                    },
                     onNewEpisode = { seasonId, epNumber ->
+                        composerEpisode = null
                         composerFor = Triple(show.id, seasonId, epNumber)
                     },
                     onOpenSettings = { settingsFor = it }
@@ -147,9 +155,12 @@ fun ShowListView(
                 episodeNumber = epNumber,
                 creatorID = creatorID,
                 creatorName = creatorName,
-                onDismiss = { composerFor = null },
+                show = shows.firstOrNull { it.id == showId },
+                existing = composerEpisode,
+                onDismiss = { composerFor = null; composerEpisode = null },
                 onPublished = {
                     composerFor = null
+                    composerEpisode = null
                     // Reopen the hub so the new episode is visible where the
                     // creator expects it, rather than dumping them at the list.
                     selectedShow = selectedShow

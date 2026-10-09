@@ -377,9 +377,15 @@ fun ProfileView(
 
     // Collections state
     var userCollections by remember(userID) { mutableStateOf(cachedProfile?.collections ?: emptyList()) }
+    /** The creator's shows by id — for the SHOW's own cover and title. Cards
+     *  used episode 1's for the whole series. */
+    var userShows by remember(userID) { mutableStateOf<Map<String, com.stitchsocial.club.foundation.Show>>(emptyMap()) }
     var showCollectionPlayer by remember { mutableStateOf(false) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
     var showingAllCollections by remember { mutableStateOf(false) }
+    /** My Shows — the creator's show management. It existed (ShowListView →
+     *  hub, settings, composer) but nothing in the app opened it. */
+    var showingMyShows by remember { mutableStateOf(false) }
     var selectedShowId by remember { mutableStateOf<String?>(null) }
     var selectedShowEpisodes by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
     var showingShowDetail by remember { mutableStateOf(false) }
@@ -488,6 +494,44 @@ fun ProfileView(
         }
     }
 
+    /** Shows + episodes for the profile row. A function so closing My Shows
+     *  can re-run it — new shows and episodes appear without leaving the
+     *  profile. */
+    suspend fun loadCollections() {
+        try {
+            val showService = ShowService.shared
+            // Mirror iOS: load via shows first (no composite index needed)
+            val shows = showService.getCreatorShows(userID)
+            userShows = shows.associateBy { it.id }
+            val showEpisodes = mutableListOf<VideoCollection>()
+            for (show in shows) {
+                val all = showService.getAllEpisodes(show.id)
+                // Drafts and unreleased episodes are the creator's own business.
+                val eps = if (isOwnProfile) all
+                          else all.filter { it.status == com.stitchsocial.club.foundation.CollectionStatus.PUBLISHED }
+                showEpisodes.addAll(eps)
+            }
+            // Also load standalone collections (legacy / no showId)
+            val standalone = try {
+                collectionService.getUserCollections(userID)
+            } catch (e: Exception) { emptyList() }
+
+            // Merge deduped by id
+            val seen = mutableSetOf<String>()
+            val merged = mutableListOf<VideoCollection>()
+            for (ep in showEpisodes) { if (seen.add(ep.id)) merged.add(ep) }
+            for (col in standalone) { if (seen.add(col.id)) merged.add(col) }
+
+            userCollections = merged
+            if (BuildConfig.DEBUG) { println("📚 PROFILE: Loaded ${merged.size} collections (${showEpisodes.size} from shows, ${standalone.size} standalone) for $userID") }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("❌ PROFILE: Collections load failed for $userID: ${e.message}") }
+        }
+    }
+    // Closing My Shows bumps this, which re-runs loadCollections.
+    var collectionsReload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(collectionsReload) { if (collectionsReload > 0) loadCollections() }
+
     LaunchedEffect(userID) {
         // Restored from the retained cache → skip every network load (instant). The
         // age gate also only runs on a real (uncached) load, which is fine — it
@@ -534,33 +578,7 @@ fun ProfileView(
                 ageGateChecked = true
             }
         }
-        launch {
-            try {
-                val showService = ShowService.shared
-                // Mirror iOS: load via shows first (no composite index needed)
-                val shows = showService.getCreatorShows(userID)
-                val showEpisodes = mutableListOf<VideoCollection>()
-                for (show in shows) {
-                    val eps = showService.getAllEpisodes(show.id)
-                    showEpisodes.addAll(eps)
-                }
-                // Also load standalone collections (legacy / no showId)
-                val standalone = try {
-                    collectionService.getUserCollections(userID)
-                } catch (e: Exception) { emptyList() }
-
-                // Merge deduped by id
-                val seen = mutableSetOf<String>()
-                val merged = mutableListOf<VideoCollection>()
-                for (ep in showEpisodes) { if (seen.add(ep.id)) merged.add(ep) }
-                for (col in standalone) { if (seen.add(col.id)) merged.add(col) }
-
-                userCollections = merged
-                if (BuildConfig.DEBUG) { println("📚 PROFILE: Loaded ${merged.size} collections (${showEpisodes.size} from shows, ${standalone.size} standalone) for $userID") }
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) { println("❌ PROFILE: Collections load failed for $userID: ${e.message}") }
-            }
-        }
+        launch { loadCollections() }
     }
 
     // Swipe-to-dismiss
@@ -643,8 +661,9 @@ fun ProfileView(
                     item {
                         ProfileCollectionsRow(
                             collections = userCollections,
+                            shows = userShows,
                             isOwnProfile = isOwnProfile,
-                            onAddTap = { /* TODO: navigate to ShowEditorView */ },
+                            onAddTap = { showingMyShows = true },
                             onShowTap = { showId: String, eps: List<VideoCollection> ->
                                 // A tap plays. Playback lived only on the standalone-
                                 // collection branch, and every published collection
@@ -1069,6 +1088,25 @@ fun ProfileView(
         )
     }
 
+    // ===== MY SHOWS (creator show management) =====
+    if (showingMyShows) {
+        Dialog(
+            onDismissRequest = { showingMyShows = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
+                ShowListView(
+                    creatorID = userID,
+                    creatorName = currentUser?.username ?: "",
+                    onDismiss = {
+                        showingMyShows = false
+                        collectionsReload += 1
+                    }
+                )
+            }
+        }
+    }
+
     // ===== ALL COLLECTIONS (See All) =====
     if (showingAllCollections) {
         Dialog(
@@ -1117,6 +1155,7 @@ fun ProfileView(
                             val (showId, eps) = groups[idx]
                             ShowCard(
                                 episodes = eps,
+                                show = userShows[showId],
                                 onTap = {
                                     // Same rule as the profile row: a tap plays
                                     // episode one, and only an empty show falls

@@ -70,6 +70,7 @@ object CdnUploadService {
      * Content-Type MUST be `video/quicktime` to match the presign signature.
      */
     suspend fun uploadSource(file: File, uploadURL: String) = withContext(Dispatchers.IO) {
+        assertPlayable(file)
         val req = Request.Builder()
             .url(uploadURL)
             .put(file.asRequestBody(SOURCE_CONTENT_TYPE.toMediaType()))
@@ -78,4 +79,34 @@ object CdnUploadService {
             if (!resp.isSuccessful) throw IOException("CDN source upload failed: HTTP ${resp.code}")
         }
     }
+
+    // ── Guard: never upload an empty video ──────────────────────────────
+    // A video export can fail and still leave a file: a container header and
+    // one black frame (~1KB, 0.07s). Nine of those were uploaded and posted —
+    // black in every feed, nothing when shared. Every source upload passes
+    // through here, so this is where they stop.
+    private const val MIN_BYTES = 50L * 1024
+    private const val MIN_MS = 500L
+
+    fun assertPlayable(file: File) {
+        if (!file.exists() || file.length() < MIN_BYTES) throw EmptyVideoException()
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            val hasVideo = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
+            val ms = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (!hasVideo || ms < MIN_MS) throw EmptyVideoException()
+        } catch (e: EmptyVideoException) {
+            throw e
+        } catch (e: Exception) {
+            // Unreadable as a video at all.
+            throw EmptyVideoException()
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
 }
+
+class EmptyVideoException : IOException(
+    "This video came out empty, so it wasn't posted. Pick or record it again — if it's from your gallery, make sure it's fully downloaded to your phone first."
+)

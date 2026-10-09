@@ -60,6 +60,14 @@ sealed class AgeGateOutcome {
 @Composable
 fun BirthdayPromptView(
     userID: String,
+    /**
+     * Business accounts reach this gate too, and "When's your birthday?"
+     * arriving just after a company name invites the founding year instead —
+     * which, for a business started this year, reads as an under-13 person and
+     * blocks the device. The gate itself is right: COPPA protects the person
+     * operating the account, not the entity. Only the wording has to say so.
+     */
+    isBusiness: Boolean = false,
     onCompleted: (AgeGateOutcome) -> Unit
 ) {
     val context = LocalContext.current
@@ -89,6 +97,7 @@ fun BirthdayPromptView(
     var selectedDate by remember { mutableStateOf(initialCal.time) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showingConfirm by remember { mutableStateOf(false) }
 
     fun showPicker() {
         val cal = Calendar.getInstance().apply { time = selectedDate }
@@ -182,11 +191,16 @@ fun BirthdayPromptView(
                 modifier = Modifier.size(40.dp)
             )
             Text(
-                "When's your birthday?",
-                fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White
+                if (isBusiness) "The owner's birthday" else "When's your birthday?",
+                fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                textAlign = TextAlign.Center
             )
             Text(
-                "We use this once to set up your account and never show it on your profile.",
+                if (isBusiness)
+                    "Your own date of birth — not the date the business started. " +
+                    "We use it once to set up the account and never show it on the profile."
+                else
+                    "We use this once to set up your account and never show it on your profile.",
                 fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center
             )
 
@@ -219,7 +233,7 @@ fun BirthdayPromptView(
             }
 
             Button(
-                onClick = ::save,
+                onClick = { showingConfirm = true },
                 enabled = !isSaving,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -238,11 +252,47 @@ fun BirthdayPromptView(
             Spacer(Modifier.weight(1f))
 
             Text(
-                "By continuing you confirm this is your real date of birth.",
+                if (isBusiness)
+                    "By continuing you confirm this is the real date of birth of the person managing this account."
+                else
+                    "By continuing you confirm this is your real date of birth.",
                 fontSize = 11.sp, color = Color.Gray.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(16.dp))
+        }
+
+        // Confirm before committing. An under-13 answer blocks this device for
+        // good — AGE_GATE_BLOCKED_PREF is written and nothing clears it — so a
+        // mistyped year must be recoverable and the picker's own default of
+        // "18 years ago" must not land on a stray tap. Shown for EVERY date
+        // deliberately: a confirmation that appeared only below the threshold
+        // would announce where the threshold is, which is exactly what the
+        // neutral gate above withholds.
+        if (showingConfirm) {
+            AlertDialog(
+                onDismissRequest = { showingConfirm = false },
+                title = { Text("Is this right?") },
+                text = {
+                    Text(
+                        if (isBusiness)
+                            "You entered ${dateFmt.format(selectedDate)} as the owner's date " +
+                            "of birth. You can't change this later, so check the year."
+                        else
+                            "You entered ${dateFmt.format(selectedDate)}. " +
+                            "You can't change this later, so check the year."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showingConfirm = false
+                        save()
+                    }) { Text(if (isBusiness) "Yes, that's correct" else "Yes, that's my birthday") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showingConfirm = false }) { Text("Go back") }
+                }
+            )
         }
     }
 }

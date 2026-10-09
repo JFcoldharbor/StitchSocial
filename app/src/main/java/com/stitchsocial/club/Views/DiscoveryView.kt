@@ -881,6 +881,8 @@ fun DiscoveryView(
     // Collection state
     var discoveryCollections by remember { mutableStateOf<List<VideoCollection>>(emptyList()) }
     var showCollectionPlayer by remember { mutableStateOf(false) }
+    /** Counts player closes, so the browse screen re-reads watch progress. */
+    var collectionPlayerCloses by remember { mutableIntStateOf(0) }
     // Segment index to resume at when the Collections takeover plays something.
     var collectionStartIndex by remember { mutableStateOf(0) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
@@ -1115,6 +1117,7 @@ fun DiscoveryView(
                     collections = discoveryCollections,
                     userID = currentUserID ?: "",
                     onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
+                    progressRefreshKey = collectionPlayerCloses,
                     onPlay = { coll, startIndex ->
                         // startIndex > 0 means the user came in via resume — the
                         // whole point of surfacing watch progress, so it's split
@@ -1205,7 +1208,10 @@ fun DiscoveryView(
                         )
                         showCollectionPlayer = false
                     },
-                    onDismiss = { showCollectionPlayer = false }
+                    onDismiss = {
+                        showCollectionPlayer = false
+                        collectionPlayerCloses += 1
+                    }
                 )
             }
         }
@@ -1353,7 +1359,12 @@ fun DiscoveryView(
                                     followManager = followManager,
                                     navigationCoordinator = navigationCoordinator,
                                     videoService = videoService,
-                                    isAnnouncementShowing = isAnnouncementShowing,
+                                    // Pauses the feed under anything drawn over
+                                    // it. An episode opened from a feed card is an
+                                    // overlay, not a new screen, so the feed cell
+                                    // played on under the show — two soundtracks,
+                                    // and the feed's audio still going on exit.
+                                    isAnnouncementShowing = isAnnouncementShowing || showCollectionPlayer,
                                     collectionCardMap = viewModel.collectionCardMap,
                                     sponsoredSlotMap = viewModel.sponsoredSlotMap,
                                     onSponsoredCta = { slot -> openSponsoredSlot(slot) },
@@ -2362,7 +2373,8 @@ private fun DiscoveryFullscreenDeck(
                         SponsoredSwipeCard(
                             slot = sponsored,
                             onCtaClick = { onSponsoredCta(sponsored) },
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            isActive = isCurrentPage && !isAnnouncementShowing
                         )
                     }
                     // A page you have settled on is an impression. Session-deduped

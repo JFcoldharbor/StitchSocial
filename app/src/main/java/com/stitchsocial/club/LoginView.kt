@@ -141,6 +141,7 @@ fun LoginView(
     // Account type + business
     var accountType by remember { mutableStateOf(AccountType.PERSONAL) }
     var brandName by remember { mutableStateOf("") }
+    var foundedYear by remember { mutableStateOf("") }
     var websiteURL by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(AdCategory.OTHER) }
     var referralCode by remember { mutableStateOf("") }
@@ -163,6 +164,12 @@ fun LoginView(
     var forgotError by remember { mutableStateOf<String?>(null) }
 
     // Focus
+    // Optional by design — a business shouldn't be stopped from signing up
+    // because it can't put a year on when it started. Anything implausible is
+    // simply not written rather than blocking the form.
+    val thisYear = remember { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) }
+    val parsedFoundedYear = foundedYear.toIntOrNull()?.takeIf { it in 1800..thisYear }
+
     val fEmail = remember { FocusRequester() }
     val fUser = remember { FocusRequester() }
     val fDN = remember { FocusRequester() }
@@ -308,7 +315,8 @@ fun LoginView(
                         accountType = accountType,
                         brandName = if (accountType == AccountType.BUSINESS) brandName else null,
                         websiteURL = if (accountType == AccountType.BUSINESS && websiteURL.isNotBlank()) websiteURL else null,
-                        businessCategory = if (accountType == AccountType.BUSINESS) category else null
+                        businessCategory = if (accountType == AccountType.BUSINESS) category else null,
+                        foundedYear = if (accountType == AccountType.BUSINESS) parsedFoundedYear else null
                     )
                     if (r.success) {
                         // The handle is claimed by the server —
@@ -362,7 +370,7 @@ fun LoginView(
 
     fun switchMode(m: AuthMode) {
         mode = m; email = ""; password = ""; confirmPassword = ""
-        username = ""; displayName = ""; brandName = ""; websiteURL = ""
+        username = ""; displayName = ""; brandName = ""; websiteURL = ""; foundedYear = ""
         referralCode = ""; acceptedTerms = false; errorMsg = null
         accountType = AccountType.PERSONAL
     }
@@ -486,6 +494,13 @@ fun LoginView(
                             LTextField(brandName, { brandName = it; errorMsg = null },
                                 "Brand Name", "Your company or brand name",
                                 KeyboardType.Text, ImeAction.Next, { fPw.requestFocus() }, fBrand)
+
+                            // The place a founding year belongs. It had no home
+                            // before, which is how it ended up in the age gate's
+                            // birthday picker.
+                            LTextField(foundedYear, { foundedYear = it.filter(Char::isDigit).take(4) },
+                                "Year Founded (optional)", thisYear.toString(),
+                                KeyboardType.Number, ImeAction.Next, { fPw.requestFocus() })
 
                             LTextField(websiteURL, { websiteURL = it },
                                 "Website (optional)", "https://yourbrand.com",

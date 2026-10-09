@@ -371,6 +371,8 @@ data class CreatorCampaignDeliverable(
     val approvedAt: Date?,
     val payoutAt: Date?,
     val grossAmountCents: Int?,
+    /** The creator's share, locked when the brand accepted them (by rank). */
+    val creatorShareRate: Double? = null,
     val platformFeeCents: Int?,
     val creatorNetCents: Int?,
     val stripeTransferID: String?,
@@ -391,6 +393,7 @@ data class CreatorCampaignDeliverable(
                 approvedAt = (data["approvedAt"] as? Timestamp)?.toDate(),
                 payoutAt = (data["payoutAt"] as? Timestamp)?.toDate(),
                 grossAmountCents = (data["grossAmountCents"] as? Number)?.toInt(),
+                creatorShareRate = (data["creatorShareRate"] as? Number)?.toDouble(),
                 platformFeeCents = (data["platformFeeCents"] as? Number)?.toInt(),
                 creatorNetCents = (data["creatorNetCents"] as? Number)?.toInt(),
                 stripeTransferID = data["stripeTransferID"] as? String,

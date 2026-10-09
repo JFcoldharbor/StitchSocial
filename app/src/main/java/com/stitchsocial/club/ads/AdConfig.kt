@@ -36,6 +36,17 @@ object AdConfig {
          * room hosts it.
          */
         val community: String get() = unit("ca-app-pub-1280726013478181/6460284914")
+
+        /**
+         * The part-to-part break inside an episode — CREATOR-owned, split by
+         * the episode creator's rank.
+         *
+         * TODO: create a "Collection break" native unit in the Android AdMob app
+         * and put it here. Until then it reports through the one live unit, so
+         * AdMob's dashboard can't separate the two — our ledger still can, by
+         * placement and owner.
+         */
+        val collectionBreak: String get() = unit("ca-app-pub-1280726013478181/6460284914")
     }
 
     /** Who earns from an impression. */

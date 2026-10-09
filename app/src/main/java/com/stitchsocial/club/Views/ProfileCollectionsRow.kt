@@ -49,6 +49,8 @@ import com.stitchsocial.club.ui.theme.StitchColors
 @Composable
 fun ProfileCollectionsRow(
     collections: List<VideoCollection>,
+    /** The shows by id, for their own cover and title. */
+    shows: Map<String, com.stitchsocial.club.foundation.Show> = emptyMap(),
     isOwnProfile: Boolean,
     onAddTap: () -> Unit,
     onShowTap: (showId: String, episodes: List<VideoCollection>) -> Unit,
@@ -95,12 +97,30 @@ fun ProfileCollectionsRow(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            Text(
-                "See all",
-                color = StitchColors.primary,
-                fontSize = 11.sp,
-                modifier = Modifier.clickable { onSeeAllTap() }
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Your own shows: the way into managing them (My Shows).
+                if (isOwnProfile) {
+                    Text(
+                        "Manage",
+                        color = StitchColors.primary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clickable { onAddTap() }
+                            .padding(horizontal = 10.dp, vertical = 12.dp)
+                    )
+                }
+                // A real tap target — this was bare 11sp text, about 14dp tall.
+                Text(
+                    "See all",
+                    color = StitchColors.primary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { onSeeAllTap() }
+                        .padding(start = 10.dp, top = 12.dp, bottom = 12.dp)
+                )
+            }
         }
 
         Spacer(Modifier.height(Spacing.sm))
@@ -119,6 +139,7 @@ fun ProfileCollectionsRow(
             items(showGroups, key = { it.first }) { group ->
                 ShowCard(
                     episodes = group.second,
+                    show = shows[group.first],
                     onTap = { onShowTap(group.first, group.second) }
                 )
             }
@@ -166,75 +187,75 @@ fun ProfileCollectionsRow(
 @Composable
 fun ShowCard(
     episodes: List<VideoCollection>,
+    /** The show itself, when loaded: its cover and title win over episode 1's. */
+    show: com.stitchsocial.club.foundation.Show? = null,
     onTap: () -> Unit
 ) {
     val firstEp = episodes.firstOrNull()
     val contentType = firstEp?.contentType ?: CollectionContentType.SERIES
     val color = showCardColor(contentType)
-    val title = inferShowTitle(episodes)
+    val title = show?.title?.trim()?.takeIf { it.isNotEmpty() } ?: inferShowTitle(episodes)
 
-    Box(
+    // The cover is left alone: many covers carry their own title art, and the
+    // title and count drawn over them (on a dark scrim) hid it. Now: the art,
+    // a small count badge in the corner, the title underneath. (iOS parity.)
+    Column(
         modifier = Modifier
             .width(CollectionCardMetrics.width)
-            .height(CollectionCardMetrics.height)
-            .clip(RoundedCornerShape(CollectionCardMetrics.corner))
-            .background(color.copy(alpha = 0.06f))
-            .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(CollectionCardMetrics.corner))
-            .clickable { onTap() }
+            .clickable { onTap() },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // The cover IS the card. It used to be a 72dp slice sitting above a stack
-        // of five elements at four type sizes — a content-type badge, the title,
-        // an episode count, a strip of up to four EP cells and a "+N" tile, most
-        // of it at 7-8sp. The cover is what identifies a show, so it takes the
-        // whole card and only the two things a viewer needs sit on top of it.
-        // The badge went because the row is already grouped by creator; the strip
-        // went because four 7sp "EP1" labels say nothing the count does not.
-        // (iOS parity — 311c107.)
-        val coverURL = firstEp?.coverImageURL
-        if (!coverURL.isNullOrBlank()) {
-            AsyncImage(
-                model = coverURL,
-                contentDescription = title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // Scrim — the cover is arbitrary artwork, so the text needs its own ground.
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.45f to Color.Transparent,
-                        1.0f to Color.Black.copy(alpha = 0.78f)
-                    )
-                )
-        )
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+                .width(CollectionCardMetrics.width)
+                .height(CollectionCardMetrics.height)
+                .clip(RoundedCornerShape(CollectionCardMetrics.corner))
+                .background(color.copy(alpha = 0.06f))
+                .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(CollectionCardMetrics.corner))
         ) {
-            Text(
-                title,
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            val coverURL = show?.coverImageURL?.takeIf { it.isNotBlank() } ?: firstEp?.coverImageURL
+            if (!coverURL.isNullOrBlank()) {
+                AsyncImage(
+                    model = coverURL,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // No cover: the name on its tint, so the card still says what it is.
+                Text(
+                    title,
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.Center).padding(10.dp)
+                )
+            }
 
-            val epWord = if (episodes.size == 1) "episode" else "episodes"
+            val epWord = if (episodes.size == 1) "ep" else "eps"
             Text(
                 "${episodes.size} $epWord",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(3.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
             )
         }
+
+        Text(
+            title,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

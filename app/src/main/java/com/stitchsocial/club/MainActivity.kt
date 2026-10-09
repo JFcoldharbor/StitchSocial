@@ -312,6 +312,21 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // /v/{videoID}: the link the share button hands out. The thread overlay
+        // takes a thread, so look the video up for its thread first; a reply
+        // opens in its parent's thread with the reply in focus.
+        segmentAfter("v")?.let { videoID ->
+            lifecycleScope.launch {
+                val video = VideoServiceImpl().getVideoById(videoID)
+                if (video == null) {
+                    Log.d("STITCH_MAIN", "🔗 LINK: no video $videoID")
+                    return@launch
+                }
+                com.stitchsocial.club.foundation.VideoDeepLink.request(video.threadID ?: videoID, videoID)
+            }
+            return
+        }
+
         Log.d("STITCH_MAIN", "🔗 LINK: unrouted $uri")
     }
 
@@ -598,6 +613,18 @@ fun MainScreen() {
         }
     }
 
+    val pendingVideoLink by com.stitchsocial.club.foundation.VideoDeepLink.pending
+    LaunchedEffect(pendingVideoLink) {
+        com.stitchsocial.club.foundation.VideoDeepLink.consume()?.let { target ->
+            Log.d("STITCH_MAIN", "🔗 Video deep-link -> ${target.threadID}/${target.videoID}")
+            isShowingProfileView = false
+            isShowingCommunity = false
+            threadViewThreadID = target.threadID
+            threadViewTargetVideoID = target.videoID
+            isShowingThreadView = true
+        }
+    }
+
     val pendingProfileUserID by ProfileDeepLink.pending
     LaunchedEffect(pendingProfileUserID) {
         ProfileDeepLink.consume()?.let { id ->
@@ -863,6 +890,7 @@ fun MainScreen() {
                 val uid = currentUser!!.id
                 com.stitchsocial.club.views.BirthdayPromptView(
                     userID = uid,
+                    isBusiness = currentUser!!.isBusiness,
                     onCompleted = { outcome ->
                         ageGateState = when (outcome) {
                             is com.stitchsocial.club.views.AgeGateOutcome.Adult           -> "ok"

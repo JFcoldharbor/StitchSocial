@@ -51,6 +51,20 @@ class ShowService private constructor() {
         val shared = ShowService()
     }
 
+    // A free/paid flag cached under one account must not decide what the next
+    // account on this phone sees — signing into a new account kept playing a
+    // show that had just gone subscribers-only.
+    private var observedUID: String? = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    init {
+        com.google.firebase.auth.FirebaseAuth.getInstance().addAuthStateListener { auth ->
+            val uid = auth.currentUser?.uid
+            if (uid != observedUID) {
+                observedUID = uid
+                clearAllCaches()
+            }
+        }
+    }
+
     fun clearAllCaches() {
         showCache.clear()
         seasonsCache.clear()
@@ -100,18 +114,58 @@ class ShowService private constructor() {
     }
 
     suspend fun saveShow(show: Show) {
-        val data = encodeShow(show)
-        showsCol.document(show.id).set(data).await()
+        // Merge, and leave the counters out: they're kept by addSeason /
+        // addEpisode and the server recount. A full .set() of a cached Show
+        // wrote stale seasonCount / totalEpisodes / view totals back over them
+        // (and dropped any field this model doesn't know about).
+        val data = encodeShow(show) - setOf("seasonCount", "totalEpisodes", "totalViews", "totalHypes", "totalCools")
+        val previousType = showCache[show.id]?.data?.contentType
+        // Whether this save is the move from free to subscribers-only. Read from
+        // the doc when nothing is cached: a missed transition leaves every
+        // episode free and the show still plays for everyone.
+        val wasFree = showCache[show.id]?.data?.isFree
+            ?: if (!show.isFree) runCatching { showsCol.document(show.id).get().await().getBoolean("isFree") }.getOrNull() else null
+        showsCol.document(show.id).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
+        // The player plays an episode if the show OR the episode is free, and
+        // every episode carries its own isFree (and a freeSegmentCount covering
+        // all its parts) from when shows were made free. So locking the show
+        // alone locked nothing. Going paid locks the episodes too; a creator
+        // re-frees any single episode from that episode's settings.
+        if (wasFree == true && !show.isFree) {
+            runCatching {
+                val eps = collectionsCol.whereEqualTo("showId", show.id).get().await()
+                if (!eps.isEmpty) {
+                    val batch = db.batch()
+                    eps.documents.forEach {
+                        batch.update(it.reference, mapOf("isFree" to false, "freeSegmentCount" to 0))
+                    }
+                    batch.commit().await()
+                }
+                episodesCache.clear()
+            }
+        }
+        // The type rails read each EPISODE's contentType — carry a change down.
+        if (previousType != null && previousType != show.contentType) {
+            runCatching {
+                val eps = db.collection("videoCollections").whereEqualTo("showId", show.id).get().await()
+                if (!eps.isEmpty) {
+                    val batch = db.batch()
+                    eps.documents.forEach { batch.update(it.reference, "contentType", show.contentType.rawValue) }
+                    batch.commit().await()
+                }
+            }
+        }
         showCache[show.id] = CacheEntry(show, System.currentTimeMillis())
         if (BuildConfig.DEBUG) { println("✅ SHOW SERVICE: Saved show ${show.id}") }
     }
 
+    /** Deletes the show, its seasons, every episode and every part — on the
+     *  server, the only place that can cascade. This used to flag the show
+     *  "removed" and leave all of its episodes and parts live. */
     suspend fun deleteShow(showId: String) {
-        showsCol.document(showId).update(mapOf(
-            "status" to ShowStatus.REMOVED.rawValue,
-            "updatedAt" to FieldValue.serverTimestamp()
-        )).await()
+        ShowDeletionService.delete(ShowDeletionService.Scope.Show(showId))
         showCache.remove(showId)
+        seasonsCache.remove(showId)
     }
 
     // ═══════════════════════════════════════
@@ -137,9 +191,12 @@ class ShowService private constructor() {
         return season
     }
 
+    /** Deletes the season with its episodes and parts, and recounts the show.
+     *  Used to delete only the season document, stranding its episodes. */
     suspend fun deleteSeason(showId: String, seasonId: String) {
-        showsCol.document(showId).collection("seasons").document(seasonId).delete().await()
+        ShowDeletionService.delete(ShowDeletionService.Scope.Season(showId, seasonId))
         seasonsCache.remove(showId)
+        showCache.remove(showId)
     }
 
     // ═══════════════════════════════════════
@@ -350,6 +407,11 @@ class ShowService private constructor() {
             visibility    = CollectionVisibility.from(data["visibility"] as? String),
             allowReplies  = data["allowReplies"]   as? Boolean ?: true,
             contentType   = CollectionContentType.from(data["contentType"] as? String),
+            // Read like CollectionService does. Without these, an episode opened
+            // from a profile (which loads through here) was fully paywalled even
+            // when the creator had marked it free.
+            isFree        = data["isFree"]         as? Boolean ?: false,
+            freeSegmentCount = (data["freeSegmentCount"] as? Number)?.toInt() ?: 0,
             showId        = data["showId"]         as? String,
             seasonId      = data["seasonId"]       as? String,
             episodeNumber = (data["episodeNumber"] as? Long)?.toInt(),

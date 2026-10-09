@@ -36,6 +36,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,6 +49,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalConfiguration
@@ -72,6 +75,10 @@ import kotlinx.coroutines.launch
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.foundation.SpecialUsersConfig
+import com.stitchsocial.club.ads.CollectionAdBreakController
+import com.stitchsocial.club.ads.CollectionAdBreakOverlay
+import com.google.android.gms.ads.nativead.NativeAd
 import com.stitchsocial.club.services.CollectionService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AuthService
@@ -131,6 +138,33 @@ fun CollectionPlayerView(
         }
     }
 
+    /** Where the next part starts. Usually 0; a skip that crosses a part
+     *  boundary leaves the matching offset here (see skip()). */
+    var pendingStartMs by remember { mutableLongStateOf(0L) }
+
+    // ── Part-to-part ad break (see ads/CollectionAdBreak.kt) ──────
+    val adBreaks = remember(collection.id) { CollectionAdBreakController() }
+    /** The break on screen and the part it precedes. That part only becomes
+     *  current when the break ends. */
+    var adBreak by remember { mutableStateOf<Pair<NativeAd, Int>?>(null) }
+    DisposableEffect(adBreaks) { onDispose { adBreaks.release() } }
+
+    /** Every forward move goes through here: a break point with an ad in hand
+     *  shows the ad first; otherwise the move just happens. */
+    fun goNext() {
+        val next = currentIndex + 1
+        if (next >= segmentCount || adBreak != null) return
+        // The paywall comes first; an ad in front of a locked part plays to nothing.
+        if (!viewModel.isLocked(next)) {
+            adBreaks.take(next)?.let { ad ->
+                exoPlayer.pause()
+                adBreak = ad to next
+                return
+            }
+        }
+        viewModel.advanceToNext()
+    }
+
     // Update player when segment changes — in-place, no teardown
     LaunchedEffect(currentIndex, segments.size) {
         val seg = segments.getOrNull(currentIndex) ?: return@LaunchedEffect
@@ -139,8 +173,22 @@ fun CollectionPlayerView(
         exoPlayer.pause()
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(playURL)))
         exoPlayer.prepare()
-        exoPlayer.seekTo(0)
+        exoPlayer.seekTo(pendingStartMs)
+        pendingStartMs = 0L
         exoPlayer.play()
+    }
+
+    // How far through the current part, for the progress bars. Held as State
+    // and read only inside CollectionTopBar, so its updates recompose the bar
+    // and not this whole screen.
+    val partProgress = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(exoPlayer) {
+        while (true) {
+            val dur = exoPlayer.duration
+            partProgress.floatValue =
+                if (dur > 0) (exoPlayer.currentPosition.toFloat() / dur).coerceIn(0f, 1f) else 0f
+            delay(200)
+        }
     }
 
     // Release on dispose
@@ -155,6 +203,59 @@ fun CollectionPlayerView(
     val offsetX = remember { Animatable(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
+    // Double-tap skip indicator (iOS parity)
+    var seekFeedback by remember { mutableStateOf<SeekFeedback?>(null) }
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(seekFeedback?.tick) {
+        if (seekFeedback == null) return@LaunchedEffect
+        delay(700)
+        seekFeedback = null
+    }
+
+    /**
+     * Skip 10s of the EPISODE and say what happened. An episode is one
+     * recording cut into parts, so across a boundary the skip carries on into
+     * the neighbouring part at the matching point instead of restarting it.
+     * Mirrors iOS CollectionPlayerView.
+     */
+    fun skip(back: Boolean) {
+        val pos = exoPlayer.currentPosition
+        val dur = exoPlayer.duration
+        if (dur <= 0) return
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        val target = pos + if (back) -10_000L else 10_000L
+        var seconds = 0
+        val label = when {
+            target >= dur - 500 -> {
+                if (currentIndex < segmentCount - 1) {
+                    pendingStartMs = (target - dur).coerceAtLeast(0L)
+                    goNext(); "Part ${currentIndex + 2}"
+                } else "End"
+            }
+            target < 0 -> {
+                if (currentIndex == 0) {
+                    exoPlayer.seekTo(0); "Start"
+                } else {
+                    // `target` seconds before the end of the previous part — but
+                    // at least a second before it, or it would end at once and
+                    // bounce straight back here.
+                    val prevMs = ((segments.getOrNull(currentIndex - 1)?.duration ?: 0.0) * 1000).toLong()
+                    pendingStartMs = if (prevMs > 1_000) (prevMs + target).coerceIn(0L, prevMs - 1_000) else 0L
+                    viewModel.advanceToPrevious(); "Part $currentIndex"
+                }
+            }
+            else -> {
+                exoPlayer.seekTo(target)
+                // Rapid skips the same way add up into one indicator: 10s, 20s.
+                val carried = seekFeedback?.takeIf { it.back == back }?.seconds ?: 0
+                seconds = carried + 10
+                "${seconds}s"
+            }
+        }
+        seekFeedback = SeekFeedback(back = back, label = label, seconds = seconds,
+                                    tick = (seekFeedback?.tick ?: 0) + 1)
+    }
+
     // Overlay state
     var showThreadView by remember { mutableStateOf(false) }
     var threadTargetVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
@@ -168,12 +269,30 @@ fun CollectionPlayerView(
         viewModel.setCurrentUserEmail(
             com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
         )
+        // A free show frees every episode in it.
+        collection.showId?.takeIf { it.isNotBlank() }?.let { showId ->
+            if (runCatching { com.stitchsocial.club.services.ShowService.shared.getShow(showId)?.isFree }
+                    .getOrNull() == true) viewModel.setShowFree(true)
+        }
         viewModel.setSubscribed(
             runCatching {
                 com.stitchsocial.club.services.SubscriptionService.shared
                     .isSubscribed(userID, collection.creatorID)
             }.getOrDefault(false)
         )
+
+        adBreaks.configure(
+            collection = collection,
+            viewerID = userID,
+            viewerTier = currentUserTier,
+            viewerIsFounder = SpecialUsersConfig.detectSpecialUser(
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email.orEmpty()
+            )?.isFounder == true
+        )
+        adBreaks.prefetch(context, viewModel.currentIndex.value, viewModel.segments.value.size)
+    }
+    LaunchedEffect(currentIndex, segmentCount) {
+        adBreaks.prefetch(context, currentIndex, segmentCount)
     }
     LaunchedEffect(currentIndex) {
         // Pull fresh hype/cool/view/reply for the active segment so the overlay
@@ -181,13 +300,23 @@ fun CollectionPlayerView(
         viewModel.refreshSegmentCounts(currentIndex)
     }
 
-    // ExoPlayer listener — auto-advance on segment end
+    // ExoPlayer listener — auto-advance on segment end.
+    //
+    // The listener is created once, so it must read the CURRENT index and
+    // count. It used to capture them at first composition — before the parts
+    // had loaded, when the count was 0 — so `currentIndex < segmentCount - 1`
+    // was false for ever and no part ever advanced on its own.
+    val liveIndex by rememberUpdatedState(currentIndex)
+    val liveCount by rememberUpdatedState(segmentCount)
+    val liveGoNext by rememberUpdatedState(::goNext)
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) {
-                    if (currentIndex < segmentCount - 1) {
-                        viewModel.advanceToNext()
+                    if (liveIndex < liveCount - 1) {
+                        liveGoNext()
+                    } else if (liveCount > 0) {
+                        viewModel.markCollectionCompleted()
                     }
                 }
             }
@@ -254,9 +383,11 @@ fun CollectionPlayerView(
 
                                     scope.launch {
                                         when {
+                                            // The break owns the screen until it ends.
+                                            adBreak != null -> {}
                                             currentOffset < -threshold || velocity < -300f -> {
                                                 if (currentIndex < segmentCount - 1)
-                                                    viewModel.advanceToNext()
+                                                    goNext()
                                             }
                                             currentOffset > threshold || velocity > 300f -> {
                                                 if (currentIndex > 0)
@@ -291,6 +422,18 @@ fun CollectionPlayerView(
                                     }
                                 }
                             )
+                        }
+                        // Double-tap an edge to skip 10s: left 30% back, right 30%
+                        // forward. Taps the overlay's buttons consume never get
+                        // here, so hype/cool/reply are unaffected.
+                        .pointerInput(segmentCount, currentIndex) {
+                            detectTapGestures(onDoubleTap = { offset ->
+                                if (adBreak != null) return@detectTapGestures
+                                when {
+                                    offset.x < size.width * 0.30f -> skip(back = true)
+                                    offset.x > size.width * 0.70f -> skip(back = false)
+                                }
+                            })
                         }
                 ) {
                     // ── Video + overlay — same Box, overlay on top (HomeFeed pattern)
@@ -356,17 +499,37 @@ fun CollectionPlayerView(
                     }
                 }
 
+                // ── Skip indicator ─────────────────────────────────────
+                SeekFeedbackOverlay(
+                    feedback = seekFeedback,
+                    modifier = Modifier.fillMaxSize().zIndex(5f)
+                )
+
                 // ── Top bar ───────────────────────────────────────────
                 CollectionTopBar(
                     collection = collection,
                     segmentCount = segmentCount,
                     currentIndex = currentIndex,
+                    partProgress = partProgress,
                     onClose = onDismiss,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth()
                         .zIndex(10f)
                 )
+
+                // ── Ad break — over everything but the thread sheet ───
+                adBreak?.let { (ad, next) ->
+                    CollectionAdBreakOverlay(
+                        ad = ad,
+                        nextPartNumber = next + 1,
+                        onFinish = {
+                            adBreak = null
+                            viewModel.advanceToNext()
+                        },
+                        modifier = Modifier.fillMaxSize().zIndex(50f)
+                    )
+                }
 
                 // ── Paywall ───────────────────────────────────────────
                 // Playback stopping with no explanation reads as a broken
@@ -418,6 +581,60 @@ fun CollectionPlayerView(
 }
 
 // ─────────────────────────────────────────────
+// MARK: - Skip indicator
+// ─────────────────────────────────────────────
+
+/** What the double-tap skip indicator shows. [tick] changes on every skip. */
+data class SeekFeedback(val back: Boolean, val label: String, val seconds: Int, val tick: Int)
+
+/**
+ * A soft half-circle on the tapped side with the direction and what happened
+ * ("10s", "Start", "Part 6"). Purely visual — draws nothing that takes touches.
+ */
+@Composable
+fun SeekFeedbackOverlay(feedback: SeekFeedback?, modifier: Modifier = Modifier) {
+    var last by remember { mutableStateOf(feedback) }
+    if (feedback != null) last = feedback
+    val shown = last ?: return
+
+    BoxWithConstraints(modifier = modifier) {
+        val w = maxWidth
+        AnimatedVisibility(
+            visible = feedback != null,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(300)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .align(if (shown.back) Alignment.CenterStart else Alignment.CenterEnd)
+                        .width(w * 0.42f)
+                        .fillMaxHeight(0.9f)
+                        .clip(
+                            if (shown.back) RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
+                            else RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50)
+                        )
+                        .background(Color.White.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                           verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            if (shown.back) Icons.Default.FastRewind else Icons.Default.FastForward,
+                            contentDescription = null, tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text(shown.label, color = Color.White, fontSize = 13.sp,
+                             fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
 // MARK: - Collection Top Bar
 // ─────────────────────────────────────────────
 
@@ -426,6 +643,8 @@ fun CollectionTopBar(
     collection: VideoCollection,
     segmentCount: Int,
     currentIndex: Int,
+    /** 0–1 through the current part; read here so only the bar recomposes. */
+    partProgress: State<Float>,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -460,17 +679,28 @@ fun CollectionTopBar(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.widthIn(max = 200.dp)
                     ) {
+                        // Full before the current part, filling through it, dim after.
+                        val fraction by partProgress
                         repeat(segmentCount) { idx ->
+                            val fill = when {
+                                idx < currentIndex -> 1f
+                                idx > currentIndex -> 0f
+                                else -> fraction
+                            }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(3.dp)
                                     .clip(RoundedCornerShape(2.dp))
-                                    .background(
-                                        if (idx <= currentIndex) Color.White
-                                        else Color.White.copy(alpha = 0.3f)
-                                    )
-                            )
+                                    .background(Color.White.copy(alpha = 0.3f))
+                            ) {
+                                Box(
+                                    Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fill)
+                                        .background(Color.White)
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(6.dp))

@@ -104,6 +104,7 @@
                 <data android:host="www.stitchsocial.me" />
                 <data android:pathPrefix="/e/" />
                 <data android:pathPrefix="/u/" />
+                <data android:pathPrefix="/v/" />
                 <data android:pathPrefix="/invite/" />
             </intent-filter>
 

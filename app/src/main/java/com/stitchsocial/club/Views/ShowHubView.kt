@@ -102,7 +102,12 @@ fun ShowHubView(
 
     LaunchedEffect(showId) {
         isLoading = true
-        val (s, seasons, eps) = ShowService.shared.loadFullShow(showId)
+        val (s, loadedSeasons, eps) = ShowService.shared.loadFullShow(showId)
+        // A new show has no season, and every way to add an episode needs one
+        // — so "new episode" did nothing. Season 1 is made on first open.
+        val seasons = if (loadedSeasons.isEmpty() && s != null) {
+            runCatching { listOf(ShowService.shared.addSeason(showId)) }.getOrDefault(loadedSeasons)
+        } else loadedSeasons
         show = s
         seasonIds = seasons.map { it.id }
         episodesBySeason = eps
@@ -208,6 +213,31 @@ fun ShowHubView(
                             Text("Next drop · ${fmt.format(slot)}", color = Color.White,
                                 fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             Text("Episode $nextEpisodeNumber · tap to fill this slot",
+                                color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
+                        }
+                        Icon(Icons.Default.Add, null, tint = HUB.cyan, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+
+            // No release rhythm set → no "Next drop" card, which was the only
+            // way to start an episode. Always offer one.
+            if (nextSlot == null) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(HUB.cyan.copy(alpha = 0.08f))
+                            .border(1.dp, HUB.cyan.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+                            .clickable { visibleSeasonId?.let { onNewEpisode(it, nextEpisodeNumber) } }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("New episode", color = Color.White,
+                                fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Episode $nextEpisodeNumber · upload and publish",
                                 color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
                         }
                         Icon(Icons.Default.Add, null, tint = HUB.cyan, modifier = Modifier.size(20.dp))

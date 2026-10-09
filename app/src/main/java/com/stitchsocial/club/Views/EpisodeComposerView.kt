@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.stitchsocial.club.services.EpisodeFinalizeService
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.tasks.await
 
 private object COMP {
     val bg = Color(0xFF0B0B0D)
@@ -74,7 +75,12 @@ fun EpisodeComposerView(
     creatorID: String,
     creatorName: String,
     onDismiss: () -> Unit,
-    onPublished: (String) -> Unit
+    onPublished: (String) -> Unit,
+    /** The show, for its type and its Free setting. */
+    show: com.stitchsocial.club.foundation.Show? = null,
+    /** An existing episode — a draft being finished, or parts being added.
+     *  Its saved parts stay; new ones go after them. Null = a new episode. */
+    existing: com.stitchsocial.club.foundation.VideoCollection? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -85,9 +91,14 @@ fun EpisodeComposerView(
     var segments by remember { mutableStateOf<List<EditorSegment>>(emptyList()) }
     var frames by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
 
-    var title by remember { mutableStateOf("Episode $episodeNumber") }
-    var description by remember { mutableStateOf("") }
-    var isFree by remember { mutableStateOf(false) }
+    // One id for this episode across every attempt (it was a new UUID per
+    // tap, so a retried publish made a second episode).
+    val episodeID = remember { existing?.id ?: UUID.randomUUID().toString() }
+    val savedParts = existing?.segmentIDs?.size ?: 0
+    var title by remember { mutableStateOf(existing?.title?.takeIf { it.isNotBlank() } ?: "Episode $episodeNumber") }
+    var description by remember { mutableStateOf(existing?.description ?: "") }
+    // A free show's episodes are free.
+    var isFree by remember { mutableStateOf(show?.isFree == true) }
     var freePreview by remember { mutableStateOf("1") }
 
     var phase by remember { mutableStateOf<EpisodeFinalizeService.Phase?>(null) }
@@ -134,7 +145,11 @@ fun EpisodeComposerView(
         }
 
         when (step) {
-            ComposerStep.VIDEO -> VideoStep { picker.launch(PickVisualMediaRequest()) }
+            ComposerStep.VIDEO -> VideoStep(
+                savedParts = savedParts,
+                onSkip = { step = ComposerStep.DETAILS },
+                onPick = { picker.launch(PickVisualMediaRequest()) }
+            )
 
             ComposerStep.CUTS -> CutsStep(
                 frames = frames,
@@ -150,15 +165,43 @@ fun EpisodeComposerView(
                 description = description, onDescription = { description = it },
                 isFree = isFree, onIsFree = { isFree = it },
                 freePreview = freePreview, onFreePreview = { freePreview = it },
-                segmentCount = segments.size,
+                segmentCount = savedParts + segments.size,
                 phase = phase,
                 error = error,
-                onBack = { step = ComposerStep.CUTS },
+                onBack = { step = if (sourceUri == null) ComposerStep.VIDEO else ComposerStep.CUTS },
                 onPublish = { publish ->
-                    val uri = sourceUri ?: return@DetailsStep
+                    val free = isFree || show?.isFree == true
+                    val uri = sourceUri
+                    // Nothing new to upload: release (or keep as a draft) the
+                    // parts already saved on this episode.
+                    if (uri == null) {
+                        if (existing == null || savedParts == 0) {
+                            error = "Pick a video first."
+                            return@DetailsStep
+                        }
+                        scope.launch {
+                            error = null
+                            runCatching {
+                                com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+                                    .collection("videoCollections").document(existing.id)
+                                    .set(mapOf(
+                                        "title" to title,
+                                        "description" to description,
+                                        "isFree" to free,
+                                        "freeSegmentCount" to if (free) savedParts else freePreview.toIntOrNull() ?: 0,
+                                        "status" to if (publish) "published" else "draft",
+                                        "publishedAt" to if (publish) com.google.firebase.Timestamp.now()
+                                                         else com.google.firebase.firestore.FieldValue.delete(),
+                                        "updatedAt" to com.google.firebase.Timestamp.now()
+                                    ), com.google.firebase.firestore.SetOptions.merge())
+                                    .await()
+                            }.onSuccess { onPublished(existing.id) }
+                             .onFailure { error = it.message ?: "Couldn't save" }
+                        }
+                        return@DetailsStep
+                    }
                     scope.launch {
                         error = null
-                        val episodeID = UUID.randomUUID().toString()
                         val result = EpisodeFinalizeService(context).finalize(
                             EpisodeFinalizeService.Input(
                                 episodeID = episodeID,
@@ -175,15 +218,21 @@ fun EpisodeComposerView(
                                 description = description,
                                 creatorID = creatorID,
                                 creatorName = creatorName,
-                                coverImageURL = null,
-                                contentType = "series",
+                                // Keep an existing episode's cover.
+                                coverImageURL = existing?.coverImageURL,
+                                // Was hard-coded "series": every Android episode
+                                // landed in the Series rail whatever its show was.
+                                contentType = show?.contentType?.rawValue ?: "series",
                                 showId = showId,
                                 seasonId = seasonId,
-                                isFree = isFree,
-                                freeSegmentCount = if (isFree) segments.size
+                                isFree = free,
+                                freeSegmentCount = if (free) savedParts + segments.size
                                                    else freePreview.toIntOrNull() ?: 0,
                                 status = if (publish) "published" else "draft",
-                                totalDuration = durationMs / 1000.0
+                                totalDuration = durationMs / 1000.0,
+                                existingSegmentIDs = existing?.segmentIDs ?: emptyList(),
+                                existingDuration = existing?.totalDuration ?: 0.0,
+                                episodeNumber = existing?.episodeNumber ?: episodeNumber
                             )
                         ) { phase = it }
 
@@ -197,7 +246,7 @@ fun EpisodeComposerView(
 }
 
 @Composable
-private fun VideoStep(onPick: () -> Unit) {
+private fun VideoStep(savedParts: Int, onSkip: () -> Unit, onPick: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -215,6 +264,17 @@ private fun VideoStep(onPick: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = COMP.pink),
             shape = RoundedCornerShape(24.dp)
         ) { Text("Choose from library", color = Color.White, fontWeight = FontWeight.Bold) }
+        if (savedParts > 0) {
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "This episode already has $savedParts part${if (savedParts == 1) "" else "s"} saved. " +
+                    "A new video is added after Part $savedParts.",
+                color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp
+            )
+            TextButton(onClick = onSkip) {
+                Text("Skip — just publish what's saved", color = COMP.cyan)
+            }
+        }
     }
 }
 

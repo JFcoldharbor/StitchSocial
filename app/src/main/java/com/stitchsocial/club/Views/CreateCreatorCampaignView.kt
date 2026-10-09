@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.stitchsocial.club.services.BrandDealSplit
 import com.stitchsocial.club.services.CreatorCampaignCriteria
 import com.stitchsocial.club.services.CreatorCampaignService
 import kotlinx.coroutines.launch
@@ -50,7 +51,7 @@ fun CreateCreatorCampaignView(
     var brief by remember { mutableStateOf("") }
     var payoutDollars by remember { mutableStateOf("100") }
     var category by remember { mutableStateOf("lifestyle") }
-    var minTier by remember { mutableStateOf("rising") }
+    var minTier by remember { mutableStateOf("influencer") }
     var minStitchers by remember { mutableStateOf("1000") }
     var minViewsPerVideo by remember { mutableStateOf("") }
     var requiredHashtags by remember { mutableStateOf("") }
@@ -59,10 +60,16 @@ fun CreateCreatorCampaignView(
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     val categories = listOf("lifestyle", "fitness", "beauty", "technology", "food", "music", "gaming", "fashion", "other")
-    val tiers = listOf("rookie", "rising", "veteran", "influencer", "legendary", "founder")
+    // Brand deals open at Influencer (Rank 4) — the server refuses anyone
+    // below — so a minimum lower than that means nothing. The list used to
+    // skip Ambassador through Top Creator entirely. iOS parity.
+    val tiers = listOf("influencer", "ambassador", "elite", "partner", "legendary", "top_creator")
 
     val payoutInt = payoutDollars.toIntOrNull() ?: 0
-    val creatorNet = String.format("%.2f", payoutInt * 0.8)
+    // What a creator nets per delivery, lowest rank to highest: the split is
+    // by rank, so a brand sees the range rather than one figure.
+    val creatorNetLow = String.format("%.2f", payoutInt * BrandDealSplit.LOWEST_CREATOR_SHARE)
+    val creatorNetHigh = String.format("%.2f", payoutInt * BrandDealSplit.HIGHEST_CREATOR_SHARE)
     val canSubmit = title.isNotBlank() && brief.length >= 20 && payoutInt >= 5 && !isSubmitting
 
     Scaffold(
@@ -117,7 +124,7 @@ fun CreateCreatorCampaignView(
                     Text("per approved deliverable", color = AppTheme.colors.textSecondary, fontSize = 12.sp)
                 }
                 Text(
-                    "Stitch takes 20% — creator nets $$creatorNet per approved delivery",
+                    "Creators keep ${BrandDealSplit.percent(BrandDealSplit.LOWEST_CREATOR_SHARE)}–${BrandDealSplit.percent(BrandDealSplit.HIGHEST_CREATOR_SHARE)} depending on their rank — $$creatorNetLow to $$creatorNetHigh per approved delivery",
                     color = AppTheme.colors.textSecondary,
                     fontSize = 11.sp
                 )
@@ -307,7 +314,7 @@ private fun DropdownField(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    value.replaceFirstChar { it.uppercase() },
+                    optionLabel(value),
                     color = AppTheme.colors.textPrimary,
                     fontSize = 14.sp,
                     modifier = Modifier.weight(1f)
@@ -321,7 +328,7 @@ private fun DropdownField(
             ) {
                 options.forEach { opt ->
                     DropdownMenuItem(
-                        text = { Text(opt.replaceFirstChar { it.uppercase() }, color = AppTheme.colors.textPrimary) },
+                        text = { Text(optionLabel(opt), color = AppTheme.colors.textPrimary) },
                         onClick = {
                             onChange(opt)
                             expanded = false
@@ -332,3 +339,7 @@ private fun DropdownField(
         }
     }
 }
+
+/** "top_creator" -> "Top Creator". */
+private fun optionLabel(raw: String): String =
+    raw.split('_').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }

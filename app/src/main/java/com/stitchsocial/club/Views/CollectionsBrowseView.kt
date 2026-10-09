@@ -102,6 +102,10 @@ fun CollectionsBrowseView(
     onClose: () -> Unit,
     /** Play a collection, resuming at [startIndex] (the segment index). */
     onPlay: (VideoCollection, Int) -> Unit,
+    /** Bumped by the host each time the player closes, so progress is re-read
+     *  — the player draws over this screen, which stays composed underneath and
+     *  otherwise keeps the progress it read on open. */
+    progressRefreshKey: Int = 0,
 ) {
     var mode by remember { mutableStateOf(BrowseMode.BROWSE) }
     var selectedType by remember { mutableStateOf<CollectionContentType?>(null) }
@@ -116,7 +120,9 @@ fun CollectionsBrowseView(
 
     // Progress is per-collection; CollectionService caches, so this settles fast
     // on repeat opens. Only what's on screen is fetched.
-    LaunchedEffect(collections.map { it.id }) {
+    LaunchedEffect(collections.map { it.id }, progressRefreshKey) {
+        // Back from the player: let its save-on-close land first.
+        if (progressRefreshKey > 0) kotlinx.coroutines.delay(800)
         val service = CollectionService()
         val result = mutableMapOf<String, CollectionProgress>()
         for (ep in collections) {
@@ -249,7 +255,7 @@ fun CollectionsBrowseView(
                     }
 
                     if (inProgress.isNotEmpty() && query.isBlank()) {
-                        RailHeader("EPISODES IN PROGRESS")
+                        RailHeader("EPISODES IN PROGRESS") { mode = BrowseMode.WATCHING }
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -275,7 +281,7 @@ fun CollectionsBrowseView(
                         contentTypes.forEach { t ->
                             val items = searched.filter { it.contentType == t }
                             if (items.isNotEmpty()) {
-                                RailHeader(t.displayName.uppercase())
+                                RailHeader(t.displayName.uppercase()) { selectedType = t }
                                 LazyRow(
                                     contentPadding = PaddingValues(horizontal = 14.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -624,14 +630,23 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun RailHeader(text: String) {
+private fun RailHeader(text: String, onSeeAll: (() -> Unit)? = null) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 20.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SectionLabel(text)
         Spacer(Modifier.weight(1f))
-        Text("See all", color = COL.cyan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        // Was a plain label with no click — "See all" did nothing on any rail.
+        // Padded to a real tap target (iOS parity).
+        if (onSeeAll != null) {
+            Text(
+                "See all", color = COL.cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable { onSeeAll() }
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            )
+        }
     }
 }
 

@@ -284,6 +284,8 @@ object FirebaseSchema {
         const val WEBSITE_URL           = "websiteURL"
         const val BUSINESS_CATEGORY     = "businessCategory"
         const val BRAND_LOGO_URL        = "brandLogoURL"
+        /** Int — the year the business started. Not the operator's birthdate. */
+        const val FOUNDED_YEAR          = "foundedYear"
         const val BUSINESS_DESCRIPTION  = "businessDescription"
         const val IS_VERIFIED_BUSINESS  = "isVerifiedBusiness"
 

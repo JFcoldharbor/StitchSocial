@@ -106,7 +106,7 @@ fun CreatorCampaignDetailView(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                BriefCard(campaign)
+                BriefCard(campaign, splitLine = if (isBrandAccount) null else creatorSplitLine(campaign, myDeliverable))
                 campaign.criteria?.let { CriteriaCard(it) }
 
                 if (isBrandAccount) {
@@ -165,7 +165,7 @@ fun CreatorCampaignDetailView(
 // ============================ SHARED CARDS ============================
 
 @Composable
-private fun BriefCard(campaign: CreatorCampaign) {
+private fun BriefCard(campaign: CreatorCampaign, splitLine: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -194,6 +194,7 @@ private fun BriefCard(campaign: CreatorCampaign) {
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp
                 )
+                splitLine?.let { Text(it, color = AppTheme.colors.textSecondary, fontSize = 10.sp) }
             }
         }
         Text(campaign.brief, color = AppTheme.colors.textPrimary.copy(alpha = 0.85f), fontSize = 14.sp)
@@ -874,5 +875,18 @@ private fun SubmitDeliverableSheet(
                 )
             }
         }
+    }
+}
+
+/**
+ * What this creator takes home. Once accepted, the split is locked onto their
+ * deal; before that it depends on their rank, so show the range. iOS parity.
+ */
+private fun creatorSplitLine(campaign: CreatorCampaign, deliverable: CreatorCampaignDeliverable?): String {
+    val share = deliverable?.creatorShareRate
+    return if (share != null) {
+        "You keep ${BrandDealSplit.percent(share)} · $" + String.format("%.2f", campaign.payoutDollars * share)
+    } else {
+        "Creators keep ${BrandDealSplit.percent(BrandDealSplit.LOWEST_CREATOR_SHARE)}–${BrandDealSplit.percent(BrandDealSplit.HIGHEST_CREATOR_SHARE)} by rank"
     }
 }

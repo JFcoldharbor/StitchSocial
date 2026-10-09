@@ -96,42 +96,44 @@ object VideoWatermarkService {
                 "dur=${mainDurationUs / 1000}ms → canvas ${outW}x$outH")
         }
 
+        // Effects go on each item: Media3 1.4 ignores composition-level video
+        // effects for a single sequence, so the watermark was never burned in.
+        // Timestamps stay continuous across the sequence, so
+        // presentationTimeUs >= mainDurationUs == "we're on the end screen".
+        // SCALE_TO_FIT reconciles the clip and end screen resolutions.
+        val watermarkBitmap = renderWatermarkBitmap(context, creatorUsername, outH)
+        val endUsernameBitmap = creatorUsername.takeIf { it.isNotBlank() }
+            ?.let { renderEndScreenUsernameBitmap(it, outW, outH) }
+        fun itemEffects(): Effects {
+            // Fresh overlay instances per item — each owns its GL texture.
+            val overlays = mutableListOf<TextureOverlay>(
+                JumpingWatermarkOverlay(watermarkBitmap, mainDurationUs)
+            )
+            endUsernameBitmap?.let { overlays.add(EndScreenUsernameOverlay(it, mainDurationUs)) }
+            return Effects(
+                emptyList(),
+                listOf<Effect>(
+                    Presentation.createForWidthAndHeight(outW, outH, Presentation.LAYOUT_SCALE_TO_FIT),
+                    OverlayEffect(ImmutableList.copyOf(overlays))
+                )
+            )
+        }
+
         // Main clip (keep audio) + concatenated bundled end screen (keep its audio).
         val mainItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(sourceFile)))
             .setRemoveAudio(false)
+            .setEffects(itemEffects())
             .build()
 
         val endUri = Uri.parse("android.resource://${context.packageName}/${R.raw.stitch_end_screen}")
         val endItem = EditedMediaItem.Builder(MediaItem.fromUri(endUri))
             .setRemoveAudio(false)
+            .setEffects(itemEffects())
             .build()
 
         val sequence = EditedMediaItemSequence(listOf(mainItem, endItem))
 
-        // Composition-level output canvas — SCALE_TO_FIT reconciles the main
-        // clip and the end screen even if their resolutions differ.
-        val presentation = Presentation.createForWidthAndHeight(
-            outW, outH, Presentation.LAYOUT_SCALE_TO_FIT
-        )
-
-        // Overlays (composition timeline is continuous across the sequence, so
-        // presentationTimeUs >= mainDurationUs == "we're on the end screen").
-        val overlays = mutableListOf<TextureOverlay>()
-        overlays.add(JumpingWatermarkOverlay(
-            bitmap = renderWatermarkBitmap(context, creatorUsername, outH),
-            mainDurationUs = mainDurationUs
-        ))
-        if (creatorUsername.isNotBlank()) {
-            overlays.add(EndScreenUsernameOverlay(
-                bitmap = renderEndScreenUsernameBitmap(creatorUsername, outW, outH),
-                mainDurationUs = mainDurationUs
-            ))
-        }
-        val overlayEffect = OverlayEffect(ImmutableList.copyOf(overlays))
-
-        val videoEffects: List<Effect> = listOf(presentation, overlayEffect)
         val composition = Composition.Builder(listOf(sequence))
-            .setEffects(Effects(emptyList(), videoEffects))
             .build()
 
         val outputFile = File(context.cacheDir, "StitchWM_${UUID.randomUUID()}.mp4")

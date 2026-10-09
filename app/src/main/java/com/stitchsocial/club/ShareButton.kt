@@ -10,12 +10,17 @@ import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesomeMosaic
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,9 +39,11 @@ import androidx.core.content.FileProvider
 import com.stitchsocial.club.views.ThreadCollageSelectionView
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
+import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.services.ShareableVideo
 import com.stitchsocial.club.services.VideoServiceImpl
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -51,13 +58,14 @@ enum class ShareButtonSize(val iconSize: Dp) {
 
 // MARK: - Share Button
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ShareButton(
     video: CoreVideoMetadata,
     creatorUsername: String,
     threadID: String? = null,
-    size: ShareButtonSize = ShareButtonSize.MEDIUM
+    size: ShareButtonSize = ShareButtonSize.MEDIUM,
+    userTier: UserTier = UserTier.ROOKIE
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -71,6 +79,49 @@ fun ShareButton(
     var collageThreadData by remember { mutableStateOf<ThreadData?>(null) }
 
     val effectiveThreadID = threadID ?: video.threadID
+
+    // Promo: the video's creator once it has 100 hype; founders on anything (iOS parity).
+    val isFounder = userTier == UserTier.FOUNDER || userTier == UserTier.CO_FOUNDER
+    val isCreator = video.creatorID == FirebaseAuth.getInstance().currentUser?.uid
+    val canPromo = (isFounder || isCreator) && (isFounder || video.hypeCount >= 100)
+
+    // Watermarked file (Save video) or the 30s stats promo.
+    fun shareFile(promoMode: Boolean) {
+        isSharing = true
+        scope.launch {
+            try {
+                // Share/watermark needs a real downloadable MP4 — the
+                // faststart mp4URL (CDN), NOT the HLS .m3u8 playbackURL and
+                // NOT a legacy/empty videoURL. Prefer mp4URL, fall back to videoURL.
+                val downloadURL = video.mp4URL?.takeIf { it.isNotBlank() } ?: video.videoURL
+                val shareable = ShareableVideo(
+                    id = video.id,
+                    videoURL = downloadURL,
+                    thumbnailURL = video.thumbnailURL,
+                    title = video.title,
+                    creatorID = video.creatorID,
+                    creatorName = creatorUsername,
+                    threadID = video.threadID,
+                    hypeCount = video.hypeCount,
+                    coolCount = video.coolCount,
+                    viewCount = video.viewCount,
+                    temperature = video.temperature.name.lowercase()
+                )
+                ShareService.shareVideo(
+                    context = context,
+                    video = shareable,
+                    creatorUsername = creatorUsername,
+                    threadID = effectiveThreadID,
+                    promoMode = promoMode
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Share failed: ${e.message}", e)
+                Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isSharing = false
+            }
+        }
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val buttonSize = size.iconSize + 16.dp
@@ -84,10 +135,13 @@ fun ShareButton(
                 .size(buttonSize)
                 .clip(CircleShape)
                 .background(Color.Black.copy(alpha = 0.3f))
-                .clickable(enabled = !isSharing && !loadingCollageData) {
-                    Log.d(TAG, "🔘 SHARE BUTTON TAPPED — opening options sheet")
-                    showOptionsSheet = true
-                },
+                // Tap shares the video's link; long press opens the options
+                // (save the watermarked video, promo, thread collage). iOS parity.
+                .combinedClickable(
+                    enabled = !isSharing && !loadingCollageData,
+                    onClick = { ShareService.shareLink(context, video.id, creatorUsername) },
+                    onLongClick = { showOptionsSheet = true }
+                ),
             contentAlignment = Alignment.Center
         ) {
             if (isSharing || loadingCollageData) {
@@ -124,44 +178,37 @@ fun ShareButton(
             containerColor = Color(0xFF111111),
         ) {
             ShareOptionRow(
-                icon = Icons.Default.Share,
-                title = "Share Video",
-                subtitle = "Send this clip as-is",
+                icon = Icons.Default.Link,
+                title = "Share link",
+                subtitle = "Opens in Stitch · Views and Hype count",
                 onClick = {
                     showOptionsSheet = false
-                    isSharing = true
-                    scope.launch {
-                        try {
-                            // Share/watermark needs a real downloadable MP4 — the
-                            // faststart mp4URL (CDN), NOT the HLS .m3u8 playbackURL and
-                            // NOT a legacy/empty videoURL. Prefer mp4URL, fall back to videoURL.
-                            val downloadURL = video.mp4URL?.takeIf { it.isNotBlank() } ?: video.videoURL
-                            val shareable = ShareableVideo(
-                                id = video.id,
-                                videoURL = downloadURL,
-                                thumbnailURL = video.thumbnailURL,
-                                title = video.title,
-                                creatorID = video.creatorID,
-                                creatorName = creatorUsername,
-                                threadID = video.threadID,
-                                hypeCount = video.hypeCount,
-                                coolCount = video.coolCount,
-                                viewCount = video.viewCount,
-                                temperature = video.temperature.name.lowercase()
-                            )
-                            ShareService.shareVideo(
-                                context = context,
-                                video = shareable,
-                                creatorUsername = creatorUsername,
-                                threadID = effectiveThreadID
-                            )
-                        } catch (e: Exception) {
-                            Log.e(TAG, "❌ Share failed: ${e.message}", e)
-                            Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
-                        } finally {
-                            isSharing = false
-                        }
-                    }
+                    ShareService.shareLink(context, video.id, creatorUsername)
+                }
+            )
+
+            ShareOptionRow(
+                icon = Icons.Default.Share,
+                title = "Save video",
+                subtitle = "Watermarked file · For TikTok and Reels",
+                onClick = {
+                    showOptionsSheet = false
+                    shareFile(promoMode = false)
+                }
+            )
+
+            ShareOptionRow(
+                icon = Icons.Default.BarChart,
+                title = "Promo Share",
+                subtitle = when {
+                    isFounder -> "30s promo · Stats overlay · Founder access"
+                    canPromo -> "30s promo · Views · Hype · Temperature"
+                    else -> "Unlocks at 100 🔥 on your videos"
+                },
+                enabled = canPromo,
+                onClick = {
+                    showOptionsSheet = false
+                    shareFile(promoMode = true)
                 }
             )
 
@@ -228,12 +275,14 @@ private fun ShareOptionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val contentAlpha = if (enabled) 1f else 0.4f
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -244,11 +293,17 @@ private fun ShareOptionRow(
                 .background(Color.White.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = title, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = title, tint = Color.White.copy(alpha = contentAlpha), modifier = Modifier.size(20.dp))
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column {
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Color.White.copy(alpha = contentAlpha), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                if (!enabled) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(Icons.Default.Lock, contentDescription = "Locked", tint = Color(0xFFFF9500).copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+                }
+            }
             Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
         }
     }

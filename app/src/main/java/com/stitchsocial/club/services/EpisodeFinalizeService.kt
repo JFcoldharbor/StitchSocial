@@ -78,7 +78,13 @@ class EpisodeFinalizeService(private val context: Context) {
         val freeSegmentCount: Int,
         /** "published" or "draft". */
         val status: String,
-        val totalDuration: Double
+        val totalDuration: Double,
+        /** Parts already saved on the episode — new parts are ADDED after
+         *  them. Re-finalizing used to replace the whole list. */
+        val existingSegmentIDs: List<String> = emptyList(),
+        val existingDuration: Double = 0.0,
+        /** Was accepted by the composer and never written. */
+        val episodeNumber: Int? = null
     )
 
     /** Phases the caller renders. Splitting and uploading carry an index so a
@@ -106,6 +112,14 @@ class EpisodeFinalizeService(private val context: Context) {
         val temps = mutableListOf<File>()
         try {
             require(input.segments.isNotEmpty()) { "An episode needs at least one segment" }
+
+            // Whether the episode doc exists BEFORE this upload. Only then can
+            // "deleted while uploading" happen — a brand-new episode has no doc
+            // until the commit below creates it, and checking for one failed
+            // every new publish with "This episode was deleted." after every
+            // part had already uploaded.
+            val episodeRef = db.collection("videoCollections").document(input.episodeID)
+            val existedAtStart = episodeRef.get().await().exists()
 
             val batch = db.batch()
             val segmentIds = mutableListOf<String>()
@@ -189,7 +203,11 @@ class EpisodeFinalizeService(private val context: Context) {
                     "discoverabilityScore" to 0.5,
                     "isPromoted" to false,
                     "collectionID" to input.episodeID,
-                    "segmentNumber" to i + 1,
+                    // The rest of the chain, so a part can be found by its show
+                    // or season without going through the episode first.
+                    "showId" to input.showId,
+                    "seasonId" to input.seasonId,
+                    "segmentNumber" to input.existingSegmentIDs.size + i + 1,
                     "segmentTitle" to seg.title,
                     // Keeps segments out of the home/search feeds — they're
                     // episode parts, not standalone posts.
@@ -225,18 +243,17 @@ class EpisodeFinalizeService(private val context: Context) {
 
             onProgress(Phase.Saving)
 
-            batch.set(
-                db.collection("videoCollections").document(input.episodeID),
-                mapOf(
+            val episodeData = mutableMapOf<String, Any?>(
                     "id" to input.episodeID,
                     "title" to input.title,
                     "description" to input.description,
                     "creatorID" to input.creatorID,
                     "creatorName" to input.creatorName,
-                    "coverImageURL" to (firstThumbnailURL ?: input.coverImageURL ?: ""),
-                    "segmentIDs" to segmentIds,
-                    "segmentCount" to input.segments.size,
-                    "totalDuration" to input.totalDuration,
+                    // The creator's chosen cover wins; part 1's frame is the fallback.
+                    "coverImageURL" to (input.coverImageURL?.takeIf { it.isNotBlank() } ?: firstThumbnailURL ?: ""),
+                    "segmentIDs" to input.existingSegmentIDs + segmentIds,
+                    "segmentCount" to input.existingSegmentIDs.size + input.segments.size,
+                    "totalDuration" to input.existingDuration + input.totalDuration,
                     "status" to input.status,
                     "visibility" to "public",
                     "allowReplies" to true,
@@ -245,15 +262,31 @@ class EpisodeFinalizeService(private val context: Context) {
                     "contentType" to input.contentType,
                     "showId" to input.showId,
                     "seasonId" to input.seasonId,
-                    "createdAt" to Timestamp(Date()),
                     "updatedAt" to Timestamp(Date()),
                     // publishedAt ONLY when actually published. A draft carrying
                     // a publishedAt would rank in discovery queries that sort by
                     // it; see the CollectionService note about orderBy exclusion.
                     "publishedAt" to if (input.status == "published") Timestamp(Date())
                                      else FieldValue.delete()
-                )
             )
+            input.episodeNumber?.let { episodeData["episodeNumber"] = it }
+            // A new episode gets its createdAt; an existing one keeps it.
+            if (!existedAtStart) episodeData["createdAt"] = Timestamp(Date())
+            // MERGE. A plain set() replaced the whole doc on every save — and
+            // FieldValue.delete() is only legal with merge, so every "Save
+            // draft" threw before anything was written.
+            batch.set(
+                db.collection("videoCollections").document(input.episodeID),
+                episodeData,
+                com.google.firebase.firestore.SetOptions.merge()
+            )
+
+            // Deleted while uploading? The batch merges into the episode doc,
+            // and a merge into a missing document creates it — committing now
+            // would bring back an episode the creator deleted. One read.
+            if (existedAtStart) {
+                check(episodeRef.get().await().exists()) { "This episode was deleted." }
+            }
 
             batch.commit().await()
 

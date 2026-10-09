@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
@@ -22,6 +24,7 @@ import com.stitchsocial.club.foundation.ScheduleService
 import com.stitchsocial.club.foundation.Show
 import com.stitchsocial.club.foundation.ShowTag
 import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.foundation.CollectionContentType
 import com.stitchsocial.club.services.ShowService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -72,6 +75,9 @@ fun ShowSettingsView(
     var show by remember { mutableStateOf(initial) }
     var saveTick by remember { mutableStateOf(0) }
     var savedLabel by remember { mutableStateOf(if (isNew) "" else "All changes saved") }
+    /** An edit not yet written. Backing out within the 600ms debounce used to
+     *  cancel it, so a quick rename was lost. */
+    var dirty by remember { mutableStateOf(false) }
 
     // 600ms debounce, per the handoff. Replaces BOTH the Save button and the
     // write-on-every-cadence-tap.
@@ -80,13 +86,24 @@ fun ShowSettingsView(
         savedLabel = "Saving…"
         delay(600)
         runCatching { ShowService.shared.saveShow(show) }
-            .onSuccess { savedLabel = "All changes saved"; onSaved(show) }
+            .onSuccess { savedLabel = "All changes saved"; dirty = false; onSaved(show) }
             .onFailure { savedLabel = "Not saved — ${it.message ?: "try again"}" }
     }
 
     fun edit(block: (Show) -> Show) {
         show = block(show)
+        dirty = true
         saveTick++
+    }
+
+    /** Back: write anything pending first, then leave. */
+    fun leave() {
+        if (isNew || !dirty) { onDismiss(); return }
+        scope.launch {
+            runCatching { ShowService.shared.saveShow(show) }
+                .onSuccess { dirty = false; onSaved(show) }
+            onDismiss()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(SET.bg)) {
@@ -97,7 +114,7 @@ fun ShowSettingsView(
         ) {
             Icon(
                 Icons.Default.ArrowBack, "Back", tint = Color.White,
-                modifier = Modifier.size(22.dp).clickable { onDismiss() }
+                modifier = Modifier.size(22.dp).clickable { leave() }
             )
             Spacer(Modifier.weight(1f))
             // The autosave indicator IS the save button's replacement — without
@@ -127,6 +144,29 @@ fun ShowSettingsView(
                     modifier = Modifier.fillMaxWidth().height(96.dp),
                     colors = fieldColors()
                 )
+                Spacer(Modifier.height(12.dp))
+                // Show type — there was no way to set or change it on Android.
+                Text("Show type", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CollectionContentType.values().forEach { type ->
+                        val selected = show.contentType == type
+                        Text(
+                            type.displayName,
+                            color = if (selected) Color.Black else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (selected) Color.White else Color.White.copy(alpha = 0.08f))
+                                .clickable { edit { it.copy(contentType = type) } }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
+                }
             }
 
             // ── RELEASE RHYTHM ───────────────────────────────────────────
@@ -192,11 +232,32 @@ fun ShowSettingsView(
 
             // ── ACCESS · SET ONCE ────────────────────────────────────────
             SectionLabel("ACCESS · SET ONCE")
+            // Asking before a free show goes subscribers-only — it locks
+            // episodes people may be partway through.
+            var confirmingPaid by remember { mutableStateOf(false) }
+            // Set once the switch is confirmed: `episodes` came in from the
+            // caller and still says free until it reloads.
+            var episodesLocked by remember { mutableStateOf(false) }
+            if (confirmingPaid) {
+                AlertDialog(
+                    onDismissRequest = { confirmingPaid = false },
+                    title = { Text("Make this show subscribers-only?") },
+                    text = { Text("Every episode locks for anyone who isn't subscribed, including people partway through one. You can make a single episode free again from its own settings.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmingPaid = false
+                            episodesLocked = true
+                            edit { it.copy(isFree = false) }
+                        }) { Text("Lock all episodes") }
+                    },
+                    dismissButton = { TextButton(onClick = { confirmingPaid = false }) { Text("Cancel") } },
+                )
+            }
             SettingsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(
                         checked = show.isFree,
-                        onCheckedChange = { v -> edit { it.copy(isFree = v) } }
+                        onCheckedChange = { v -> if (v) edit { it.copy(isFree = true) } else confirmingPaid = true }
                     )
                     Spacer(Modifier.width(10.dp))
                     Column {
@@ -210,7 +271,7 @@ fun ShowSettingsView(
 
                 // Name the overrides rather than letting a per-episode setting
                 // silently contradict the show-level one.
-                val overrides = episodes.count { it.isFree != show.isFree }
+                val overrides = if (episodesLocked && !show.isFree) 0 else episodes.count { it.isFree != show.isFree }
                 if (overrides > 0) {
                     Spacer(Modifier.height(8.dp))
                     Text(

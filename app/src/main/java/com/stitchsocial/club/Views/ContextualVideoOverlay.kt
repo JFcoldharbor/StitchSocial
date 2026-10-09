@@ -636,7 +636,8 @@ fun ContextualVideoOverlay(
                 displayReplyCount = displayReplyCount,
                 context = context,
                 onAction = onAction,
-                currentUserID = currentUserID
+                currentUserID = currentUserID,
+                currentUserTier = currentUserTier
             )
         } else if (overlayContext == OverlayContext.CAROUSEL) {
             CarouselOverlay(
@@ -978,7 +979,8 @@ private fun MinimalDiscoveryOverlay(
     displayReplyCount: Int,
     context: Context,
     onAction: ((OverlayAction) -> Unit)?,
-    currentUserID: String? = null
+    currentUserID: String? = null,
+    currentUserTier: UserTier = UserTier.ROOKIE
 ) {
     // Fixed text sizes
     val nameFontSize = OverlaySizes.LABEL_MEDIUM.fixedSp()
@@ -1051,7 +1053,8 @@ private fun MinimalDiscoveryOverlay(
             ShareButton(
                 video = video,
                 creatorUsername = displayCreatorName,
-                size = ShareButtonSize.MEDIUM
+                size = ShareButtonSize.MEDIUM,
+                userTier = currentUserTier
             )
 
             // More options (Report / Block)
@@ -1214,6 +1217,7 @@ private fun FullContextualOverlay(
                 context = context,
                 onAction = onAction,
                 currentUserID = currentUserID,
+                currentUserTier = currentUserTier,
                 showShareInTop = showShareInTop,
                 onExit = onExit
             )
@@ -1283,6 +1287,7 @@ private fun TopSection(
     context: Context,
     onAction: ((OverlayAction) -> Unit)?,
     currentUserID: String? = null,
+    currentUserTier: UserTier = UserTier.ROOKIE,
     showShareInTop: Boolean = false,
     onExit: (() -> Unit)? = null
 ) {
@@ -1337,7 +1342,8 @@ private fun TopSection(
                 ShareButton(
                     video = video,
                     creatorUsername = displayCreatorName,
-                    size = ShareButtonSize.TINY
+                    size = ShareButtonSize.TINY,
+                    userTier = currentUserTier
                 )
             }
             if (onExit != null) {
@@ -2286,9 +2292,10 @@ internal fun TipButton(
             }
         }
 
-        // Label
+        // Label — "Tip" on your own video too (greyed): a dash said nothing
+        // about what the swipe had turned the button into.
         androidx.compose.material3.Text(
-            if (isSelfTip) "—" else "Tip",
+            "Tip",
             fontSize = 10.fixedSp(),
             fontWeight = FontWeight.Medium,
             color = if (isSelfTip) Color.Gray else Color.White.copy(0.8f)

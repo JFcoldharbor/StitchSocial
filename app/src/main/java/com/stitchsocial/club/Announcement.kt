@@ -32,6 +32,9 @@ data class Announcement(
     val message: String? = null,
     val priority: String = AnnouncementPriority.STANDARD.value,
     val type: String = AnnouncementType.UPDATE.value,
+    /** Newer kinds ("spotlight") ride here over a `type` every shipped build
+     *  knows, so older apps still show the announcement. Absent on older ones. */
+    val displayType: String? = null,
     val targetAudience: Any? = null,  // Can be String or Map - handle both formats
     val startDate: Timestamp = Timestamp.now(),
     val endDate: Timestamp? = null,
@@ -62,7 +65,7 @@ data class Announcement(
         get() = AnnouncementPriority.fromValue(priority)
 
     val typeEnum: AnnouncementType
-        get() = AnnouncementType.fromValue(type)
+        get() = AnnouncementType.fromValue(displayType ?: type)
 
     val repeatModeEnum: AnnouncementRepeatMode
         get() = AnnouncementRepeatMode.fromValue(repeatMode)
@@ -229,7 +232,10 @@ enum class AnnouncementType(val value: String) {
      * Same announcement machinery (it already carried a videoId), but typed so
      * the overlay can present it as a highlight instead of an app notice.
      */
-    HIGHLIGHT("highlight");
+    HIGHLIGHT("highlight"),
+    /** Featuring a creator's video. Written as `displayType` over a
+     *  "community" type by the iOS composer — see Announcement.displayType. */
+    SPOTLIGHT("spotlight");
 
     val displayName: String
         get() = when (this) {
@@ -242,6 +248,7 @@ enum class AnnouncementType(val value: String) {
             COMMUNITY -> "Community"
             SAFETY -> "Safety Alert"
             HIGHLIGHT -> "Stitch Highlight"
+            SPOTLIGHT -> "Video Spotlight"
         }
 
     /** Material Icon name */
@@ -256,6 +263,7 @@ enum class AnnouncementType(val value: String) {
             COMMUNITY -> "groups"
             SAFETY -> "security"
             HIGHLIGHT -> "star"
+            SPOTLIGHT -> "star"
         }
 
     companion object {

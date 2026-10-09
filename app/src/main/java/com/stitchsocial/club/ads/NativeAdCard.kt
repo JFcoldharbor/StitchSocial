@@ -83,11 +83,12 @@ fun NativeAdCard(
  *  never calls back, which presents as "no ad, no error, no log". */
 private var inFlight: MutableSet<AdLoader> = mutableSetOf()
 
-private fun loadNativeAd(
+internal fun loadNativeAd(
     context: Context,
     unitId: String,
     owner: AdConfig.ImpressionOwner,
     placement: String,
+    onFailed: () -> Unit = {},
     onLoaded: (NativeAd) -> Unit
 ) {
     val videoOptions = VideoOptions.Builder()
@@ -127,6 +128,7 @@ private fun loadNativeAd(
                     println("📺 ADMOB: load failed [$placement] — ${error.message}")
                 }
                 inFlight.remove(loader)
+                onFailed()
             }
         })
         .withNativeAdOptions(adOptions)

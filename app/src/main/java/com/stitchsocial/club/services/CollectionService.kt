@@ -299,13 +299,10 @@ class CollectionService {
      * Mirrors Swift VideoService.propagateToCollection.
      * No read needed — FieldValue.increment is server-side.
      */
-    /** Soft-delete a collection — sets status to DELETED, clears from cache. */
+    /** Deletes the collection and its parts through the server cascade. It
+     *  used to flag the collection "deleted" and leave every part live. */
     suspend fun deleteCollection(collectionID: String) {
-        db.collection("videoCollections").document(collectionID)
-            .update(mapOf(
-                "status" to "deleted",
-                "updatedAt" to com.google.firebase.Timestamp.now()
-            )).await()
+        ShowDeletionService.delete(ShowDeletionService.Scope.Episode(collectionID))
         invalidateDiscoveryCache()
         userCollectionCache.clear()
         if (BuildConfig.DEBUG) { println("🗑️ COLLECTION SERVICE: Deleted $collectionID") }

@@ -10,9 +10,15 @@
  * - Temperature emoji slam + letter-by-letter type-in
  * - 3s branded end card
  *
- * Uses MediaCodec + MediaMuxer + Canvas overlay
+ * Runs the source through a Media3 Transformer composition (the same idiom as
+ * VideoWatermarkService): the first 27s of the clip, then 3s of the bundled
+ * end screen, with one full-frame BitmapOverlay redrawn per output frame.
+ * Sources shorter than 27s loop so every stat gets its full slot (iOS
+ * stretches the clip instead).
  *
- * CACHING: Source video checked via disk cache before download.
+ * NOTE: this replaces a MediaCodec version that drew the overlay but never
+ * encoded a frame, so it always "succeeded" with an empty file.
+ *
  * Promo temp files prefixed "StitchPromo_", cleaned after share dismisses.
  * Counter text values pre-computed as String array — not recalculated per frame.
  * Ember positions pre-calculated at init and reused across frames.
@@ -22,18 +28,40 @@ package com.stitchsocial.club.services
 
 import android.content.Context
 import android.graphics.*
-import android.media.*
+import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.annotation.OptIn
+import androidx.media3.common.Effect
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.Presentation
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
+import androidx.media3.transformer.Transformer
+import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import kotlin.coroutines.resume
 import kotlin.math.*
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.R
 
+@OptIn(UnstableApi::class)
 class PromoVideoExporter private constructor(private val context: Context) {
 
     companion object {
@@ -54,6 +82,9 @@ class PromoVideoExporter private constructor(private val context: Context) {
         private const val COUNTER_DURATION_MS = 3_000L
         private const val COUNTER_STEPS = 20
         private const val FPS = 30
+
+        // Below this a looped source is just a stutter — fall back to a regular share.
+        private const val MIN_SOURCE_MS = 1_000L
     }
 
     // State
@@ -105,233 +136,338 @@ class PromoVideoExporter private constructor(private val context: Context) {
 
     // MARK: - Export
 
+    /**
+     * Build the promo from a local [sourceUri]. Never throws — a failed export
+     * returns success = false so the caller can fall back to a regular share.
+     */
     suspend fun exportPromo(
         sourceUri: Uri,
         creatorUsername: String,
-        stats: PromoStats
+        stats: PromoStats,
+        onProgress: (Double) -> Unit = {}
     ): PromoResult = withContext(Dispatchers.IO) {
+        _isExporting.value = true
+        _progress.value = 0.0
         try {
-            _isExporting.value = true
-            _progress.value = 0.0
+            val probe = probeSource(sourceUri)
+            val sourceMs = probe.durationUs / 1000
+            if (sourceMs < MIN_SOURCE_MS) {
+                return@withContext PromoResult(success = false, error = "Video too short for a promo")
+            }
+            val (outW, outH) = probe.outputResolution()
+
+            // Effects go on every item: Media3 1.4 ignores composition-level
+            // video effects for a single sequence. Each item gets its own
+            // overlay instance (GL texture) sharing one renderer.
+            val renderer = PromoFrameRenderer(outW, outH, creatorUsername, stats)
+            fun itemEffects() = Effects(
+                emptyList(),
+                listOf<Effect>(
+                    Presentation.createForWidthAndHeight(outW, outH, Presentation.LAYOUT_SCALE_TO_FIT),
+                    OverlayEffect(ImmutableList.of(PromoOverlay(renderer)))
+                )
+            )
+
+            // Main clip: first 27s, looped when the source is shorter.
+            val clipItems = mutableListOf<EditedMediaItem>()
+            var remainingMs = CLIP_DURATION_MS
+            while (remainingMs > 0) {
+                val takeMs = min(remainingMs, sourceMs)
+                clipItems.add(clippedItem(sourceUri, takeMs, itemEffects()))
+                remainingMs -= takeMs
+            }
+
+            val endUri = Uri.parse("android.resource://${context.packageName}/${R.raw.stitch_end_screen}")
+            val endItem = clippedItem(endUri, END_CARD_DURATION_MS, itemEffects())
+
+            val sequence = EditedMediaItemSequence(clipItems + endItem)
+
+            val composition = Composition.Builder(listOf(sequence))
+                // Silent sources: synthesize an audio track so the sequence's
+                // tracks line up with the end screen's.
+                .experimentalSetForceAudioTrack(true)
+                .build()
 
             val outputFile = createTempFile()
-
-            // Pre-compute counter values (CACHING: compute once, index per frame)
-            val viewCounterSteps = preComputeCounter(stats.viewCount)
-            val hypeCounterSteps = preComputeCounter(stats.hypeCount)
-            val coolCounterSteps = preComputeCounter(stats.coolCount)
-
-            // Extract source video info
-            val extractor = MediaExtractor()
-            extractor.setDataSource(context, sourceUri, null)
-
-            val videoTrackIndex = findTrack(extractor, "video/")
-            if (videoTrackIndex < 0) {
-                return@withContext PromoResult(success = false, error = "No video track found")
+            if (BuildConfig.DEBUG) {
+                println("🎬 PROMO: Starting export — source ${sourceMs}ms → canvas ${outW}x$outH, ${clipItems.size} clip(s)")
             }
 
-            extractor.selectTrack(videoTrackIndex)
-            val inputFormat = extractor.getTrackFormat(videoTrackIndex)
-            val videoWidth = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
-            val videoHeight = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
-            val scale = min(videoWidth, videoHeight) / 1080f
-
-            // Setup decoder → surface → encoder → muxer pipeline
-            val outputFormat = createOutputFormat(videoWidth, videoHeight)
-            val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            encoder.configure(outputFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val inputSurface = encoder.createInputSurface()
-            encoder.start()
-
-            val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            var muxerTrackIndex = -1
-            var muxerStarted = false
-
-            // Decode source frames, draw overlay, encode
-            val decoder = MediaCodec.createDecoderByType(
-                inputFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
-            )
-
-            val surfaceTexture = android.graphics.SurfaceTexture(0)
-            surfaceTexture.setDefaultBufferSize(videoWidth, videoHeight)
-
-            // For simplicity: decode → bitmap → draw overlay → encode via surface
-            // This is the frame-by-frame approach
-            val totalFrames = (PROMO_DURATION_MS * FPS / 1000).toInt()
-            val sourceDurationUs = inputFormat.getLong(MediaFormat.KEY_DURATION)
-            val clipDurationUs = min(CLIP_DURATION_MS * 1000, sourceDurationUs)
-
-            val overlayBitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
-            val overlayCanvas = Canvas(overlayBitmap)
-
-            // Paint objects (CACHING: reuse across frames)
-            val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-                textSize = 168f * scale
-                isFakeBoldText = true
-                setShadowLayer(30f * scale, 0f, 6f * scale, Color.argb(153, 0, 0, 0))
+            val error = runTransformer(composition, outputFile) { p ->
+                _progress.value = p
+                onProgress(p)
             }
 
-            val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                textSize = 43f * scale
+            if (error != null || !outputFile.exists() || outputFile.length() == 0L) {
+                outputFile.delete()
+                if (BuildConfig.DEBUG) { println("❌ PROMO: Export failed — ${error?.message}") }
+                return@withContext PromoResult(success = false, error = error?.message ?: "Empty promo output")
             }
 
-            val watermarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = 20f * scale
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                color = Color.WHITE
-                setShadowLayer(3f * scale, 1f, 1f, Color.argb(204, 0, 0, 0))
-            }
-
-            val dimPaint = Paint().apply {
-                color = Color.argb(115, 0, 0, 0)  // 0.45 alpha
-            }
-
-            val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                textSize = 16f * scale
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                color = Color.argb(77, 255, 255, 255)  // 0.3 alpha
-            }
-
-            val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                strokeWidth = 4f * scale
-                strokeCap = Paint.Cap.ROUND
-            }
-
-            val emberPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-            val endCardBgPaint = Paint().apply {
-                color = Color.argb(179, 0, 0, 0)  // 0.7 alpha
-            }
-
-            val endCardTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                textSize = 48f * scale
-                typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-                color = Color.WHITE
-            }
-
-            val endCardUserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textAlign = Paint.Align.CENTER
-                textSize = 24f * scale
-                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                color = Color.argb(153, 255, 255, 255)
-            }
-
-            // Stat definitions
-            data class StatDef(
-                val counterSteps: List<String>,
-                val label: String,
-                val color: Int,
-                val isTemperature: Boolean = false,
-                val tempEmoji: String = "",
-                val tempText: String = ""
-            )
-
-            val tempInfo = getTemperatureDisplay(stats.temperature)
-
-            val statDefs = listOf(
-                StatDef(viewCounterSteps, "VIEWS", Color.WHITE),
-                StatDef(hypeCounterSteps, "\uD83D\uDD25 HYPE", Color.rgb(255, 69, 69)),
-                StatDef(coolCounterSteps, "❄\uFE0F COOL", Color.rgb(69, 186, 255)),
-                StatDef(emptyList(), "TEMPERATURE", tempInfo.color, true, tempInfo.emoji, tempInfo.text)
-            )
-
-            // NOTE: Full frame-by-frame rendering with MediaCodec is complex.
-            // Below is the overlay drawing logic per frame timestamp.
-            // The actual decode/encode pipeline should use the pattern from VideoExportService.
-            // This method focuses on the overlay composition.
-
-            if (BuildConfig.DEBUG) { println("🎬 PROMO: Starting export — ${videoWidth}x${videoHeight}, $totalFrames frames") }
-
-            // For each frame, compute overlay
-            for (frameIndex in 0 until totalFrames) {
-                val timeMs = (frameIndex * 1000L) / FPS
-                val isEndCard = timeMs >= CLIP_DURATION_MS
-
-                // Clear overlay
-                overlayCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-
-                // Dark tint
-                overlayCanvas.drawRect(0f, 0f, videoWidth.toFloat(), videoHeight.toFloat(), dimPaint)
-
-                if (isEndCard) {
-                    // End card
-                    drawEndCard(overlayCanvas, videoWidth, videoHeight, scale,
-                        creatorUsername, endCardBgPaint, endCardTitlePaint, endCardUserPaint)
-                } else {
-                    // Heat glow
-                    drawHeatGlow(overlayCanvas, videoWidth, videoHeight, timeMs, stats.temperature)
-
-                    // Embers during HYPE and TEMPERATURE slots
-                    drawEmbers(overlayCanvas, videoWidth, videoHeight, scale, timeMs, emberPaint)
-
-                    // Watermark
-                    overlayCanvas.drawText(
-                        "@$creatorUsername · StitchSocial",
-                        24f * scale + watermarkPaint.measureText("@$creatorUsername · StitchSocial") / 2 + 56 * scale,
-                        40f * scale,
-                        watermarkPaint
-                    )
-
-                    // Current stat
-                    val slotIndex = (timeMs / SLOT_DURATION_MS).toInt().coerceIn(0, 3)
-                    val slotLocalMs = timeMs - (slotIndex * SLOT_DURATION_MS)
-
-                    // Visibility: 0-300ms fade in, last 1750ms fade out, gap after
-                    val isVisible = slotLocalMs < (SLOT_DURATION_MS - 1750)
-                    if (isVisible) {
-                        val stat = statDefs[slotIndex]
-
-                        if (stat.isTemperature) {
-                            drawTemperatureStat(
-                                overlayCanvas, videoWidth, videoHeight, scale,
-                                slotLocalMs, stat.tempEmoji, stat.tempText, stat.color,
-                                numberPaint, labelPaint, linePaint
-                            )
-                        } else {
-                            drawCounterStat(
-                                overlayCanvas, videoWidth, videoHeight, scale,
-                                slotLocalMs, stat.counterSteps, stat.label, stat.color,
-                                numberPaint, labelPaint, linePaint
-                            )
-                        }
-                    }
-
-                    // Bottom branding
-                    overlayCanvas.drawText(
-                        "STITCHSOCIAL",
-                        videoWidth / 2f,
-                        videoHeight - 20f * scale,
-                        brandPaint
-                    )
-                }
-
-                _progress.value = frameIndex.toDouble() / totalFrames
-
-                // TODO: Feed overlayBitmap to encoder surface here
-                // The actual encode step uses the same pattern as VideoExportService.fullProcessExport
-                // drawing overlayBitmap onto the encoder's input Surface via Canvas
-            }
-
-            // Finalize muxer
-            // encoder.signalEndOfInputStream()
-            // drain encoder, stop muxer
-
-            _isExporting.value = false
             _progress.value = 1.0
-
-            if (BuildConfig.DEBUG) { println("✅ PROMO: Export completed — ${outputFile.name}") }
+            if (BuildConfig.DEBUG) { println("✅ PROMO: Export completed — ${outputFile.name} (${outputFile.length() / 1024}KB)") }
             PromoResult(success = true, outputFile = outputFile)
 
         } catch (e: Exception) {
-            _isExporting.value = false
             if (BuildConfig.DEBUG) { println("❌ PROMO: Export failed — ${e.message}") }
             PromoResult(success = false, error = e.message)
+        } finally {
+            _isExporting.value = false
+        }
+    }
+
+    private fun clippedItem(uri: Uri, durationMs: Long, effects: Effects): EditedMediaItem {
+        val mediaItem = MediaItem.Builder()
+            .setUri(uri)
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setEndPositionMs(durationMs)
+                    .build()
+            )
+            .build()
+        return EditedMediaItem.Builder(mediaItem)
+            .setRemoveAudio(false)
+            .setEffects(effects)
+            .build()
+    }
+
+    /** Runs the export; returns null on success or the failure. */
+    private suspend fun runTransformer(
+        composition: Composition,
+        outputFile: File,
+        onProgress: (Double) -> Unit
+    ): ExportException? = suspendCancellableCoroutine { cont ->
+        val mainHandler = Handler(Looper.getMainLooper())
+        mainHandler.post {
+            val transformer = Transformer.Builder(context)
+                // Pin H.264 so HEVC sources still play on web and older Android.
+                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        if (cont.isActive) cont.resume(null)
+                    }
+
+                    override fun onError(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                        exportException: ExportException
+                    ) {
+                        if (cont.isActive) cont.resume(exportException)
+                    }
+                })
+                .build()
+
+            cont.invokeOnCancellation {
+                mainHandler.post { runCatching { transformer.cancel() } }
+            }
+
+            transformer.start(composition, outputFile.absolutePath)
+
+            // Media3 has no continuous progress stream — poll getProgress.
+            val holder = ProgressHolder()
+            val tick = object : Runnable {
+                override fun run() {
+                    if (!cont.isActive) return
+                    val state = transformer.getProgress(holder)
+                    if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                        onProgress((holder.progress / 100.0).coerceIn(0.0, 0.99))
+                    }
+                    if (state != Transformer.PROGRESS_STATE_NOT_STARTED) {
+                        mainHandler.postDelayed(this, 200)
+                    }
+                }
+            }
+            mainHandler.postDelayed(tick, 200)
+        }
+    }
+
+    // Stat slot definition (inner classes can't hold nested classes)
+    private data class StatDef(
+        val counterSteps: List<String>,
+        val label: String,
+        val color: Int,
+        val isTemperature: Boolean = false,
+        val tempEmoji: String = "",
+        val tempText: String = ""
+    )
+
+    // MARK: - Overlay
+
+    /**
+     * Full-frame overlay. Media3 re-uploads the bitmap when its generation id
+     * changes, so redrawing the one bitmap in place is enough; it is only
+     * redrawn when the output frame index changes.
+     */
+    private class PromoOverlay(private val renderer: PromoFrameRenderer) : BitmapOverlay() {
+        private var lastFrame = -1L
+
+        override fun getBitmap(presentationTimeUs: Long): Bitmap {
+            val frame = presentationTimeUs * FPS / 1_000_000
+            if (frame != lastFrame) {
+                lastFrame = frame
+                renderer.draw(presentationTimeUs / 1000)
+            }
+            return renderer.bitmap
+        }
+    }
+
+    /** Draws one promo frame (stats, heat, embers, end card) into [bitmap]. */
+    private inner class PromoFrameRenderer(
+        private val width: Int,
+        private val height: Int,
+        private val creatorUsername: String,
+        private val stats: PromoStats
+    ) {
+        val bitmap: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        private val canvas = Canvas(bitmap)
+        private val scale = min(width, height) / 1080f
+
+        // Pre-compute counter values (CACHING: compute once, index per frame)
+        private val tempInfo = getTemperatureDisplay(stats.temperature)
+
+        private val statDefs = listOf(
+            StatDef(preComputeCounter(stats.viewCount), "VIEWS", Color.WHITE),
+            StatDef(preComputeCounter(stats.hypeCount), "🔥 HYPE", Color.rgb(255, 69, 69)),
+            StatDef(preComputeCounter(stats.coolCount), "❄️ COOL", Color.rgb(69, 186, 255)),
+            StatDef(emptyList(), "TEMPERATURE", tempInfo.color, true, tempInfo.emoji, tempInfo.text)
+        )
+
+        // Paint objects (CACHING: reuse across frames)
+        private val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            textSize = 168f * scale
+            isFakeBoldText = true
+            setShadowLayer(30f * scale, 0f, 6f * scale, Color.argb(153, 0, 0, 0))
+        }
+
+        private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            textSize = 43f * scale
+        }
+
+        private val watermarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 30f * scale
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            color = Color.WHITE
+            setShadowLayer(3f * scale, 1f, 1f, Color.argb(204, 0, 0, 0))
+        }
+
+        private val dimPaint = Paint().apply {
+            color = Color.argb(115, 0, 0, 0)  // 0.45 alpha
+        }
+
+        private val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            textSize = 24f * scale
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            color = Color.argb(77, 255, 255, 255)  // 0.3 alpha
+        }
+
+        private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 4f * scale
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        private val emberPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        private val endCardBgPaint = Paint().apply {
+            color = Color.argb(179, 0, 0, 0)  // 0.7 alpha
+        }
+
+        private val endCardTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            textSize = 64f * scale
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+            color = Color.WHITE
+        }
+
+        private val endCardUserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = Paint.Align.CENTER
+            textSize = 36f * scale
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            color = Color.argb(153, 255, 255, 255)
+        }
+
+        private val watermarkText = "@$creatorUsername · StitchSocial"
+
+        fun draw(timeMs: Long) {
+            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+
+            if (timeMs >= CLIP_DURATION_MS) {
+                drawEndCard(canvas, width, height, scale,
+                    creatorUsername, endCardBgPaint, endCardTitlePaint, endCardUserPaint)
+                return
+            }
+
+            // Dark tint so the stats read over any footage
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
+
+            drawHeatGlow(canvas, width, height, timeMs, stats.temperature)
+            drawEmbers(canvas, width, height, scale, timeMs, emberPaint)
+
+            canvas.drawText(watermarkText, 32f * scale, 64f * scale, watermarkPaint)
+
+            // Current stat — visible for the slot minus a 1.75s gap at the end
+            val slotIndex = (timeMs / SLOT_DURATION_MS).toInt().coerceIn(0, 3)
+            val slotLocalMs = timeMs - (slotIndex * SLOT_DURATION_MS)
+            if (slotLocalMs < (SLOT_DURATION_MS - 1750)) {
+                val stat = statDefs[slotIndex]
+                if (stat.isTemperature) {
+                    drawTemperatureStat(
+                        canvas, width, height, scale,
+                        slotLocalMs, stat.tempEmoji, stat.tempText, stat.color,
+                        numberPaint, labelPaint, linePaint
+                    )
+                } else {
+                    drawCounterStat(
+                        canvas, width, height, scale,
+                        slotLocalMs, stat.counterSteps, stat.label, stat.color,
+                        numberPaint, labelPaint, linePaint
+                    )
+                }
+            }
+
+            canvas.drawText("STITCHSOCIAL", width / 2f, height - 32f * scale, brandPaint)
+        }
+    }
+
+    // MARK: - Source probe
+
+    private data class SourceProbe(
+        val durationUs: Long,
+        val width: Int,
+        val height: Int,
+        val rotation: Int
+    ) {
+        /** Even canvas preserving the displayed aspect, capped to 1080×1920. */
+        fun outputResolution(): Pair<Int, Int> {
+            val (dw, dh) = if (rotation == 90 || rotation == 270) height to width else width to height
+            if (dw <= 0 || dh <= 0) return 1080 to 1920
+            val scale = minOf(1080f / dw, 1920f / dh, 1f)
+            val w = (dw * scale).toInt().let { if (it % 2 == 0) it else it - 1 }.coerceAtLeast(2)
+            val h = (dh * scale).toInt().let { if (it % 2 == 0) it else it - 1 }.coerceAtLeast(2)
+            return w to h
+        }
+    }
+
+    private fun probeSource(uri: Uri): SourceProbe {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            fun key(k: Int) = retriever.extractMetadata(k)?.toIntOrNull() ?: 0
+            SourceProbe(
+                durationUs = (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L) * 1000L,
+                width = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),
+                height = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT),
+                rotation = key(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            )
+        } catch (e: Exception) {
+            SourceProbe(0L, 0, 0, 0)
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 
@@ -538,24 +674,6 @@ class PromoVideoExporter private constructor(private val context: Context) {
             "warm" -> TempDisplay("☀\uFE0F", "WARM", Color.rgb(255, 204, 51))
             "cold" -> TempDisplay("❄\uFE0F", "COLD", Color.rgb(128, 199, 255))
             else -> TempDisplay("\uD83C\uDF21\uFE0F", temp.uppercase(), Color.WHITE)
-        }
-    }
-
-    private fun findTrack(extractor: MediaExtractor, prefix: String): Int {
-        for (i in 0 until extractor.trackCount) {
-            val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith(prefix)) return i
-        }
-        return -1
-    }
-
-    private fun createOutputFormat(width: Int, height: Int): MediaFormat {
-        return MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-            setInteger(MediaFormat.KEY_BIT_RATE, 8_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
         }
     }
 

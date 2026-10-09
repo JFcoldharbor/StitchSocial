@@ -236,8 +236,9 @@ private val SponsoredMagenta = Color(0xFFE91E63)
 
 /**
  * First-party sponsored ad card for the swipe feed — port of iOS sponsored slot card.
- * Static 9:16 creative, NO video player, NO engagement overlay:
- *   - Full-bleed creative image (slot.imageURL)
+ * 9:16 creative, NO engagement overlay:
+ *   - Full-bleed creative: slot.videoURL plays (looped, only while [isActive])
+ *     when set, otherwise the image (slot.imageURL)
  *   - "SPONSORED" capsule badge (top-left)
  *   - Advertiser name + title over a bottom gradient
  *   - CTA button in brand magenta with the slot's ctaText
@@ -249,7 +250,8 @@ private val SponsoredMagenta = Color(0xFFE91E63)
 fun SponsoredSwipeCard(
     slot: SponsoredSlot,
     onCtaClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isActive: Boolean = false
 ) {
     Box(
         modifier = modifier
@@ -257,13 +259,26 @@ fun SponsoredSwipeCard(
             .clip(RoundedCornerShape(20.dp))
             .background(Color(0xFF1A1A2E))
     ) {
-        // Full-bleed 9:16 creative
-        AsyncImage(
-            model = slot.imageURL,
-            contentDescription = slot.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Full-bleed 9:16 creative. The image stays underneath a video ad as its
+        // poster until the first frame arrives.
+        var videoStarted by remember(slot.id) { mutableStateOf(false) }
+        if (slot.hasVideo) {
+            val clip = remember(slot.id, slot.videoURL) { slot.playerMetadata() }
+            VideoPlayerComposable(
+                video = clip,
+                isActive = isActive,
+                modifier = Modifier.fillMaxSize(),
+                onPlaybackStarted = { videoStarted = true }
+            )
+        }
+        if (!slot.hasVideo || !videoStarted) {
+            AsyncImage(
+                model = slot.imageURL,
+                contentDescription = slot.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // "SPONSORED" capsule badge — top-left
         Box(

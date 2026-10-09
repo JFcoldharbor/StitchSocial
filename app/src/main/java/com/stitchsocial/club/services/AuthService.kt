@@ -211,7 +211,14 @@ class AuthService {
         accountType: AccountType = AccountType.PERSONAL,
         brandName: String? = null,
         websiteURL: String? = null,
-        businessCategory: AdCategory? = null
+        businessCategory: AdCategory? = null,
+        /**
+         * Year the business started. Separate from the age gate's birthdate on
+         * purpose: with nowhere else to put it, a founding year was being typed
+         * into the birthday picker, where a business started this year reads as
+         * an under-13 person and blocks the device.
+         */
+        foundedYear: Int? = null
     ): AuthResult {
         return withContext(Dispatchers.IO) {
             try {
@@ -263,7 +270,8 @@ class AuthService {
                         accountType = accountType,
                         brandName = brandName,
                         websiteURL = websiteURL,
-                        businessCategory = businessCategory
+                        businessCategory = businessCategory,
+                        foundedYear = foundedYear
                     )
                     if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User profile created successfully") }
 
@@ -278,7 +286,8 @@ class AuthService {
                             accountType = accountType,
                             brandName = brandName,
                             websiteURL = websiteURL,
-                            businessCategory = businessCategory
+                            businessCategory = businessCategory,
+                            foundedYear = foundedYear
                         )
                         delay(500)
                     }
@@ -476,7 +485,8 @@ class AuthService {
         accountType: AccountType = AccountType.PERSONAL,
         brandName: String? = null,
         websiteURL: String? = null,
-        businessCategory: AdCategory? = null
+        businessCategory: AdCategory? = null,
+        foundedYear: Int? = null
     ) {
         try {
             if (BuildConfig.DEBUG) { println("AUTH SERVICE: 📝 Creating user profile for ${firebaseUser.uid} (${accountType.rawValue})") }
@@ -526,6 +536,9 @@ class AuthService {
                 userData["businessCategory"] = (businessCategory ?: AdCategory.OTHER).value
                 if (!websiteURL.isNullOrBlank()) {
                     userData["websiteURL"] = websiteURL
+                }
+                if (foundedYear != null) {
+                    userData["foundedYear"] = foundedYear
                 }
                 // Zero out social metrics — business accounts don't show these (mirrors iOS migration)
                 userData["clout"] = 0
