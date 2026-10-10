@@ -94,6 +94,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 // Foundation imports
 import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.services.UserService
+import com.stitchsocial.club.services.CoinTransferKind
+import com.stitchsocial.club.services.HypeCoinService
 import com.stitchsocial.club.services.AuthService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.ShareButton
@@ -2179,9 +2181,9 @@ internal fun SwappableEngagementSlot(
 // Mirrors TipButton.swift: tap=1 coin, long press=5 coins
 // isSelfTip disabled with PersonOff icon
 // Optimistic sessionTotal over persisted coinTotal (matches iOS field name)
-// Writes: debit tipper coin_balances, credit creator availableCoins,
-//         increment videos.coinTotal, write tip notification, update
-//         creator's supporters subcollection + topSupporters array.
+// Coins move through the coins_transfer callable (kind tip), which also
+// increments videos.coinTotal and sends the tip notification. Client writes
+// left: creator's supporters subcollection + topSupporters array.
 // ============================================================================
 
 @androidx.compose.runtime.Composable
@@ -2213,32 +2215,36 @@ internal fun TipButton(
         onTipSent(amount)
         scope.launch {
             try {
-                db.collection("coin_balances").document(currentUserID)
-                    .update("availableCoins", FieldValue.increment(-amount.toLong())).await()
-                db.collection("coin_balances").document(creatorID)
-                    .update("availableCoins", FieldValue.increment(amount.toLong())).await()
-                db.collection("videos").document(videoID)
-                    .update(
-                        "coinTotal", FieldValue.increment(amount.toLong()),
-                        "lastTippedAt", com.google.firebase.Timestamp(java.util.Date())
-                    ).await()
+                // Server moves the coins, bumps videos.coinTotal and sends the
+                // tip notification (with its 60s cooldown). One clientTxnID per
+                // tap; HypeCoinService reuses it on transient retries.
+                HypeCoinService.shared.transferCoins(
+                    fromUserID = currentUserID,
+                    toUserID = creatorID,
+                    amount = amount,
+                    kind = CoinTransferKind.TIP,
+                    videoID = videoID
+                )
                 if (BuildConfig.DEBUG) { println("💰 TIP: $currentUserID → $creatorID +$amount on $videoID") }
 
-                // Side-effects — notification + creator's supporters list +
-                // topSupporters array. Run sequentially after the core
-                // transfer so a side-effect failure doesn't roll back the tip.
+                // Side-effects — creator's supporters list + topSupporters
+                // array. Run after the transfer so a side-effect failure
+                // doesn't roll back the tip.
                 recordTipSideEffects(
                     db = db,
                     tipperID = currentUserID,
                     creatorID = creatorID,
-                    videoID = videoID,
                     amount = amount
                 )
             } catch (e: Exception) {
                 onTipSent(-amount)
-                errorMsg = "Tip failed"
+                errorMsg = when (e) {
+                    is CoinError.InsufficientBalance -> "Not enough coins"
+                    is CoinError.CoinsFrozen -> e.message ?: "Tip failed"
+                    else -> "Tip failed"
+                }
                 showError = true
-                scope.launch { delay(2000); showError = false }
+                scope.launch { delay(if (e is CoinError.CoinsFrozen) 4000 else 2000); showError = false }
                 if (BuildConfig.DEBUG) { println("❌ TIP: ${e.message}") }
             }
         }
@@ -2325,11 +2331,10 @@ internal fun TipButton(
 }
 
 // ============================================================================
-// MARK: - Tip side-effects (mirrors iOS TipService.recordTipAggregates +
-// sendTipNotification). Run after the tip transfer succeeds.
+// MARK: - Tip side-effects (mirrors iOS TipService.recordTipAggregates).
+// Run after the tip transfer succeeds.
 //
 // Schema:
-//   notifications/{id}                                           — drives FCM
 //   users/{creatorID}/supporters/{tipperID}                      — per-tipper aggregate
 //   users/{creatorID}.topSupporters: [{tipperID, username, totalSent}]
 //                                                                 — denormalized top 10
@@ -2339,60 +2344,19 @@ private suspend fun recordTipSideEffects(
     db: FirebaseFirestore,
     tipperID: String,
     creatorID: String,
-    videoID: String,
     amount: Int
 ) {
     if (tipperID.isEmpty() || creatorID.isEmpty()) return
 
     // Resolve tipper's display name with the same fallback chain iOS uses:
-    // displayName → username → "Someone". Notification copy reads better
+    // displayName → username → "Someone". The supporters list reads better
     // than a raw uid prefix.
     val tipperUsername = resolveDisplayName(db, tipperID)
 
-    // 1) In-app notification — onNotificationCreated CF will fan out FCM.
-    //    Cooldown handled by checking tipper→creator pair within 60s.
-    try {
-        val cooldownKey = "tip_${tipperID}_${creatorID}"
-        val cooldownDoc = db.collection("notification_cooldowns").document(cooldownKey).get().await()
-        val lastTs = cooldownDoc.getTimestamp("lastNotificationAt")?.toDate()?.time ?: 0L
-        val now = System.currentTimeMillis()
-        val withinCooldown = lastTs > 0 && (now - lastTs) < 60_000L
-        if (!withinCooldown) {
-            val amountText = if (amount == 1) "1 coin" else "$amount coins"
-            val notificationID = java.util.UUID.randomUUID().toString()
-            val notification = mapOf(
-                "id" to notificationID,
-                "recipientID" to creatorID,
-                "senderID" to tipperID,
-                "type" to "tip",
-                "title" to "💰 You got tipped!",
-                "message" to "$tipperUsername tipped you $amountText",
-                "payload" to mapOf(
-                    "senderUsername" to tipperUsername,
-                    "senderID" to tipperID,
-                    "amount" to amount,
-                    "videoID" to videoID,
-                    "notificationType" to "tip"
-                ),
-                "isRead" to false,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "expiresAt" to com.google.firebase.Timestamp(
-                    java.util.Date(now + 30L * 24 * 60 * 60 * 1000)
-                )
-            )
-            db.collection("notifications").document(notificationID).set(notification).await()
-            db.collection("notification_cooldowns").document(cooldownKey)
-                .set(mapOf("lastNotificationAt" to com.google.firebase.Timestamp(java.util.Date())))
-                .await()
-            if (BuildConfig.DEBUG) { println("✅ TIP NOTIF: $amountText tip notification written for $creatorID") }
-        } else {
-            if (BuildConfig.DEBUG) { println("⏱ TIP NOTIF: Cooldown active ($tipperID → $creatorID)") }
-        }
-    } catch (e: Exception) {
-        if (BuildConfig.DEBUG) { println("⚠️ TIP NOTIF: write failed — ${e.message}") }
-    }
+    // The tip notification (and its 60s tipper→creator cooldown) is sent by
+    // coins_transfer on the server — not written from here any more.
 
-    // 2) Per-tipper supporter row under the creator (atomic increment so
+    // 1) Per-tipper supporter row under the creator (atomic increment so
     //    repeat tips just bump totalSent).
     try {
         db.collection("users").document(creatorID)
@@ -2412,7 +2376,7 @@ private suspend fun recordTipSideEffects(
         return
     }
 
-    // 3) Refresh creator's top-10 array. Read subcollection ordered desc,
+    // 2) Refresh creator's top-10 array. Read subcollection ordered desc,
     //    project to {tipperID, username, totalSent}, write to user doc.
     try {
         val snapshot = db.collection("users").document(creatorID)

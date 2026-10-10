@@ -174,7 +174,11 @@ enum class CoinTransactionType(val rawValue: String) {
     TIP_SENT("tip_sent"),
     CASH_OUT("cash_out"),
     REFUND("refund"),
-    BONUS("bonus");
+    BONUS("bonus"),
+    BOOST_SPEND("boost_spend"),
+    TIP_REVERSAL("tip_reversal"),       // Tip taken back (payment refunded)
+    SUBSCRIPTION_REVERSAL("sub_reversal"),
+    GIFT_REVERSAL("gift_reversal");
 
     companion object {
         fun fromRawValue(value: String): CoinTransactionType? =
@@ -362,5 +366,7 @@ sealed class CoinError(message: String) : Exception(message) {
     )
     object PurchaseFailed  : CoinError("Purchase failed. Please try again.")
     object TransferFailed  : CoinError("Transfer failed. Please try again.")
+    /** Server refused with coins_frozen — the account is frozen after a chargeback. */
+    object CoinsFrozen     : CoinError("Coins are paused on this account. Contact support.")
     object BillingUnavailable : CoinError("Google Play Billing is not available on this device.")
 }

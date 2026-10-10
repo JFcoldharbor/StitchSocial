@@ -202,12 +202,15 @@ class SubscriptionService private constructor() {
 
             val price = coinTier.rawValue
 
-            // Debit coins — mirrors iOS HypeCoinService.transferCoins
+            // Move coins server-side (coins_transfer, kind subscription). The
+            // server only moves coins — the sub doc, plan stats, event and
+            // notification below are still written here.
             coinService.transferCoins(
                 fromUserID = subscriberID,
                 toUserID = creatorID,
                 amount = price,
-                type = CoinTransactionType.SUBSCRIPTION_SENT
+                kind = CoinTransferKind.SUBSCRIPTION,
+                subscriptionTier = coinTier.displayName
             )
 
             val subID = "${subscriberID}_${creatorID}"

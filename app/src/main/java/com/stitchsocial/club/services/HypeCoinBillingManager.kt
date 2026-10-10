@@ -13,19 +13,22 @@
  *   1. loadProducts()       — query Play Console for product details (1 call at init)
  *   2. launchPurchase()     — open Play purchase sheet (Activity required)
  *   3. onPurchaseResult()   — called by BillingClient.PurchasesUpdatedListener
- *   4. handlePurchase()     — acknowledge + credit Firestore via HypeCoinService
+ *   4. handlePurchase()     — server verifies + credits (verifyGooglePlayPurchase),
+ *                             THEN the purchase is consumed with Play
  *   5. HypeCoinCoordinator  — real-time Firestore listener detects balance change → UI updates
  *
  * CACHING:
  *   - ProductDetails cached in memory after first loadProducts() call.
  *     Re-queried only on BillingClient reconnect or explicit refresh.
  *     Add PRODUCT_DETAILS entry to CacheType in CoreTypes.kt if needed.
- *   - Pending purchases re-processed on every BillingClient reconnect
- *     to handle interrupted flows (app killed mid-purchase).
+ *   - Unconsumed purchases are re-verified on every BillingClient connect,
+ *     on sign-in and on app foreground, to recover interrupted flows (app
+ *     killed mid-purchase, verify call failed). A purchase is only consumed
+ *     after the server says ok, so it stays in Play's list until credited.
  *
  * BATCHING:
  *   - No batching needed here. Each purchase is one Play transaction → one
- *     creditPurchase() call. Tips/subscriptions are handled by HypeCoinService.
+ *     verifyGooglePlayPurchase call. Tips/subscriptions are handled by HypeCoinService.
  *
  * PLAY CONSOLE SETUP (required before this code works):
  *   1. Create in-app products in Play Console → Monetize → In-app products
@@ -83,6 +86,10 @@ class HypeCoinBillingManager private constructor(context: Context) {
     /** UserID set by HypeCoinCoordinator.configure() — needed to credit purchase */
     var currentUserID: String? = null
 
+    /** Purchase tokens with a verify in flight — the purchase listener and a
+     *  reconnect re-query can both hand us the same purchase. */
+    private val inFlightTokens = mutableSetOf<String>()
+
     // MARK: - BillingClient Setup
 
     private val purchasesUpdatedListener = PurchasesUpdatedListener { billingResult, purchases ->
@@ -125,7 +132,12 @@ class HypeCoinBillingManager private constructor(context: Context) {
      * Call from HypeCoinCoordinator.configure() after user signs in.
      */
     fun connect() {
-        if (billingClient.isReady) return
+        if (billingClient.isReady) {
+            // Already connected (e.g. a new sign-in) — still sweep for
+            // purchases the server hasn't credited yet.
+            retryUnconsumedPurchases()
+            return
+        }
 
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(billingResult: BillingResult) {
@@ -150,13 +162,26 @@ class HypeCoinBillingManager private constructor(context: Context) {
         })
     }
 
-    /** Disconnect and clean up. Call from HypeCoinCoordinator.disconnect(). */
-    fun disconnect() {
-        billingClient.endConnection()
-        productDetailsCache.clear()
-        scope.cancel()
-        _billingState.value = BillingState.Disconnected
-        if (BuildConfig.DEBUG) { println("🔌 BILLING: Disconnected") }
+    /**
+     * Forget the signed-in user. Called from HypeCoinCoordinator.disconnect()
+     * on sign-out / account switch.
+     *
+     * This used to end the BillingClient and cancel [scope]. Both are
+     * one-shot: an ended BillingClient can't reconnect and a cancelled scope
+     * silently drops every later launch — and the coordinator disconnects
+     * before its FIRST configure, so purchases were never handled at all.
+     * The manager is a process singleton, so the connection is kept.
+     */
+    fun signOut() {
+        currentUserID = null
+        _purchaseState.value = PurchaseState.Idle
+        if (BuildConfig.DEBUG) { println("🔌 BILLING: Signed out") }
+    }
+
+    /** Re-verify unconsumed purchases. Safe to call often — the server and
+     *  the in-flight guard both dedupe on purchaseToken. */
+    fun retryUnconsumedPurchases() {
+        scope.launch { reprocessPendingPurchases() }
     }
 
     // MARK: - Load Products
@@ -268,17 +293,22 @@ class HypeCoinBillingManager private constructor(context: Context) {
     // MARK: - Handle Purchase
 
     /**
-     * Verify, acknowledge, and credit a completed Play purchase.
+     * Verify + credit a completed Play purchase on the server, then consume it.
      *
      * Flow:
      *   1. Check purchase state is PURCHASED (not PENDING)
-     *   2. Acknowledge with Play (required within 3 days or Play auto-refunds)
-     *   3. Call HypeCoinService.creditPurchase() → writes to Firestore
+     *   2. verifyGooglePlayPurchase → server checks the token with Google Play
+     *      and credits coin_balances (idempotent on purchaseToken)
+     *   3. Only after the server says ok: consume with Play. Consuming also
+     *      acknowledges (Play auto-refunds anything unacknowledged after 3
+     *      days) and lets the same coin pack be bought again.
      *   4. HypeCoinCoordinator's Firestore listener detects balance change → UI updates
      *
      * SAFETY:
-     *   - purchaseToken is unique per transaction — HypeCoinService duplicate-checks it
-     *   - Called for each purchase in the list, including re-delivered purchases on reconnect
+     *   - A failed verify leaves the purchase unconsumed, so it comes back from
+     *     queryPurchasesAsync and is retried on the next connect/foreground.
+     *   - A failed consume after a successful verify is also retried; the
+     *     server answers alreadyCredited, so coins are never added twice.
      */
     private suspend fun handlePurchase(purchase: Purchase) {
         if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) {
@@ -298,58 +328,63 @@ class HypeCoinBillingManager private constructor(context: Context) {
         val productId = purchase.products.firstOrNull()
         val pkg       = HypeCoinPackage.entries.firstOrNull { it.playBillingProductId == productId }
 
-        if (pkg == null) {
+        if (productId == null || pkg == null) {
             if (BuildConfig.DEBUG) { println("❌ BILLING: Unknown productId: $productId") }
             _purchaseState.value = PurchaseState.Failed("Unknown product")
             return
         }
 
-        // Acknowledge with Play — must happen within 3 days
-        if (!purchase.isAcknowledged) {
-            val ackParams = AcknowledgePurchaseParams.newBuilder()
-                .setPurchaseToken(purchase.purchaseToken)
-                .build()
-
-            val ackResult = billingClient.acknowledgePurchase(ackParams)
-
-            if (ackResult.responseCode != BillingClient.BillingResponseCode.OK) {
-                if (BuildConfig.DEBUG) { println("❌ BILLING: Acknowledge failed - ${ackResult.debugMessage}") }
-                _purchaseState.value = PurchaseState.Failed("Purchase acknowledgment failed")
+        val token = purchase.purchaseToken
+        synchronized(inFlightTokens) { if (!inFlightTokens.add(token)) return }
+        try {
+            // 1) Server verifies with Google Play and credits
+            try {
+                coinService.verifyPlayPurchase(
+                    userID        = userID,
+                    productId     = productId,
+                    purchaseToken = token,
+                    orderId       = purchase.orderId
+                )
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("❌ BILLING: Verify failed — left unconsumed for retry: ${e.message}") }
+                _purchaseState.value = PurchaseState.Failed(
+                    if (e is CoinError.CoinsFrozen) e.message ?: "Coins are paused on this account."
+                    else "We couldn't confirm your purchase yet. We'll keep trying — you won't be charged twice."
+                )
                 return
             }
 
-            if (BuildConfig.DEBUG) { println("✅ BILLING: Purchase acknowledged with Play") }
-        }
+            // 2) Credited — now consume with Play
+            val consumeParams = ConsumeParams.newBuilder()
+                .setPurchaseToken(token)
+                .build()
+            val consumeResult = billingClient.consumePurchase(consumeParams)
+            if (consumeResult.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                // Coins are already in the account; the next sweep re-verifies
+                // (alreadyCredited) and consumes again.
+                if (BuildConfig.DEBUG) { println("⚠️ BILLING: Consume failed after credit - ${consumeResult.billingResult.debugMessage}") }
+            } else {
+                if (BuildConfig.DEBUG) { println("✅ BILLING: Purchase consumed with Play") }
+            }
 
-        // Credit Firestore via HypeCoinService
-        try {
-            coinService.creditPurchase(
-                userID           = userID,
-                coins            = pkg.coins,
-                purchaseToken    = purchase.purchaseToken,
-                packageRawValue  = pkg.rawValue
-            )
-
-            if (BuildConfig.DEBUG) { println("💰 BILLING: Credited ${pkg.coins} coins to $userID for ${pkg.displayName}") }
+            if (BuildConfig.DEBUG) { println("💰 BILLING: Verified ${pkg.coins} coins for $userID (${pkg.displayName})") }
             _purchaseState.value = PurchaseState.Success(pkg)
-
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("❌ BILLING: Credit failed - ${e.message}") }
-            _purchaseState.value = PurchaseState.Failed(e.message ?: "Credit failed")
+        } finally {
+            synchronized(inFlightTokens) { inFlightTokens.remove(token) }
         }
     }
 
     // MARK: - Reprocess Pending Purchases
 
     /**
-     * Query Play for any unacknowledged purchases and reprocess them.
-     * Called on every BillingClient reconnect to recover interrupted flows.
+     * Query Play for owned (= unconsumed) purchases and re-verify them.
+     * Called on every BillingClient connect, sign-in and app foreground.
      *
-     * Handles: app killed after Play confirmed but before Firestore credited,
-     *          network failures mid-purchase, device reboots.
+     * Handles: app killed after Play confirmed but before the server credited,
+     *          verify call failures, device reboots.
      */
     private suspend fun reprocessPendingPurchases() {
-        if (!billingClient.isReady) return
+        if (!billingClient.isReady || currentUserID == null) return
 
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.INAPP)

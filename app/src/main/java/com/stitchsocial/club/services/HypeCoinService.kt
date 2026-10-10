@@ -7,9 +7,20 @@
  *
  * EXACT PORT: HypeCoinService.swift (iOS)
  *
+ * SERVER-OWNED LEDGER:
+ *   The app never writes coin_balances or coin_transactions. Every coin
+ *   movement goes through a callable that validates, moves and records it
+ *   in one server transaction:
+ *     - coins_transfer           — tips, subscriptions, stream gifts
+ *     - coins_spend              — coin spends with no recipient (post boosts;
+ *                                  Android has no boost UI yet)
+ *     - verifyGooglePlayPurchase — called by HypeCoinBillingManager; the
+ *                                  server checks the token with Google Play
+ *                                  and credits. Client crediting is gone.
+ *   The app only reads: balance (snapshot listener in HypeCoinCoordinator)
+ *   and transaction history.
+ *
  * ANDROID DELTA vs iOS:
- *   - creditPurchase() replaces creditWebPurchase() — called by HypeCoinBillingManager
- *     after Google Play purchase is verified, not by web webhook
  *   - No Stripe / web flow — Play Billing handles all purchases natively
  *   - Coroutine-based (suspend funs) instead of async/await
  *   - StateFlow instead of @Published
@@ -21,29 +32,49 @@
  *   - Transactions: Cached in WalletViewModel after first fetch (immutable).
  *   - Add COIN_BALANCE to CacheType enum in CoreTypes.kt.
  *
- * BATCHING:
- *   - transferCoins() uses two sequential updateData() calls (debit + credit).
- *     For high-frequency tips, HypeCoinCoordinator batches by recipient before
- *     calling transferCoins() once per recipient — reduces writes.
- *   - creditPurchase() uses a duplicate-check query then two writes — safe for
- *     Play Billing since purchase tokens are unique per transaction.
- *   - All balance mutations use FieldValue.increment — no read-then-write.
+ * BATCHING / IDEMPOTENCY:
+ *   - For high-frequency tips, HypeCoinCoordinator batches by recipient before
+ *     calling transferCoins() once per recipient — one callable per batch.
+ *   - Every transfer/spend carries a clientTxnID, generated once per logical
+ *     movement. Transient failures are retried here with the SAME id, so the
+ *     server applies it at most once (it answers alreadyProcessed on a replay).
  */
 
 package com.stitchsocial.club.services
 
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.functions.FirebaseFunctionsException
 import com.stitchsocial.club.firebase.FirebaseSchema
 import com.stitchsocial.club.foundation.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
-import java.util.Date
 import java.util.UUID
 import com.stitchsocial.club.BuildConfig
+
+/** What a coins_transfer is for. The server books each kind differently. */
+enum class CoinTransferKind(val raw: String) {
+    TIP("tip"),
+    SUBSCRIPTION("subscription"),
+    STREAM_GIFT("stream_gift")
+}
+
+/** Server reply to a transfer or spend. */
+data class CoinMoveResult(
+    val balanceAfter: Int,
+    val txnID: String,
+    val alreadyProcessed: Boolean
+)
+
+/** Server reply to verifyGooglePlayPurchase. */
+data class PurchaseVerifyResult(
+    val coins: Int,
+    val balanceAfter: Int,
+    val alreadyCredited: Boolean
+)
 
 class HypeCoinService private constructor() {
 
@@ -54,11 +85,11 @@ class HypeCoinService private constructor() {
     // MARK: - Firestore
 
     private val db = FirebaseFirestore.getInstance(FirebaseSchema.DATABASE_NAME)
+    private val functions = FirebaseFunctions.getInstance("us-central1")
 
     private object Collections {
         val BALANCES     = FirebaseSchema.Collections.COIN_BALANCES
         val TRANSACTIONS = FirebaseSchema.Collections.COIN_TRANSACTIONS
-        val CASH_OUTS    = FirebaseSchema.Collections.CASH_OUT_REQUESTS
     }
 
     // MARK: - State
@@ -97,9 +128,10 @@ class HypeCoinService private constructor() {
             return balance
         }
 
-        // Create new balance document if missing — matches iOS behavior
+        // No document yet — the server creates it on the first credit or
+        // transfer. Writing an empty one from here would be a client write
+        // to a server-owned collection, so just report zero.
         val newBalance = HypeCoinBalance.empty(userID)
-        docRef.set(newBalance.toMap()).await()
         _balance.value = newBalance
         return newBalance
     }
@@ -109,65 +141,37 @@ class HypeCoinService private constructor() {
     // ─────────────────────────────────────────────
 
     /**
-     * Credit coins after a verified Google Play purchase.
-     * Called by HypeCoinBillingManager once Play Billing reports SUCCESS
-     * and the purchase token has been acknowledged.
+     * Have the server verify a Google Play purchase and credit it.
+     * Called by HypeCoinBillingManager BEFORE it consumes the purchase — a
+     * purchase is only consumed once this returns, so a failed verify stays
+     * in Play's unconsumed list and is retried on the next connect.
      *
-     * iOS equivalent: creditWebPurchase() — triggered by Stripe webhook.
-     * Android: triggered in-app by Play Billing purchase callback.
-     *
-     * SAFETY: Duplicate check on purchaseToken prevents double-crediting
-     * if the callback fires more than once (Play Billing can replay).
-     *
-     * BATCHING: Two Firestore writes (balance increment + transaction record).
-     * FieldValue.increment avoids a read-then-write on balance.
+     * SAFETY: the server keys the credit on purchaseToken and answers
+     * alreadyCredited on a replay, so re-verifying is always safe.
      */
-    suspend fun creditPurchase(
+    suspend fun verifyPlayPurchase(
         userID: String,
-        coins: Int,
-        purchaseToken: String,      // Google Play purchase token (unique per transaction)
-        packageRawValue: String     // HypeCoinPackage.rawValue for description
-    ) {
+        productId: String,
+        purchaseToken: String,
+        orderId: String?
+    ): PurchaseVerifyResult {
         _isLoading.value = true
         try {
-            // Duplicate check — purchaseToken used as transaction ID
-            val existing = db.collection(Collections.TRANSACTIONS)
-                .whereEqualTo(FirebaseSchema.CoinTransactionDocument.ID, purchaseToken)
-                .get().await()
-
-            if (!existing.isEmpty) {
-                if (BuildConfig.DEBUG) { println("⚠️ COINS: Purchase token already credited: $purchaseToken") }
-                return
-            }
-
-            val balanceRef = db.collection(Collections.BALANCES).document(userID)
-
-            // Increment balance — FieldValue.increment = no read needed
-            balanceRef.update(
-                mapOf(
-                    FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to FieldValue.increment(coins.toLong()),
-                    FirebaseSchema.CoinBalanceDocument.LIFETIME_EARNED  to FieldValue.increment(coins.toLong()),
-                    FirebaseSchema.CoinBalanceDocument.LAST_UPDATED     to Timestamp.now()
-                )
-            ).await()
-
-            // Record transaction
-            val transaction = buildTransactionMap(
-                id          = purchaseToken,
-                userID      = userID,
-                type        = CoinTransactionType.PURCHASE,
-                amount      = coins,
-                balanceAfter = (_balance.value?.availableCoins ?: 0) + coins,
-                description = "Purchased $coins Hype Coins ($packageRawValue)"
+            val payload = mutableMapOf<String, Any>(
+                "productId"     to productId,
+                "purchaseToken" to purchaseToken
             )
-            db.collection(Collections.TRANSACTIONS)
-                .document(purchaseToken)
-                .set(transaction).await()
+            orderId?.takeIf { it.isNotEmpty() }?.let { payload["orderId"] = it }
 
-            // Refresh published state
-            fetchBalance(userID)
-            if (BuildConfig.DEBUG) { println("💰 COINS: Credited $coins coins from Play purchase $purchaseToken") }
-
+            val data = callWithRetry("verifyGooglePlayPurchase", payload)
+            val result = PurchaseVerifyResult(
+                coins           = (data["coins"] as? Number)?.toInt() ?: 0,
+                balanceAfter    = (data["balanceAfter"] as? Number)?.toInt() ?: 0,
+                alreadyCredited = data["alreadyCredited"] as? Boolean ?: false
+            )
+            applyBalanceAfter(userID, result.balanceAfter)
+            if (BuildConfig.DEBUG) { println("💰 COINS: Verified Play purchase $productId (+${result.coins}, alreadyCredited=${result.alreadyCredited})") }
+            return result
         } finally {
             _isLoading.value = false
         }
@@ -193,127 +197,77 @@ class HypeCoinService private constructor() {
     // ─────────────────────────────────────────────
 
     /**
-     * Debit sender, credit receiver (as pending).
-     * EXACT MATCH: iOS HypeCoinService.transferCoins()
+     * Move coins from the signed-in user to another user via coins_transfer.
+     * The server debits the sender, credits the receiver's pendingCoins (the
+     * earnings bucket — not re-spendable) and writes both ledger rows.
      *
-     * BATCHING: HypeCoinCoordinator batches rapid tips by recipient before
-     * calling this — so this function runs once per recipient per batch window.
+     * For kind TIP with a videoID the server also bumps videos.coinTotal and
+     * sends the tip notification (with its 60s cooldown). For SUBSCRIPTION
+     * and STREAM_GIFT it only moves coins — callers keep writing their own
+     * subscription/stream docs and notifications.
      *
-     * IMPORTANT: Two sequential writes (no Firestore transaction) matches iOS.
-     * For true atomicity a Firestore transaction or Cloud Function would be
-     * needed — acceptable for tip/sub flows where eventual consistency is fine.
+     * [clientTxnID] identifies the logical transfer. Generate it once; a
+     * caller that retries the same transfer must pass the same id.
+     *
+     * Throws CoinError.InsufficientBalance, CoinError.CoinsFrozen or
+     * CoinError.TransferFailed.
      */
     suspend fun transferCoins(
         fromUserID: String,
         toUserID: String,
         amount: Int,
-        type: CoinTransactionType,
-        subscriptionID: String? = null
-    ) {
-        // Validate balance first — 1 read
-        val senderBalance = fetchBalance(fromUserID)
-        if (senderBalance.availableCoins < amount) {
-            throw CoinError.InsufficientBalance
-        }
-
-        val senderRef   = db.collection(Collections.BALANCES).document(fromUserID)
-        val receiverRef = db.collection(Collections.BALANCES).document(toUserID)
-
-        // Deduct from sender
-        senderRef.update(
-            mapOf(
-                FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to FieldValue.increment(-amount.toLong()),
-                FirebaseSchema.CoinBalanceDocument.LIFETIME_SPENT  to FieldValue.increment(amount.toLong()),
-                FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp.now()
-            )
-        ).await()
-
-        // Credit receiver to pendingCoins — the EARNINGS bucket, held for payout
-        // and NOT re-spendable.
-        //
-        // This used to credit availableCoins, and the comment here said it
-        // matched iOS. iOS has since reverted to pendingCoins, which left
-        // Android as the outlier and broke the escrow model: a spend releases
-        // escrow and pays the creator, and that payout must not re-enter the
-        // spend pool or the same coins are counted twice — once as the fan's
-        // spend and again as the creator's spendable balance.
-        //
-        // PURCHASED coins still credit availableCoins and stay spendable; only
-        // EARNED coins (tips, subs, gifts) are held.
-        receiverRef.update(
-            mapOf(
-                FirebaseSchema.CoinBalanceDocument.PENDING_COINS to FieldValue.increment(amount.toLong()),
-                FirebaseSchema.CoinBalanceDocument.LIFETIME_EARNED to FieldValue.increment(amount.toLong()),
-                FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp.now()
-            )
-        ).await()
-
-        // Sender transaction record
-        val senderTxType = if (type == CoinTransactionType.SUBSCRIPTION_RECEIVED)
-            CoinTransactionType.SUBSCRIPTION_SENT else CoinTransactionType.TIP_SENT
-
-        val senderTxMap = buildTransactionMap(
-            id           = UUID.randomUUID().toString(),
-            userID       = fromUserID,
-            type         = senderTxType,
-            amount       = -amount,
-            balanceAfter = senderBalance.availableCoins - amount,
-            relatedUserID = toUserID,
-            relatedSubscriptionID = subscriptionID,
-            description  = if (type == CoinTransactionType.SUBSCRIPTION_RECEIVED) "Subscription payment" else "Tip sent"
+        kind: CoinTransferKind,
+        clientTxnID: String = UUID.randomUUID().toString(),
+        videoID: String? = null,
+        streamID: String? = null,
+        subscriptionTier: String? = null
+    ): CoinMoveResult {
+        val payload = mutableMapOf<String, Any>(
+            "toUserID"    to toUserID,
+            "amount"      to amount,
+            "kind"        to kind.raw,
+            "clientTxnID" to clientTxnID
         )
-        db.collection(Collections.TRANSACTIONS)
-            .document(senderTxMap[FirebaseSchema.CoinTransactionDocument.ID] as String)
-            .set(senderTxMap).await()
+        videoID?.let          { payload["videoID"] = it }
+        streamID?.let         { payload["streamID"] = it }
+        subscriptionTier?.let { payload["subscriptionTier"] = it }
 
-        // Receiver transaction record
-        val receiverTxMap = buildTransactionMap(
-            id           = UUID.randomUUID().toString(),
-            userID       = toUserID,
-            type         = type,
-            amount       = amount,
-            balanceAfter = 0, // Will resolve on next fetchBalance
-            relatedUserID = fromUserID,
-            relatedSubscriptionID = subscriptionID,
-            description  = if (type == CoinTransactionType.SUBSCRIPTION_RECEIVED) "Subscription received" else "Tip received"
-        )
-        db.collection(Collections.TRANSACTIONS)
-            .document(receiverTxMap[FirebaseSchema.CoinTransactionDocument.ID] as String)
-            .set(receiverTxMap).await()
-
-        fetchBalance(fromUserID)
-        if (BuildConfig.DEBUG) { println("💸 COINS: Transferred $amount coins from $fromUserID to $toUserID") }
+        val data   = callWithRetry("coins_transfer", payload)
+        val result = parseMoveResult(data)
+        applyBalanceAfter(fromUserID, result.balanceAfter)
+        if (BuildConfig.DEBUG) { println("💸 COINS: ${kind.raw} $amount → $toUserID (txn ${result.txnID}, replay=${result.alreadyProcessed})") }
+        return result
     }
 
     // ─────────────────────────────────────────────
-    // MARK: - Release Pending Coins
+    // MARK: - Spend Coins (no recipient)
     // ─────────────────────────────────────────────
 
     /**
-     * Move pending coins to available.
-     * EXACT MATCH: iOS HypeCoinService.releasePendingCoins()
-     * Called by Cloud Function / admin on payout cycle.
+     * Spend coins on something that isn't another user, via coins_spend.
+     * Only reason the server accepts today is "post_boost". Android has no
+     * boost purchase UI yet — this is here so one can be added without a
+     * client write.
      */
-    suspend fun releasePendingCoins(userID: String) {
-        val balanceRef = db.collection(Collections.BALANCES).document(userID)
-        val doc        = balanceRef.get().await()
-        val data       = doc.data ?: return
-        val pending    = (data[FirebaseSchema.CoinBalanceDocument.PENDING_COINS] as? Number)?.toInt() ?: 0
+    suspend fun spendCoins(
+        userID: String,
+        amount: Int,
+        reason: String = "post_boost",
+        clientTxnID: String = UUID.randomUUID().toString(),
+        videoID: String? = null
+    ): CoinMoveResult {
+        val payload = mutableMapOf<String, Any>(
+            "amount"      to amount,
+            "reason"      to reason,
+            "clientTxnID" to clientTxnID
+        )
+        videoID?.let { payload["videoID"] = it }
 
-        if (pending <= 0) return
-
-        balanceRef.update(
-            mapOf(
-                FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to FieldValue.increment(pending.toLong()),
-                FirebaseSchema.CoinBalanceDocument.PENDING_COINS   to 0,
-                FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp.now()
-            )
-        ).await()
-
-        fetchBalance(userID)
-        if (BuildConfig.DEBUG) { println("✅ COINS: Released $pending pending coins for $userID") }
+        val data   = callWithRetry("coins_spend", payload)
+        val result = parseMoveResult(data)
+        applyBalanceAfter(userID, result.balanceAfter)
+        return result
     }
-
 
     // ─────────────────────────────────────────────
     // MARK: - Fetch Transactions
@@ -360,40 +314,57 @@ class HypeCoinService private constructor() {
     // MARK: - Private Helpers
     // ─────────────────────────────────────────────
 
-    private fun buildTransactionMap(
-        id: String,
-        userID: String,
-        type: CoinTransactionType,
-        amount: Int,
-        balanceAfter: Int,
-        relatedUserID: String? = null,
-        relatedSubscriptionID: String? = null,
-        description: String
-    ): Map<String, Any> {
-        val map = mutableMapOf<String, Any>(
-            FirebaseSchema.CoinTransactionDocument.ID           to id,
-            FirebaseSchema.CoinTransactionDocument.USER_ID      to userID,
-            FirebaseSchema.CoinTransactionDocument.TYPE         to type.rawValue,
-            FirebaseSchema.CoinTransactionDocument.AMOUNT       to amount,
-            FirebaseSchema.CoinTransactionDocument.BALANCE_AFTER to balanceAfter,
-            FirebaseSchema.CoinTransactionDocument.DESCRIPTION  to description,
-            FirebaseSchema.CoinTransactionDocument.CREATED_AT   to Timestamp.now()
-        )
-        relatedUserID?.let         { map[FirebaseSchema.CoinTransactionDocument.RELATED_USER_ID]          = it }
-        relatedSubscriptionID?.let { map[FirebaseSchema.CoinTransactionDocument.RELATED_SUBSCRIPTION_ID]  = it }
-        return map
+    /**
+     * Call a coin callable, retrying transient failures (network, timeout)
+     * with the identical payload — the clientTxnID / purchaseToken inside it
+     * makes the replay a no-op on the server if the first call landed.
+     * Server refusals are mapped to CoinError and never retried.
+     */
+    private suspend fun callWithRetry(name: String, payload: Map<String, Any>): Map<String, Any?> {
+        var attempt = 0
+        while (true) {
+            try {
+                val result = functions.getHttpsCallable(name).call(payload).await()
+                @Suppress("UNCHECKED_CAST")
+                val data = result.data as? Map<String, Any?> ?: emptyMap()
+                if (data["ok"] != true) throw CoinError.TransferFailed
+                return data
+            } catch (e: FirebaseFunctionsException) {
+                val transient = e.code == FirebaseFunctionsException.Code.UNAVAILABLE ||
+                    e.code == FirebaseFunctionsException.Code.DEADLINE_EXCEEDED
+                if (transient && attempt < 2) {
+                    attempt++
+                    delay(500L * attempt)
+                    continue
+                }
+                if (BuildConfig.DEBUG) { println("❌ COINS: $name failed — ${e.code} ${e.message}") }
+                throw mapCallableError(e)
+            }
+        }
+    }
+
+    private fun mapCallableError(e: FirebaseFunctionsException): CoinError {
+        val message = e.message.orEmpty()
+        return when {
+            message.contains("insufficient_coins") -> CoinError.InsufficientBalance
+            message.contains("coins_frozen")       -> CoinError.CoinsFrozen
+            e.code == FirebaseFunctionsException.Code.FAILED_PRECONDITION -> CoinError.InsufficientBalance
+            else -> CoinError.TransferFailed
+        }
+    }
+
+    private fun parseMoveResult(data: Map<String, Any?>) = CoinMoveResult(
+        balanceAfter     = (data["balanceAfter"] as? Number)?.toInt() ?: 0,
+        txnID            = data["txnID"] as? String ?: "",
+        alreadyProcessed = data["alreadyProcessed"] as? Boolean ?: false
+    )
+
+    /** Reflect the server's post-move balance locally until the listener catches up. */
+    private fun applyBalanceAfter(userID: String, balanceAfter: Int) {
+        val current = _balance.value
+        _balance.value = if (current != null && current.userID == userID)
+            current.copy(availableCoins = balanceAfter)
+        else
+            HypeCoinBalance(userID = userID, availableCoins = balanceAfter)
     }
 }
-
-// ─────────────────────────────────────────────
-// MARK: - HypeCoinBalance toMap extension
-// ─────────────────────────────────────────────
-
-private fun HypeCoinBalance.toMap(): Map<String, Any> = mapOf(
-    FirebaseSchema.CoinBalanceDocument.USER_ID         to userID,
-    FirebaseSchema.CoinBalanceDocument.AVAILABLE_COINS to availableCoins,
-    FirebaseSchema.CoinBalanceDocument.PENDING_COINS   to pendingCoins,
-    FirebaseSchema.CoinBalanceDocument.LIFETIME_EARNED to lifetimeEarned,
-    FirebaseSchema.CoinBalanceDocument.LIFETIME_SPENT  to lifetimeSpent,
-    FirebaseSchema.CoinBalanceDocument.LAST_UPDATED    to Timestamp(lastUpdated)
-)

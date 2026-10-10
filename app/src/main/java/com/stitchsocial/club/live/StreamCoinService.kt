@@ -6,7 +6,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.stitchsocial.club.foundation.CoinError
-import com.stitchsocial.club.foundation.CoinTransactionType
+import com.stitchsocial.club.services.CoinTransferKind
 import com.stitchsocial.club.services.HypeCoinService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,9 +17,10 @@ import kotlinx.coroutines.tasks.await
  * Stream-side coin + hype manager. Mirrors iOS `StreamCoinService`.
  *
  * Responsibilities:
- *  - `sendHype` debits coins via [HypeCoinService.transferCoins] (which
- *    already handles balance validation + sender-debit + receiver-credit),
- *    writes the `hypeEvent` doc, increments the stream doc's hype/coin
+ *  - `sendHype` moves coins via [HypeCoinService.transferCoins] (the
+ *    coins_transfer callable, kind stream_gift — the server validates the
+ *    balance, debits the sender and credits the creator), writes the
+ *    `hypeEvent` doc, increments the stream doc's hype/coin
  *    counters, and applies a local XP multiplier.
  *  - `listenForHypes` subscribes to the hypeEvents subcollection so the
  *    viewer + creator both surface storm alerts when others send hypes.
@@ -82,14 +83,17 @@ class StreamCoinService private constructor() {
     ): StreamHypeEvent {
         Log.d(TAG, "🔥 send ${hypeType.emoji} ${hypeType.displayName} (${hypeType.coinCost} coins)")
 
-        // 1. Coin transfer — throws if sender doesn't have enough. Receiver
-        //    (communityID == creatorID) gets pending credit; the cash-out
-        //    flow settles this later.
+        // 1. Coin transfer — throws CoinError.InsufficientBalance /
+        //    CoinsFrozen. Receiver (communityID == creatorID) gets pending
+        //    credit; the cash-out flow settles this later. The server only
+        //    moves coins for stream gifts — the event and counters below
+        //    stay ours.
         coinService.transferCoins(
             fromUserID = senderID,
             toUserID = communityID,
             amount = hypeType.coinCost,
-            type = CoinTransactionType.TIP_SENT,
+            kind = CoinTransferKind.STREAM_GIFT,
+            streamID = streamID,
         )
 
         // 2. Build event + write to hypeEvents subcollection

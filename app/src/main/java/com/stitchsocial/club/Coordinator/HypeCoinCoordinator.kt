@@ -10,7 +10,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.stitchsocial.club.firebase.FirebaseSchema
 import com.stitchsocial.club.foundation.CoinError
-import com.stitchsocial.club.foundation.CoinTransactionType
 import com.stitchsocial.club.foundation.HypeCoinBalance
 import com.stitchsocial.club.foundation.HypeCoinPackage
 import com.stitchsocial.club.foundation.TipPreset
@@ -21,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
+import java.util.UUID
 
 /*
  * HypeCoinCoordinator.kt - HYPE COIN COORDINATOR
@@ -72,6 +72,7 @@ class HypeCoinCoordinator private constructor(context: Context) {
     private data class PendingTip(
         val toUserID: String,
         val amount: Int,
+        val videoID: String?,
         val completion: ((Boolean) -> Unit)?
     )
 
@@ -130,13 +131,15 @@ class HypeCoinCoordinator private constructor(context: Context) {
         _balance.value  = null
         tipBatchJob?.cancel()
         pendingTips.clear()
-        billingManager.disconnect()
+        billingManager.signOut()
     }
 
     private fun setupLifecycleObserver() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 scope.launch { syncBalance() }
+                // Re-verify any purchase whose server verify failed earlier.
+                if (currentUserID != null) billingManager.retryUnconsumedPurchases()
             }
         })
     }
@@ -190,25 +193,37 @@ class HypeCoinCoordinator private constructor(context: Context) {
     val billingState  get() = billingManager.billingState
     val purchaseState get() = billingManager.purchaseState
 
-    fun sendTip(toUserID: String, amount: Int, completion: ((Boolean) -> Unit)? = null) {
+    fun sendTip(
+        toUserID: String,
+        amount: Int,
+        videoID: String? = null,
+        completion: ((Boolean) -> Unit)? = null
+    ) {
         val fromUserID = currentUserID ?: run { completion?.invoke(false); return }
         val now = System.currentTimeMillis()
         if (now - lastTipTime < tipCooldownMs) {
-            pendingTips.add(PendingTip(toUserID, amount, completion))
+            pendingTips.add(PendingTip(toUserID, amount, videoID, completion))
             scheduleTipBatch()
             return
         }
         lastTipTime = now
         scope.launch {
             try {
-                coinService.transferCoins(fromUserID, toUserID, amount, CoinTransactionType.TIP_RECEIVED)
+                val result = coinService.transferCoins(
+                    fromUserID = fromUserID,
+                    toUserID   = toUserID,
+                    amount     = amount,
+                    kind       = CoinTransferKind.TIP,
+                    videoID    = videoID
+                )
+                applyBalanceAfter(result.balanceAfter)
                 completion?.invoke(true)
             } catch (e: Exception) { _lastError.value = e.message; completion?.invoke(false) }
         }
     }
 
-    fun sendQuickTip(preset: TipPreset, toUserID: String, completion: ((Boolean) -> Unit)? = null) =
-        sendTip(toUserID, preset.amount, completion)
+    fun sendQuickTip(preset: TipPreset, toUserID: String, videoID: String? = null, completion: ((Boolean) -> Unit)? = null) =
+        sendTip(toUserID, preset.amount, videoID, completion)
 
     private fun scheduleTipBatch() {
         tipBatchJob?.cancel()
@@ -218,21 +233,44 @@ class HypeCoinCoordinator private constructor(context: Context) {
         }
     }
 
+    // One coins_transfer per (recipient, video) per flush. Each gets a single
+    // clientTxnID that HypeCoinService reuses on its transient retries, so a
+    // flush is applied once even if the first attempt timed out after landing.
     private suspend fun processPendingTips() {
         if (pendingTips.isEmpty()) return
         val fromUserID = currentUserID ?: return
         val tips = pendingTips.toList(); pendingTips.clear()
-        val grouped = mutableMapOf<String, MutableList<PendingTip>>()
-        for (tip in tips) grouped.getOrPut(tip.toUserID) { mutableListOf() }.add(tip)
-        for ((toUserID, recipientTips) in grouped) {
-            val total = recipientTips.sumOf { it.amount }
+        val grouped = tips.groupBy { it.toUserID to it.videoID }
+        for ((key, recipientTips) in grouped) {
+            val (toUserID, videoID) = key
+            val total       = recipientTips.sumOf { it.amount }
+            val clientTxnID = UUID.randomUUID().toString()
             try {
-                coinService.transferCoins(fromUserID, toUserID, total, CoinTransactionType.TIP_RECEIVED)
+                val result = coinService.transferCoins(
+                    fromUserID  = fromUserID,
+                    toUserID    = toUserID,
+                    amount      = total,
+                    kind        = CoinTransferKind.TIP,
+                    clientTxnID = clientTxnID,
+                    videoID     = videoID
+                )
+                applyBalanceAfter(result.balanceAfter)
                 recipientTips.forEach { it.completion?.invoke(true) }
-            } catch (e: Exception) { recipientTips.forEach { it.completion?.invoke(false) } }
+            } catch (e: Exception) {
+                _lastError.value = e.message
+                recipientTips.forEach { it.completion?.invoke(false) }
+            }
         }
-        syncBalance()
         lastTipTime = System.currentTimeMillis()
+    }
+
+    /** Server's post-move balance — shown now, confirmed by the listener. */
+    private fun applyBalanceAfter(balanceAfter: Int) {
+        val userID  = currentUserID ?: return
+        val updated = (cachedBalance ?: HypeCoinBalance.empty(userID)).copy(availableCoins = balanceAfter)
+        cachedBalance      = updated
+        _balance.value     = updated
+        balanceLastFetched = Date()
     }
 
     suspend fun subscribe(toCreatorID: String, tier: CoinPriceTier) {
