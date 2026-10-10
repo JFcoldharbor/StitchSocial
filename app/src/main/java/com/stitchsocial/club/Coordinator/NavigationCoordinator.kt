@@ -57,7 +57,6 @@ sealed class NavigationEvent {
     data class ShowModal(val modal: ModalState, val data: Map<String, Any> = emptyMap()) : NavigationEvent()
     object DismissModal : NavigationEvent()
     data class NavigateToDestination(val destination: NavigationDestination) : NavigationEvent()
-    data class HandleDeepLink(val link: String) : NavigationEvent()
     object NavigateBack : NavigationEvent()
     data class VideoUploadProgress(val progress: Double, val phase: String) : NavigationEvent()
     data class VideoUploadComplete(val videoId: String) : NavigationEvent()
@@ -381,44 +380,6 @@ class NavigationCoordinator(
             }
 
             if (BuildConfig.DEBUG) { println("🧭 NAVIGATE: Back (stack depth: ${currentStack.size})") }
-        }
-    }
-
-    // MARK: - Deep Link Handling
-
-    fun handleDeepLink(link: String) {
-        coordinatorScope.launch {
-            val destination = parseDeepLink(link)
-            if (destination != null) {
-                navigateTo(destination)
-                _navigationEvents.emit(NavigationEvent.HandleDeepLink(link))
-                if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Handled $link -> ${destination.route}") }
-            } else {
-                if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Could not parse $link") }
-            }
-        }
-    }
-
-    private fun parseDeepLink(link: String): NavigationDestination? {
-        return try {
-            when {
-                link.contains("/user/") -> {
-                    val userId = link.substringAfterLast("/")
-                    NavigationDestination.UserProfile(userId)
-                }
-                link.contains("/video/") -> {
-                    val videoId = link.substringAfterLast("/")
-                    NavigationDestination.VideoDetail(videoId)
-                }
-                link.contains("/thread/") -> {
-                    val threadId = link.substringAfterLast("/")
-                    NavigationDestination.ThreadDetail(threadId)
-                }
-                else -> null
-            }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("🧭 DEEP LINK: Parse error - ${e.message}") }
-            null
         }
     }
 

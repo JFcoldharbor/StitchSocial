@@ -55,13 +55,19 @@ import kotlinx.coroutines.launch
  * from `rememberCoroutineScope()` is cancelled the instant the screen leaves,
  * which is the worst possible moment to be ending a stream.
  */
-private object CreatorScreenPresence {
+internal object CreatorScreenPresence {
     private val onScreen = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     fun enter(creatorID: String) { onScreen[creatorID] = true }
     fun leave(creatorID: String) { onScreen[creatorID] = false }
     fun isOnScreen(creatorID: String) = onScreen[creatorID] == true
+
+    /**
+     * True while this device is broadcasting. A notification tap asks before
+     * routing when it is: leaving this screen is what ends the stream.
+     */
+    fun isHostingAny() = onScreen.values.any { it }
 }
 
 /**

@@ -11,7 +11,6 @@ import com.stitchsocial.club.foundation.*
 import com.stitchsocial.club.engagement.*
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
-import com.stitchsocial.club.services.NotificationService
 import com.stitchsocial.club.services.SocialSignalService
 import com.stitchsocial.club.services.EngagementService
 import kotlinx.coroutines.*
@@ -22,7 +21,6 @@ import com.stitchsocial.club.BuildConfig
 class EngagementCoordinator(
     private val videoService: VideoServiceImpl,
     private val userService: UserService,
-    private val notificationService: NotificationService = NotificationService()
 ) {
     private val engagementStates = mutableMapOf<String, VideoEngagementState>()
 
@@ -78,29 +76,11 @@ class EngagementCoordinator(
         lastEngagementTimes[videoID] = System.currentTimeMillis()
     }
 
-    // NOTIFICATION (via Cloud Functions - matches iOS)
-
-    private suspend fun sendEngagementNotificationToCreator(
-        recipientID: String,
-        senderID: String,
-        videoID: String,
-        videoTitle: String,
-        engagementType: String
-    ) {
-        try {
-            if (recipientID == senderID) return
-
-            // Cloud Function handles: username lookup, title/message, FCM push
-            notificationService.sendEngagementNotification(
-                recipientID = recipientID,
-                videoID = videoID,
-                engagementType = engagementType,
-                videoTitle = videoTitle
-            )
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("NOTIFICATION: Error - ${e.message}") }
-        }
-    }
+    // NOTIFICATION
+    //
+    // None sent from here. stitchnoti_processEngagement batches and sends the
+    // creator's notification itself; calling stitchnoti_sendEngagement after
+    // every tap as well delivered each hype and cool twice.
 
     // PROCESS HYPE
 
@@ -166,14 +146,6 @@ class EngagementCoordinator(
             // advances the tier and gives accepted collaborators their third.
             // awardClout() used to be called here and is now unreachable.
 
-            // Notification (Cloud Function handles username)
-            sendEngagementNotificationToCreator(
-                recipientID = video.creatorID,
-                senderID = userID,
-                videoID = videoID,
-                videoTitle = video.title,
-                engagementType = "hype"
-            )
 
             // 📢 MEGAPHONE: Record notable engagement if Partner+ tier
             val hypeWeight = EngagementConfig.getVisualHypeMultiplier(userTier)
@@ -236,14 +208,6 @@ class EngagementCoordinator(
                 return@withContext false
             }
 
-            // Notification (Cloud Function handles username)
-            sendEngagementNotificationToCreator(
-                recipientID = video.creatorID,
-                senderID = userID,
-                videoID = videoID,
-                videoTitle = video.title,
-                engagementType = "cool"
-            )
             state.completeCoolEngagement()
             recordEngagementTime(videoID)
 

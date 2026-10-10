@@ -240,6 +240,113 @@ fun FullscreenVideoPlayer(
     }
 }
 
+// MARK: - Single Video (notification taps)
+
+/**
+ * One video, fullscreen — where a tapped notification about a video lands.
+ *
+ * Takes [CoreVideoMetadata] rather than [VideoInfo] so the overlay shows the
+ * real counts (the VideoInfo path rebuilds metadata with zeros), and mounts the
+ * player + overlay directly, the same structure ProfileView's player uses.
+ *
+ * Every way out of the video (profile, thread, stitch) dismisses this player
+ * first: it sits above ProfileView and below the recorder, so leaving it up
+ * would hide the destination or keep playing underneath it.
+ */
+@Composable
+fun FullscreenVideoPlayer(
+    video: CoreVideoMetadata,
+    currentUserID: String?,
+    currentUserTier: UserTier,
+    navigationCoordinator: NavigationCoordinator?,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    onShowProfile: (userID: String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val authService = remember { com.stitchsocial.club.services.AuthService() }
+    val videoService = remember { com.stitchsocial.club.services.VideoServiceImpl() }
+    val userService = remember { com.stitchsocial.club.services.UserService(context) }
+    val engagementViewModel = remember { EngagementViewModel(authService, videoService, userService) }
+    val iconManager = remember { FloatingIconManager() }
+    val followManager = remember { FollowManager(context) }
+
+    // Without this every hype/cool is written as "anonymous" (see ProfileView).
+    LaunchedEffect(currentUserID) {
+        if (!currentUserID.isNullOrEmpty()) engagementViewModel.setCurrentUser(currentUserID)
+    }
+
+    androidx.activity.compose.BackHandler(onBack = onDismiss)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        key(video.id) {
+            VideoPlayerComposable(
+                video = video,
+                isActive = true,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        ContextualVideoOverlay(
+            video = video,
+            overlayContext = if (video.creatorID == currentUserID) OverlayContext.PROFILE_OWN else OverlayContext.PROFILE_OTHER,
+            currentUserID = currentUserID,
+            threadVideo = null,
+            currentUserTier = currentUserTier,
+            engagementViewModel = engagementViewModel,
+            iconManager = iconManager,
+            followManager = followManager,
+            navigationCoordinator = navigationCoordinator,
+            onAction = { action ->
+                when (action) {
+                    is OverlayAction.NavigateToProfile -> {
+                        onDismiss()
+                        onShowProfile(action.userID)
+                    }
+                    is OverlayAction.NavigateToThread -> {
+                        onDismiss()
+                        onShowThreadView(video.threadID ?: video.id, action.targetVideoID ?: video.id)
+                    }
+                    is OverlayAction.StitchRecording -> {
+                        val threadID = video.threadID ?: video.id
+                        val ctx = if (video.creatorID == currentUserID) {
+                            RecordingContextFactory.createContinueThread(threadID, video.creatorName, video.title)
+                        } else {
+                            RecordingContextFactory.createStitchToThread(threadID, video.creatorName, video.title)
+                        }
+                        onDismiss()
+                        navigationCoordinator?.showModal(
+                            ModalState.RECORDING,
+                            mapOf("context" to ctx, "parentVideo" to video)
+                        )
+                    }
+                    else -> {
+                        // Hype/cool are processed inside the overlay via
+                        // engagementViewModel — handling them here too would
+                        // double-count (see the VideoInfo player above).
+                    }
+                }
+            }
+        )
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.4f), androidx.compose.foundation.shape.CircleShape)
+        ) {
+            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+        }
+    }
+}
+
 // MARK: - Helper Functions
 
 /**

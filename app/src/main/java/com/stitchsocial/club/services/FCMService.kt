@@ -51,6 +51,10 @@ class FCMService : FirebaseMessagingService() {
         private const val CHANNEL_NAME = "Stitch Social Notifications"
         private const val NOTIFICATION_ID_BASE = 1000
 
+        /** Fallback ids for pushes that carry no notificationID. */
+        private val nextNotificationId =
+            java.util.concurrent.atomic.AtomicInteger(NOTIFICATION_ID_BASE + (System.currentTimeMillis() % 100_000).toInt())
+
         /**
          * ✅ CALL THIS FROM MainActivity.onCreate() to ensure channel exists early
          * Must be called before any notification is sent
@@ -220,7 +224,14 @@ class FCMService : FirebaseMessagingService() {
             putExtra("notificationBody", body)
         }
 
-        val notificationId = NOTIFICATION_ID_BASE + (System.currentTimeMillis() % 10000).toInt()
+        // Doubles as the PendingIntent requestCode, so it must be unique per
+        // notification: `1000 + ms % 10000` repeated every ten seconds, and a
+        // repeat REPLACED the earlier notification's extras (FLAG_UPDATE_CURRENT)
+        // — tapping the older one opened the newer one's destination. The
+        // server's notificationID is stable for the same notification (a re-send
+        // replaces itself); anything without one gets a fresh counter value.
+        val notificationId = data["notificationID"]?.takeIf { it.isNotBlank() }?.hashCode()
+            ?: nextNotificationId.incrementAndGet()
 
         val pendingIntent = PendingIntent.getActivity(
             this,

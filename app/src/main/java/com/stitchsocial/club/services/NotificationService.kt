@@ -559,6 +559,7 @@ class NotificationService {
                     data["type"] as? String,
                     data["payload"] as? Map<*, *>
                 ),
+                rawType = (data["type"] as? String) ?: "",
                 title = (data["title"] as? String) ?: "",
                 message = (data["message"] as? String) ?: "",
                 senderID = (data["senderID"] as? String) ?: "",
@@ -605,7 +606,9 @@ data class StitchNotification(
     val payload: Map<String, String>,
     val isRead: Boolean,
     val createdAt: Date,
-    val readAt: Date? = null
+    val readAt: Date? = null,
+    /** The type exactly as stored. [type] folds unknown ones into SYSTEM; routing needs the original. */
+    val rawType: String = ""
 )
 
 enum class StitchNotificationType(val rawValue: String) {

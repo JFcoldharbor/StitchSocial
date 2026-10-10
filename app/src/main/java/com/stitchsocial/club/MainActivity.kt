@@ -86,12 +86,16 @@ import com.stitchsocial.club.BuildConfig
 class MainActivity : ComponentActivity() {
 
     companion object {
-        // ✅ FIXED: Store pending notification intent for Compose processing
-        var pendingNotificationIntent: Intent? = null
-
-        // ✅ FIX: Incremented on every onNewIntent so the routing LaunchedEffect
-        // re-runs when the app is already open and a notification is tapped.
-        var notificationTrigger = androidx.compose.runtime.mutableIntStateOf(0)
+        /**
+         * FCM transport keys that ride along on a tray-built tap intent. Not
+         * payload, so they're not handed to the router.
+         */
+        private val FCM_TRANSPORT_KEYS = setOf(
+            "fromNotification", "notificationTitle", "notificationBody",
+            "from", "collapse_key", "google.message_id", "google.sent_time",
+            "google.ttl", "google.original_priority", "google.delivered_priority",
+            "google.product_id", "google.c.sender.id", "gcm.n.analytics_data"
+        )
 
         // ✅ NEW: Broadcast action for pausing videos
         const val ACTION_PAUSE_ALL_VIDEOS = "com.stitchsocial.club.PAUSE_ALL_VIDEOS"
@@ -154,8 +158,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // ✅ Handle notification intent if app opened from notification
-        handleNotificationIntent(intent)
+        // ✅ Handle notification intent if app opened from notification.
+        // NOT on recreation (rotation, process restore): the Activity's intent
+        // is the same one that already routed, and routing it again would yank
+        // the user back to a notification they've moved on from.
+        handleNotificationIntent(intent, isRecreation = savedInstanceState != null)
         // Cold start from a tapped stitchsocial.me link.
         handleDeepLinkIntent(intent)
     }
@@ -164,12 +171,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleNotificationIntent(intent)
+        handleNotificationIntent(intent, isRecreation = false)
         // Warm start: singleTop means onCreate does NOT re-run, so a link tapped
         // while the app is alive only arrives here.
         handleDeepLinkIntent(intent)
-        // ✅ FIX: Signal Compose to re-run the routing LaunchedEffect
-        notificationTrigger.intValue++
     }
 
     /**
@@ -330,23 +335,59 @@ class MainActivity : ComponentActivity() {
         Log.d("STITCH_MAIN", "🔗 LINK: unrouted $uri")
     }
 
-    private fun handleNotificationIntent(intent: Intent?) {
-        intent?.let {
-            val fromNotification = it.getBooleanExtra("fromNotification", false)
-
-            if (fromNotification) {
-                Log.d("STITCH_MAIN", "📱 Notification intent detected - storing for processing")
-                pendingNotificationIntent = it
-
-                // Log notification details for debugging
-                val notificationType = it.getStringExtra("notification_type")
-                val videoId = it.getStringExtra("video_id")
-                val userId = it.getStringExtra("user_id")
-                Log.d("STITCH_MAIN", "📱 Type: $notificationType, VideoID: $videoId, UserID: $userId")
-            } else {
-                Log.d("STITCH_MAIN", "📱 Normal app launch - no notification")
-            }
+    /**
+     * Parks a tapped notification with [NotificationRouter]; MainScreen routes it
+     * once the user is signed in and the main UI is up.
+     *
+     * Two kinds of tap reach here, and only one used to be recognised:
+     *  - FOREGROUND: FCMService builds the notification itself and marks the
+     *    intent fromNotification=true.
+     *  - BACKGROUND / KILLED: the server always sends a `notification` block, so
+     *    the SYSTEM tray builds it. Its tap intent carries the data keys as
+     *    extras (plus google.message_id) and no fromNotification — and was
+     *    dropped as a "normal app launch", so no background tap ever routed.
+     * Either is recognised now by the FCM data it carries.
+     *
+     * The extras are stripped once parked, so the same intent can't route twice
+     * (e.g. redelivered on a later recreation).
+     */
+    private fun handleNotificationIntent(intent: Intent?, isRecreation: Boolean) {
+        val extras = intent?.extras ?: return
+        val isNotificationTap = extras.getBoolean("fromNotification", false) ||
+            extras.containsKey("google.message_id") ||
+            extras.containsKey("notificationID") ||
+            extras.containsKey("type")
+        if (!isNotificationTap) {
+            Log.d("STITCH_MAIN", "📱 Normal app launch - no notification")
+            return
         }
+
+        // Relaunched from Recents: Android hands back the ORIGINAL launch intent,
+        // extras and all. That tap was handled when it happened.
+        val fromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (isRecreation || fromHistory) {
+            Log.d("STITCH_MAIN", "📱 Notification intent ignored (recreation=$isRecreation, recents=$fromHistory)")
+            return
+        }
+
+        val data = mutableMapOf<String, String>()
+        for (key in extras.keySet()) {
+            if (key in FCM_TRANSPORT_KEYS || key.startsWith("google.") || key.startsWith("gcm.")) continue
+            @Suppress("DEPRECATION")
+            extras.get(key)?.toString()?.takeIf { it.isNotBlank() }?.let { data[key] = it }
+        }
+        val type = data["type"] ?: data["notification_type"]
+
+        Log.d(
+            "STITCH_MAIN",
+            "📱 Notification tap: type=$type, id=${data["notificationID"]}, " +
+                "video=${data["videoID"] ?: data["video_id"]}, user=${data["userID"] ?: data["senderID"] ?: data["user_id"]}"
+        )
+        NotificationRouter.request(type, data)
+
+        // Consume: a later recreation that re-reads this intent finds nothing.
+        intent.replaceExtras(Bundle())
+        setIntent(intent)
     }
 
     private fun suppressCameraLogging() {
@@ -387,6 +428,37 @@ fun MainScreen() {
     /// Stream to open immediately once the community screen mounts (go-live tap).
     var autoOpenStreamID by remember { mutableStateOf<String?>(null) }
 
+    // ── Notification destinations ──
+    // The video a tapped notification is about, open in the fullscreen player.
+    var notificationVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+    // Campaign / ad / wallet screen a notification opened (they otherwise live
+    // deep inside Settings, which a tap can't reach).
+    var notificationScreen by remember { mutableStateOf<NotificationDestination?>(null) }
+    // Bumped by a notification tap to remount the tab content, which closes
+    // everything open INSIDE a tab (fullscreen decks, sheets, platform Dialog
+    // windows) — state this layer can't reach any other way. Feeds are kept in
+    // retained ViewModels, so this costs what a tab switch costs.
+    var interruptGeneration by remember { mutableIntStateOf(0) }
+    // A route waiting on "Leave?" because the user is recording or live.
+    var routeAwaitingConfirm by remember { mutableStateOf<Pair<NotificationRouter.Request, String>?>(null) }
+    // Latest route wins when two overlap (one may still be fetching its video).
+    var routeToken by remember { mutableIntStateOf(0) }
+
+    fun communityListItem(community: com.stitchsocial.club.community.Community, isLive: Boolean) =
+        CommunityListItem(
+            id = community.id,
+            creatorUsername = community.creatorUsername,
+            creatorDisplayName = community.creatorDisplayName,
+            creatorTier = community.creatorTier,
+            profileImageURL = community.profileImageURL,
+            memberCount = community.memberCount,
+            userLevel = 0, userXP = 0, unreadCount = 0,
+            lastActivityPreview = "",
+            lastActivityAt = java.util.Date(),
+            isCreatorLive = isLive,
+            isVerified = false
+        )
+
     val authService = remember { AuthService() }
     val videoService = remember { VideoServiceImpl() }
     val userService = remember { UserService(context) }
@@ -405,167 +477,6 @@ fun MainScreen() {
     // Initialize ShareService for video file sharing
     LaunchedEffect(Unit) {
         ShareService.initialize(context)
-    }
-
-    // ✅ FIXED: Process pending notification intent
-    // Keys on notificationTrigger so foreground taps (onNewIntent) re-run this block.
-    val notificationTrigger by MainActivity.notificationTrigger
-    LaunchedEffect(navigationCoordinator, notificationTrigger) {
-        MainActivity.pendingNotificationIntent?.let { intent ->
-            Log.d("STITCH_MAIN", "📱 Processing pending notification intent")
-
-            val notificationType = intent.getStringExtra("notification_type")
-                ?: intent.getStringExtra("type")
-            val videoId = intent.getStringExtra("video_id")
-                ?: intent.getStringExtra("videoID")
-                ?: intent.getStringExtra("videoId")
-            val threadId = intent.getStringExtra("thread_id")
-                ?: intent.getStringExtra("threadID")
-                ?: intent.getStringExtra("threadId")
-            val userId = intent.getStringExtra("user_id")
-                ?: intent.getStringExtra("userID")
-                ?: intent.getStringExtra("senderID")
-            val eventId = intent.getStringExtra("event_id")
-                ?: intent.getStringExtra("eventID")
-                ?: intent.getStringExtra("eventId")
-
-            Log.d("STITCH_MAIN", "📱 Notification intent: type=$notificationType, video=$videoId, thread=$threadId, user=$userId, event=$eventId")
-
-            // Wait for authentication to complete
-            delay(1000)
-
-            // Event invite — routed on the PAYLOAD, not the type, and ahead of
-            // the when below. Invites are written as SYSTEM notifications, so the
-            // push arrives with type="system" and would fall straight through the
-            // type table; the eventID extra is the dependable signal. (FCMService
-            // copies every data key to an extra verbatim, so it survives the tap.)
-            if (eventId != null) {
-                Log.d("STITCH_MAIN", "📱 Deep-linking to event hub: $eventId")
-                com.stitchsocial.club.events.EventDeepLink.request(eventId)
-            }
-
-            // SHARED RESOLVER — the same one the in-app list uses, so a
-            // notification lands in the same place whichever way it's opened.
-            // Only Live and Event are taken from it so far; the `when` below
-            // still owns the rest until each type is verified.
-            val resolved = NotificationDestination.resolve(
-                notificationType,
-                mapOf(
-                    "videoID" to videoId,
-                    "threadID" to threadId,
-                    "senderID" to userId,
-                    "eventID" to eventId,
-                    "streamID" to (intent.getStringExtra("streamID")
-                        ?: intent.getStringExtra("streamId")),
-                    "communityID" to (intent.getStringExtra("communityID")
-                        ?: intent.getStringExtra("community_id"))
-                )
-            )
-
-            // A TAP TAKES PRECEDENCE OVER WHATEVER IS OPEN.
-            //
-            // Every branch below sets presentation state, and none of them used
-            // to clear what was already on screen. Tap a notification while a
-            // thread, a profile or a community is open and the destination was
-            // set UNDERNEATH it — nothing visibly happened, so the notification
-            // read as broken.
-            //
-            // Cleared before resolving rather than inside each branch: there are
-            // a dozen branches and one of them will always be forgotten.
-            isShowingThreadView = false
-            isShowingProfileView = false
-            isShowingCommunity = false
-
-            // Live resolves through the shared model rather than a string
-            // branch, so a payload that names a stream reaches the stream even
-            // if the type is written differently than expected.
-            (resolved as? NotificationDestination.Live)?.let { live ->
-                Log.d("STITCH_MAIN", "📱 Go-live tap -> live ${live.communityID}/${live.streamID}")
-                com.stitchsocial.club.live.LiveDeepLink.request(live.communityID, live.streamID)
-                MainActivity.pendingNotificationIntent = null
-                return@LaunchedEffect
-            }
-
-            when (notificationType) {
-                // Video-related notifications → ThreadView (matches iOS AppDelegate routing)
-                "hype", "reply", "cool", "engagement",
-                "stitch", "thread", "newVideo", "mention",
-                "video", "reengagement_stitches", "reengagement_milestone",
-                "tip", "question" -> {
-                    // Cloud Functions include threadID in payload — use it for deep linking
-                    val resolvedThreadID = threadId ?: videoId
-                    if (resolvedThreadID != null) {
-                        Log.d("STITCH_MAIN", "📱 Navigating to ThreadView: thread=$resolvedThreadID, target=$videoId")
-                        threadViewThreadID = resolvedThreadID
-                        threadViewTargetVideoID = videoId
-                        isShowingThreadView = true
-                    }
-                }
-                // Follow / new subscriber → profile of the sender
-                "follow", "user", "reengagement_followers", "subscription" -> {
-                    userId?.let { id ->
-                        Log.d("STITCH_MAIN", "📱 Navigating to profile: $id")
-                        profileViewUserID = id
-                        isShowingProfileView = true
-                    }
-                }
-                // Milestone → notifications tab
-                // Going live now writes a real notification (LiveStreamService
-                // .sendGoLiveNotification). Without this branch the push
-                // arrived, showed, and did nothing when tapped.
-                "go_live" -> {
-                    val communityID = intent.getStringExtra("communityID")
-                        ?: intent.getStringExtra("community_id")
-                        ?: userId   // the sender IS the community owner
-                    if (communityID != null) {
-                        Log.d("STITCH_MAIN", "📱 Go-live tap -> community $communityID")
-                        scope.launch {
-                            val community = CommunityService.shared.fetchCommunity(communityID)
-                            if (community != null) {
-                                selectedCommunityItem = CommunityListItem(
-                                    id = community.id,
-                                    creatorUsername = community.creatorUsername,
-                                    creatorDisplayName = community.creatorDisplayName,
-                                    creatorTier = community.creatorTier,
-                                    profileImageURL = community.profileImageURL,
-                                    memberCount = community.memberCount,
-                                    userLevel = 0, userXP = 0, unreadCount = 0,
-                                    lastActivityPreview = "",
-                                    lastActivityAt = java.util.Date(),
-                                    // The whole reason for the tap.
-                                    isCreatorLive = true,
-                                    isVerified = false
-                                )
-                                // The stream id rides along so the viewer opens
-                                // directly instead of stopping at the community.
-                                autoOpenStreamID = intent.getStringExtra("streamID")
-                                    ?: intent.getStringExtra("streamId")
-                                isShowingCommunity = true
-                            } else {
-                                selectedTab = MainAppTab.NOTIFICATIONS
-                            }
-                        }
-                    }
-                }
-
-                "milestone" -> {
-                    // Milestones with videoID → ThreadView, otherwise → tab
-                    val resolvedThreadID = threadId ?: videoId
-                    if (resolvedThreadID != null) {
-                        threadViewThreadID = resolvedThreadID
-                        threadViewTargetVideoID = videoId
-                        isShowingThreadView = true
-                    } else {
-                        Log.d("STITCH_MAIN", "📱 Switching to notifications tab")
-                        selectedTab = MainAppTab.NOTIFICATIONS
-                    }
-                }
-            }
-
-            // Clear pending intent
-            MainActivity.pendingNotificationIntent = null
-            Log.d("STITCH_MAIN", "✅ Notification intent processed and cleared")
-        }
     }
 
     // Event deep-link: the Hub is presented by DiscoveryView (it owns the root
@@ -588,27 +499,18 @@ fun MainScreen() {
     val pendingLive by com.stitchsocial.club.live.LiveDeepLink.pending
     LaunchedEffect(pendingLive) {
         com.stitchsocial.club.live.LiveDeepLink.consume()?.let { target ->
-            // Same precedence rule as the notification-intent path: a tap wins
-            // over whatever is already open.
+            // Same precedence rule as the notification router: a tap wins over
+            // whatever is already open.
             isShowingThreadView = false
             isShowingProfileView = false
             val community = CommunityService.shared.fetchCommunity(target.communityID)
             if (community != null) {
-                selectedCommunityItem = CommunityListItem(
-                    id = community.id,
-                    creatorUsername = community.creatorUsername,
-                    creatorDisplayName = community.creatorDisplayName,
-                    creatorTier = community.creatorTier,
-                    profileImageURL = community.profileImageURL,
-                    memberCount = community.memberCount,
-                    userLevel = 0, userXP = 0, unreadCount = 0,
-                    lastActivityPreview = "",
-                    lastActivityAt = java.util.Date(),
-                    isCreatorLive = true,
-                    isVerified = false
-                )
+                selectedCommunityItem = communityListItem(community, isLive = true)
                 autoOpenStreamID = target.streamID
                 isShowingCommunity = true
+            } else {
+                // Gone or unreadable — the inbox beats a tap that does nothing.
+                selectedTab = MainAppTab.NOTIFICATIONS
             }
         }
     }
@@ -858,6 +760,80 @@ fun MainScreen() {
         }
     }
 
+    // ── Notification tap routing (push + inbox) ─────────────────────────────
+
+    /**
+     * A tap INTERRUPTS: everything open is closed and playback paused before the
+     * destination opens, so the destination is never set underneath something
+     * that hides it. Callers have already asked "Leave?" if that loses work.
+     */
+    fun routeNotification(request: NotificationRouter.Request) {
+        val destination = NotificationDestination.resolve(request.type, request.data)
+        Log.d("STITCH_MAIN", "📱 Routing notification: type=${request.type} -> $destination")
+        val token = ++routeToken
+
+        // Pause first so nothing keeps playing while the destination loads.
+        LocalBroadcastManager.getInstance(context)
+            .sendBroadcast(Intent(MainActivity.ACTION_PAUSE_ALL_VIDEOS))
+
+        // Close everything. A recording/review modal leaves the way its own
+        // Cancel does; a live host's screen ends the stream on dispose.
+        if (currentModal != ModalState.NONE) {
+            com.stitchsocial.club.community.CommunityClipRouter.cancel()
+            navigationCoordinator.dismissModal()
+        }
+        isShowingThreadView = false
+        threadViewThreadID = null
+        threadViewTargetVideoID = null
+        isShowingProfileView = false
+        profileViewUserID = null
+        isShowingCommunity = false
+        selectedCommunityItem = null
+        autoOpenStreamID = null
+        notificationVideo = null
+        notificationScreen = null
+        interruptGeneration++
+
+        when (destination) {
+            is NotificationDestination.Event -> {
+                com.stitchsocial.club.events.EventDeepLink.request(destination.eventID)
+                selectedTab = MainAppTab.DISCOVERY
+            }
+            is NotificationDestination.Live ->
+                com.stitchsocial.club.live.LiveDeepLink.request(destination.communityID, destination.streamID)
+            is NotificationDestination.Video -> scope.launch {
+                val video = videoService.getVideoById(destination.videoID)
+                if (token != routeToken) return@launch  // a newer tap took over
+                if (video == null || video.isDeleted) {
+                    Log.d("STITCH_MAIN", "📱 Notification video ${destination.videoID} missing -> inbox")
+                    selectedTab = MainAppTab.NOTIFICATIONS
+                } else {
+                    notificationVideo = video
+                }
+            }
+            is NotificationDestination.Profile -> {
+                profileViewUserID = destination.userID
+                isShowingProfileView = true
+            }
+            NotificationDestination.OwnProfile -> selectedTab = MainAppTab.PROGRESSION
+            is NotificationDestination.Community -> scope.launch {
+                val community = CommunityService.shared.fetchCommunity(destination.communityID)
+                if (token != routeToken) return@launch
+                if (community != null) {
+                    selectedCommunityItem = communityListItem(community, isLive = false)
+                    isShowingCommunity = true
+                } else {
+                    selectedTab = MainAppTab.NOTIFICATIONS
+                }
+            }
+            NotificationDestination.Campaigns,
+            NotificationDestination.AdOpportunities,
+            NotificationDestination.Wallet -> notificationScreen = destination
+            NotificationDestination.Home -> selectedTab = MainAppTab.HOME
+            NotificationDestination.Inbox -> selectedTab = MainAppTab.NOTIFICATIONS
+        }
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = StitchColors.background) {
         when {
             authLoading || isLoadingUser -> LoadingScreen()
@@ -907,6 +883,48 @@ fun MainScreen() {
                 )
             }
             currentUser != null -> {
+                // Notification taps are taken HERE, not at the top of MainScreen:
+                // this branch composing IS "signed in, past the age gate, main UI
+                // up". The old router waited a fixed second for auth and routed
+                // into a screen that might not exist yet; a cold tap now simply
+                // waits in NotificationRouter until this point is reached.
+                val pendingRoute by NotificationRouter.pending
+                LaunchedEffect(pendingRoute) {
+                    val request = NotificationRouter.consume() ?: return@LaunchedEffect
+                    // Ask before throwing away a recording or ending a broadcast.
+                    val loses = when {
+                        com.stitchsocial.club.live.CreatorScreenPresence.isHostingAny() ->
+                            "Your live stream will end."
+                        currentModal in setOf(
+                            ModalState.RECORDING, ModalState.REACTION, ModalState.VIDEO_REVIEW,
+                            ModalState.PARALLEL_PROCESSING, ModalState.THREAD_COMPOSER
+                        ) -> "Your recording will be lost."
+                        else -> null
+                    }
+                    if (loses != null) {
+                        routeAwaitingConfirm = request to loses  // newest tap wins
+                    } else {
+                        routeNotification(request)
+                    }
+                }
+
+                routeAwaitingConfirm?.let { (request, loses) ->
+                    AlertDialog(
+                        onDismissRequest = { routeAwaitingConfirm = null },
+                        title = { Text("Leave?") },
+                        text = { Text(loses) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                routeAwaitingConfirm = null
+                                routeNotification(request)
+                            }) { Text("Leave", color = StitchColors.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { routeAwaitingConfirm = null }) { Text("Stay") }
+                        }
+                    )
+                }
+
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Tab content with explicit lower z-index
                     var isShowingCollectionPlayer by remember { mutableStateOf(false) }
@@ -932,7 +950,10 @@ fun MainScreen() {
                             .fillMaxSize()
                             .zIndex(0f)  // Ensure this is below ThreadView
                     ) {
-                        if (currentModal == ModalState.NONE) TabContent(
+                        // Also unmounted under a notification's fullscreen video,
+                        // for the same SurfaceView reason; keyed so a notification
+                        // tap remounts it (see interruptGeneration).
+                        if (currentModal == ModalState.NONE && notificationVideo == null) key(interruptGeneration) { TabContent(
                             selectedTab = selectedTab,
                             currentUser = currentUser!!,
                             videoService = videoService,
@@ -957,7 +978,7 @@ fun MainScreen() {
                             onTabBarVisibilityChange = { visible ->
                                 isShowingCollectionPlayer = !visible
                             }
-                        )
+                        ) }
 
                         // Blocking overlay when ThreadView is active
                         if (isShowingThreadView) {
@@ -979,6 +1000,7 @@ fun MainScreen() {
                     // down there — it is what FRIENDS has instead of that tile,
                     // not as well as it.
                     if (streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
+                        notificationVideo == null && notificationScreen == null &&
                         !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
                         StreakBanner(
@@ -1026,7 +1048,7 @@ fun MainScreen() {
                         .FullScreenSurfaceState.isUp.collectAsState()
                     val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement &&
                         !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity &&
-                        !fullScreenSurfaceUp
+                        !fullScreenSurfaceUp && notificationVideo == null && notificationScreen == null
                     LaunchedEffect(shouldShowTabBar, fullScreenSurfaceUp, isShowingCommunity) {
                         Log.d(
                             "STITCH_MAIN",
@@ -1226,9 +1248,62 @@ fun MainScreen() {
                 // parent boundary, so tapping Stitch/Thread from a profile-
                 // launched player rendered the modal underneath the profile.
 
+                // Campaign / ad / wallet screen opened by a notification. Same
+                // layer as ProfileView; the screens themselves take (user, onDismiss).
+                notificationScreen?.let { screen ->
+                    val user = currentUser!!
+                    val close = { notificationScreen = null }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)
+                            .background(Color.Black)
+                    ) {
+                        androidx.activity.compose.BackHandler(onBack = close)
+                        when (screen) {
+                            NotificationDestination.Campaigns -> CreatorCampaignsHubView(
+                                currentUserID = user.id,
+                                isBrandAccount = user.isBusiness,
+                                brandName = user.displayName,
+                                brandLogoURL = user.profileImageURL,
+                                onDismiss = close
+                            )
+                            NotificationDestination.AdOpportunities ->
+                                AdOpportunitiesView(user = user, onDismiss = close)
+                            NotificationDestination.Wallet ->
+                                WalletView(userID = user.id, userTier = user.tier, onDismiss = close)
+                            else -> {}
+                        }
+                    }
+                }
+
                 // ModalOverlay — recording, video review, thread composer, etc.
                 Box(modifier = Modifier.fillMaxSize().zIndex(500f)) {
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
+                }
+
+                // The video a tapped notification is about. Above the recorder's
+                // layer (its Stitch button dismisses this first) and below
+                // ThreadView. Closing it puts the user back on their tab.
+                notificationVideo?.let { video ->
+                    Box(modifier = Modifier.fillMaxSize().zIndex(600f)) {
+                        FullscreenVideoPlayer(
+                            video = video,
+                            currentUserID = currentUser?.id,
+                            currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
+                            navigationCoordinator = navigationCoordinator,
+                            onShowThreadView = { threadID, targetVideoID ->
+                                threadViewThreadID = threadID
+                                threadViewTargetVideoID = targetVideoID
+                                isShowingThreadView = true
+                            },
+                            onShowProfile = { userID ->
+                                profileViewUserID = userID
+                                isShowingProfileView = true
+                            },
+                            onDismiss = { notificationVideo = null }
+                        )
+                    }
                 }
 
                 // ThreadView — full-screen conversation view, takes precedence

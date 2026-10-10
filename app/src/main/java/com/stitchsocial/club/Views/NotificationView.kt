@@ -92,7 +92,6 @@ import com.stitchsocial.club.viewmodels.NotificationViewModel
 import com.stitchsocial.club.viewmodels.NotificationFilter
 import com.stitchsocial.club.viewmodels.NotificationItem
 import com.stitchsocial.club.viewmodels.NotificationType
-import com.stitchsocial.club.viewmodels.NotificationNavigationEvent
 
 // Coordination
 import com.stitchsocial.club.coordination.NavigationCoordinator
@@ -169,43 +168,8 @@ fun NotificationViewComplete(
     // Time-bucketed feed sections
     val sections = remember(notifications) { groupNotifications(notifications) }
 
-    // Observe navigation events from ViewModel
-    LaunchedEffect(viewModel) {
-        Log.d("NOTIF_NAV", "🔵 Navigation collector STARTED")
-        viewModel.navigationEvent.collect { event ->
-            Log.d("NOTIF_NAV", "🔵 Event received: $event")
-            when (event) {
-                is NotificationNavigationEvent.NavigateToProfile -> {
-                    Log.d("NOTIF_NAV", "👤 -> Profile: ${event.userId}")
-                    onNavigateToProfile(event.userId)
-                }
-                is NotificationNavigationEvent.NavigateToVideo -> {
-                    Log.d("NOTIF_NAV", "-> Thread: ${event.threadId}, target: ${event.videoId}")
-                    onShowThreadView(event.threadId ?: event.videoId, event.videoId)
-                }
-                is NotificationNavigationEvent.NavigateToThread -> {
-                    Log.d("NOTIF_NAV", "🧵 -> Thread only: ${event.threadId}")
-                    onShowThreadView(event.threadId, null)
-                }
-                is NotificationNavigationEvent.NavigateToEvent -> {
-                    Log.d("NOTIF_NAV", "📅 -> Event hub: ${event.eventId}")
-                    // No callback for this one: the Hub is presented by
-                    // DiscoveryView, which isn't composed while this tab is up.
-                    // Park the id — MainActivity switches to Discovery, which
-                    // then opens the Hub and consumes it.
-                    com.stitchsocial.club.events.EventDeepLink.request(event.eventId)
-                }
-                is NotificationNavigationEvent.NavigateToLive -> {
-                    Log.d("NOTIF_NAV", "🔴 -> Live: ${event.communityID} / ${event.streamID}")
-                    // Parked for the same reason as events: the live viewer is
-                    // presented from the community screen, which isn't composed
-                    // while this tab is up.
-                    com.stitchsocial.club.live.LiveDeepLink.request(event.communityID, event.streamID)
-                }
-                NotificationNavigationEvent.None -> { }
-            }
-        }
-    }
+    // Row taps route through NotificationRouter (see onNotificationTapped) —
+    // MainScreen presents the destination, same as for a tapped push.
 
     // Load initial data
     LaunchedEffect(Unit) {

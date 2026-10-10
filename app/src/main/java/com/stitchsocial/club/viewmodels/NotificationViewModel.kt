@@ -34,20 +34,6 @@ import kotlinx.coroutines.tasks.await
 import java.util.*
 
 /**
- * Navigation events emitted by NotificationViewModel
- */
-sealed class NotificationNavigationEvent {
-    data class NavigateToProfile(val userId: String) : NotificationNavigationEvent()
-    data class NavigateToVideo(val videoId: String, val threadId: String? = null) : NotificationNavigationEvent()
-    data class NavigateToThread(val threadId: String) : NotificationNavigationEvent()
-    /** Event invite -> that event's Hub (presented by DiscoveryView). */
-    data class NavigateToEvent(val eventId: String) : NotificationNavigationEvent()
-    /** Go-live -> the STREAM, not the creator's profile. */
-    data class NavigateToLive(val communityID: String, val streamID: String?) : NotificationNavigationEvent()
-    object None : NotificationNavigationEvent()
-}
-
-/**
  * Notification ViewModel with complete Firebase integration and navigation
  */
 class NotificationViewModel(
@@ -88,23 +74,10 @@ class NotificationViewModel(
     private val _filteredNotifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val filteredNotifications: StateFlow<List<NotificationItem>> = _filteredNotifications.asStateFlow()
 
-    // MARK: - Navigation Events
-
-    private val _navigationEvent = MutableSharedFlow<NotificationNavigationEvent>(
-        replay = 1,
-        extraBufferCapacity = 5
-    )
-    val navigationEvent: SharedFlow<NotificationNavigationEvent> = _navigationEvent.asSharedFlow()
-
     // MARK: - Profile Image Cache
 
     private val _profileImages = MutableStateFlow<Map<String, String>>(emptyMap())
     val profileImages: StateFlow<Map<String, String>> = _profileImages.asStateFlow()
-
-    // MARK: - ThreadID Resolution Cache
-    // Caches videoID → threadID lookups to avoid repeat Firestore reads
-    // when user taps same notification multiple times
-    private val threadIDCache = mutableMapOf<String, String>()
 
     // MARK: - Initialization
 
@@ -207,6 +180,7 @@ class NotificationViewModel(
             message = firebaseNotification.message,
             timestamp = firebaseNotification.createdAt,
             isRead = firebaseNotification.isRead,
+            rawType = firebaseNotification.rawType,
             actionData = buildMap {
                 put("userId", firebaseNotification.senderID)
                 put("senderID", firebaseNotification.senderID)
@@ -293,205 +267,20 @@ class NotificationViewModel(
     // MARK: - Notification Actions
 
     /**
-     * Handle notification tap with proper navigation
-     * Matches iOS handleNotificationTap exactly:
-     * 1. Follow -> profile
-     * 2. Video-related -> try threadID from payload, fallback to video fetch
-     * 3. Milestone -> video if available
+     * Handle a notification row tap.
      *
-     * CACHING: threadID lookups cached in threadIDCache to avoid
-     * repeat Firestore reads on re-taps of same notification.
+     * Hands the raw type + payload to [NotificationRouter] — the SAME hand-off a
+     * tapped push uses — so the row and the push land in the same place by
+     * construction. This used to run its own resolver ladder plus a threadID
+     * lookup, and drifted from the push path more than once.
      */
     fun onNotificationTapped(notification: NotificationItem) {
         viewModelScope.launch {
-            Log.d(TAG, "NOTIF tapped: ${notification.type} | keys: ${notification.actionData.keys}")
-
-            // Mark as read
+            Log.d(TAG, "NOTIF tapped: ${notification.rawType} | keys: ${notification.actionData.keys}")
             markAsRead(notification.id)
-
-            // PAYLOAD-FIRST APPROACH: Check what data exists rather than relying
-            // on type mapping (which may fall through to SYSTEM_UPDATE due to
-            // StitchNotificationType enum mismatch with Firestore values).
-            val videoId = notification.actionData["videoID"] as? String
-                ?: notification.actionData["videoId"] as? String
-            val hasVideo = !videoId.isNullOrEmpty()
-
-            val senderUserId = notification.actionData["senderID"] as? String
-                ?: notification.actionData["userId"] as? String
-                ?: notification.actionData["senderId"] as? String
-
-            // Event invite. EventsViewModel.inviteUsers writes these as SYSTEM
-            // with a notificationType="event_invite" payload key (there is no
-            // event case in StitchNotificationType — iOS does the same), so the
-            // payload's eventID is the only dependable signal here.
-            val eventId = notification.actionData["eventID"] as? String
-                ?: notification.actionData["eventId"] as? String
-
-            // Go-live. sendGoLiveNotification writes communityID + streamID into
-            // the payload; the community falls back to senderID because the
-            // sender IS the community owner.
-            val liveStreamId = notification.actionData["streamID"] as? String
-                ?: notification.actionData["streamId"] as? String
-            val liveCommunityId = notification.actionData["communityID"] as? String
-                ?: notification.actionData["communityId"] as? String
-                ?: senderUserId
-
-            // Determine intent from BOTH type AND payload
-            val isFollowType = notification.type == NotificationType.NEW_FOLLOWER
-                    || notification.actionData["engagementType"]?.toString() == "follow"
-            val isTierUpgrade = notification.type == NotificationType.TIER_UPGRADED
-
-            // SHARED RESOLVER first, so the in-app list and the push intent
-            // can't disagree about where a notification goes. That drift is
-            // exactly how go-live opened the creator's profile here while the
-            // push path opened their community.
-            //
-            // The hand-rolled ladder below still handles the cases the model
-            // deliberately leaves alone — tier-upgrade opens YOUR profile, which
-            // needs the current user rather than anything in the payload.
-            val destination = NotificationDestination.resolve(
-                notification.type.name.lowercase(),
-                notification.actionData + mapOf(
-                    "senderID" to senderUserId,
-                    "videoID" to videoId,
-                    "eventID" to eventId,
-                    "streamID" to liveStreamId,
-                    "communityID" to liveCommunityId
-                )
-            )
-            when (destination) {
-                is NotificationDestination.Event -> {
-                    Log.d(TAG, "NAV -> Event hub: ${destination.eventID}")
-                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToEvent(destination.eventID))
-                    return@launch
-                }
-                is NotificationDestination.Live -> {
-                    Log.d(TAG, "NAV -> Live: ${destination.communityID}/${destination.streamID}")
-                    _navigationEvent.emit(
-                        NotificationNavigationEvent.NavigateToLive(destination.communityID, destination.streamID)
-                    )
-                    return@launch
-                }
-                else -> Unit
-            }
-
-            when {
-                // Event invite -> the event's Hub. FIRST on purpose: an invite
-                // carries a senderID and no videoID, so the generic sender
-                // fallback below would otherwise swallow it and open the
-                // inviter's profile instead of the event.
-                !eventId.isNullOrEmpty() -> {
-                    Log.d(TAG, "NAV -> Event hub: $eventId")
-                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToEvent(eventId))
-                }
-
-                // GO-LIVE -> the stream. Placed above the sender fallbacks for
-                // the same reason as the event branch: a go-live notification
-                // carries a senderID and NO videoID, so "has sender but no
-                // video" swallowed it and opened the creator's PROFILE — the one
-                // place the viewer can't watch from.
-                notification.type == NotificationType.GO_LIVE && liveCommunityId != null -> {
-                    Log.d(TAG, "NAV -> Live: community=$liveCommunityId stream=$liveStreamId")
-                    _navigationEvent.emit(
-                        NotificationNavigationEvent.NavigateToLive(liveCommunityId, liveStreamId)
-                    )
-                }
-
-                // Follow notification (no video) -> profile
-                isFollowType && !hasVideo && senderUserId != null -> {
-                    Log.d(TAG, "NAV -> Profile (follow): $senderUserId")
-                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(senderUserId))
-                }
-
-                // Has videoID -> navigate to thread (covers hype, cool, reply, share, newVideo, mention, milestone)
-                hasVideo -> {
-                    val threadId = resolveThreadID(videoId!!, notification.actionData)
-                    Log.d(TAG, "NAV -> Thread: $threadId, target: $videoId")
-                    _navigationEvent.emit(
-                        NotificationNavigationEvent.NavigateToVideo(
-                            videoId = videoId,
-                            threadId = threadId
-                        )
-                    )
-                }
-
-                // Tier upgrade -> own profile
-                isTierUpgrade -> {
-                    val userId = getCurrentUserId()
-                    if (userId.isNotEmpty()) {
-                        Log.d(TAG, "NAV -> Profile (tier): $userId")
-                        _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(userId))
-                    }
-                }
-
-                // Has sender but no video -> profile
-                senderUserId != null -> {
-                    Log.d(TAG, "NAV -> Profile (fallback): $senderUserId")
-                    _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(senderUserId))
-                }
-
-                else -> {
-                    Log.w(TAG, "No navigation possible - no videoID or senderID in payload")
-                }
-            }
-        }
-    }
-
-    /**
-     * Resolve threadID for a video - matches iOS fallback logic:
-     * 1. Check payload for threadID
-     * 2. Check local cache
-     * 3. Fetch video from Firestore to resolve threadID
-     * 4. Fallback: use videoID as threadID
-     *
-     * CACHING: Results stored in threadIDCache (in-memory, cleared on ViewModel destroy)
-     */
-    private suspend fun resolveThreadID(videoId: String, actionData: Map<String, Any>): String {
-        // 1. Try threadID from payload (Cloud Functions now include this)
-        val payloadThreadId = actionData["threadID"] as? String
-            ?: actionData["threadId"] as? String
-        if (!payloadThreadId.isNullOrEmpty()) {
-            threadIDCache[videoId] = payloadThreadId
-            return payloadThreadId
-        }
-
-        // 2. Check local cache
-        threadIDCache[videoId]?.let { return it }
-
-        // 3. Fetch video from Firestore to resolve real threadID (matches iOS fallback)
-        return try {
-            val video = videoService.getVideoById(videoId)
-            val resolvedThreadId = video?.threadID ?: video?.id ?: videoId
-            threadIDCache[videoId] = resolvedThreadId
-            Log.d(TAG, "Resolved threadID from Firestore: $videoId -> $resolvedThreadId")
-            resolvedThreadId
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve threadID for $videoId, using fallback")
-            videoId
-        }
-    }
-
-    /**
-     * Navigate to a specific user's profile
-     */
-    fun navigateToProfile(userId: String) {
-        viewModelScope.launch {
-            Log.d(TAG, "ðŸ“± Direct navigation to profile: $userId")
-            _navigationEvent.emit(NotificationNavigationEvent.NavigateToProfile(userId))
-        }
-    }
-
-    /**
-     * Navigate to a specific video/thread
-     */
-    fun navigateToVideo(videoId: String, threadId: String? = null) {
-        viewModelScope.launch {
-            Log.d(TAG, "ðŸ“± Direct navigation to video: $videoId")
-            _navigationEvent.emit(
-                NotificationNavigationEvent.NavigateToVideo(
-                    videoId = videoId,
-                    threadId = threadId ?: videoId
-                )
+            NotificationRouter.request(
+                notification.rawType.ifBlank { notification.type.name.lowercase() },
+                notification.actionData.mapValues { it.value.toString() }
             )
         }
     }
@@ -636,7 +425,9 @@ data class NotificationItem(
     val message: String,
     val timestamp: Date,
     val isRead: Boolean,
-    val actionData: Map<String, Any> = emptyMap()
+    val actionData: Map<String, Any> = emptyMap(),
+    /** The stored type string, for routing (see NotificationDestination.resolve). */
+    val rawType: String = ""
 ) {
     val timeAgo: String
         get() {

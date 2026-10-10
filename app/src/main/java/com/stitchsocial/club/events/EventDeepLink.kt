@@ -17,7 +17,7 @@ import androidx.compose.runtime.mutableStateOf
  *
  * Compose state rather than a plain var so DiscoveryView can key a
  * LaunchedEffect on it and react the moment it's set — the same shape as
- * `MainActivity.notificationTrigger`. Process-scoped `object` so the id survives
+ * [com.stitchsocial.club.foundation.NotificationRouter]. Process-scoped `object` so the id survives
  * the tab switch (and the Activity recreation a cold-start tap goes through),
  * mirroring [EventMomentBridge].
  */
