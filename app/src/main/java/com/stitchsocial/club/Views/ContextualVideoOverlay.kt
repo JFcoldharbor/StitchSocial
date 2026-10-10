@@ -1336,6 +1336,7 @@ private fun TopSection(
                 temperatureColor = temperatureColor,
                 isThread = false,
                 collaborators = video.collaborators,
+                landingVideo = video,
                 onClick = {
                     pauseAllVideos(context)
                     onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
@@ -1642,6 +1643,12 @@ private fun CreatorPill(
     /// Accepted collaborators, for the "with @x" credit. Empty on nearly every
     /// post, so the line simply does not render rather than reserving space.
     collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
+    /// Posted from a Landing's post step (`incentivized`). The label is how a
+    /// paid-for post stays honest, so it sits with the name, on every surface
+    /// this overlay renders (feed, thread, fullscreen).
+    /// The video whose Landing chips ("At {name}", "Posted for a perk") sit
+    /// under the name. Only the video's own creator pill passes it.
+    landingVideo: com.stitchsocial.club.foundation.CoreVideoMetadata? = null,
     onClick: () -> Unit
 ) {
     val imageSize: Dp = if (isThread) OverlaySizes.PROFILE_IMAGE_THREAD else OverlaySizes.PROFILE_IMAGE
@@ -1742,6 +1749,15 @@ private fun CreatorPill(
                     fontWeight = FontWeight.Medium,
                     color = Color.White.copy(alpha = 0.6f),
                     maxLines = 1
+                )
+            }
+            if (landingVideo != null) {
+                val pillContext = LocalContext.current
+                com.stitchsocial.club.landing.VideoLandingChips(
+                    video = landingVideo,
+                    modifier = Modifier.padding(top = 3.dp),
+                    fontSize = threadLabelSize,
+                    beforeOpen = { pauseAllVideos(pillContext) }
                 )
             }
         }

@@ -420,7 +420,13 @@ class DiscoveryViewModel(
             collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             collaborators = com.stitchsocial.club.services.Collaborator.list(data["collaborators"]),
-            collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"])
+            collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"]),
+            // Landings: drives the "Posted for a perk" label.
+            landingID = data["landingID"] as? String,
+            landingSpot = data["landingSpot"] as? String,
+            incentivized = data["incentivized"] as? Boolean ?: false,
+            landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
+            landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -834,10 +840,18 @@ fun DiscoveryView(
     // Follow manager for search (needs context)
     val followManager = remember { FollowManager(context) }
 
-    // Sponsored slot tap: record (session-deduped) + open ctaURL externally — mirrors iOS
+    // Sponsored slot tap: record (session-deduped) + open ctaURL externally — mirrors iOS.
+    // A Landing-linked promotion (ctaKind "landing_claim") instead opens the
+    // Landing in-app and claims its welcome perk (source "sponsored").
     val openSponsoredSlot: (SponsoredSlot) -> Unit = { slot ->
         sponsoredSlotService.recordTap(slot.id)
-        if (slot.ctaURL.isNotBlank()) {
+        if (slot.isLandingClaim) {
+            com.stitchsocial.club.landing.LandingPresenter.route(
+                slug = slot.landingSlug!!,
+                source = com.stitchsocial.club.landing.LandingSource.SPONSORED,
+                autoClaim = true
+            )
+        } else if (slot.ctaURL.isNotBlank()) {
             try {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(slot.ctaURL)))
             } catch (e: Exception) {
@@ -1265,6 +1279,15 @@ fun DiscoveryView(
                         currentSwipeIndex = 0 // Reset swipe position
                     }
                 )
+
+                // Stitch Landings: live restaurants nearby. Only when location
+                // is already granted (the row never asks) and only on For You;
+                // it renders nothing when there are none.
+                if (selectedCategory == DiscoveryCategory.FOR_YOU && selectedHashtag == null) {
+                    com.stitchsocial.club.landing.NearYouLandingsRow(
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                    )
+                }
 
                 // Trending Hashtags (show when Trending category selected)
                 if (selectedCategory == DiscoveryCategory.TRENDING) {

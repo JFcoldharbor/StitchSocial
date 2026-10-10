@@ -31,7 +31,7 @@ object NotificationRouter {
     )
 
     /**
-     * Type for a tapped stitchsocial.me link (/v/, /u/, /e/). Links carry only
+     * Type for a tapped stitchsocial.me link (/v/, /u/, /e/, /l/). Links carry only
      * the id, so [NotificationDestination.resolve] reads it from the payload.
      */
     const val TYPE_SHARED_LINK = "shared_link"

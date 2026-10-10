@@ -1141,6 +1141,10 @@ private fun ThreadCard(
                 ChallengeBadge(status = status)
             }
 
+            // Stitch Landings: posted from a Landing's post step.
+            // Addendum 1: plus "At {name}" when the server tagged it.
+            com.stitchsocial.club.landing.VideoLandingChips(video = video)
+
             // Title
             Text(
                 text = video.title,

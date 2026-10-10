@@ -26,9 +26,18 @@ data class SponsoredSlot(
     val videoURL: String = "",          // set = video ad, played inside SponsoredSwipeCard
     val isActive: Boolean = false,
     val startAt: Date? = null,
-    val endAt: Date? = null
+    val endAt: Date? = null,
+    /// Landings addendum 1: "landing_claim" when the promotion links the
+    /// brand's Landing. The CTA then claims the welcome perk in-app; ctaURL
+    /// (stitchsocial.me/l/<slug>) is only the fallback for old builds.
+    val ctaKind: String? = null,
+    val landingID: String? = null,
+    val landingSlug: String? = null
 ) {
     val hasVideo: Boolean get() = videoURL.isNotBlank()
+
+    /** The CTA claims a Landing's welcome perk in-app rather than opening a URL. */
+    val isLandingClaim: Boolean get() = ctaKind == "landing_claim" && !landingSlug.isNullOrBlank()
 
     /** The creative as something VideoPlayerComposable can play. Never a feed item. */
     fun playerMetadata(): CoreVideoMetadata = CoreVideoMetadata(
@@ -86,7 +95,10 @@ data class SponsoredSlot(
                 videoURL = data["videoURL"] as? String ?: "",
                 isActive = data["isActive"] as? Boolean ?: false,
                 startAt = (data["startAt"] as? Timestamp)?.toDate(),
-                endAt = (data["endAt"] as? Timestamp)?.toDate()
+                endAt = (data["endAt"] as? Timestamp)?.toDate(),
+                ctaKind = (data["ctaKind"] as? String)?.takeIf { it.isNotBlank() },
+                landingID = (data["landingID"] as? String)?.takeIf { it.isNotBlank() },
+                landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }

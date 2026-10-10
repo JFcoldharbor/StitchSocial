@@ -129,7 +129,19 @@ data class CoreVideoMetadata(
     val collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
     val collabBoost: com.stitchsocial.club.services.CollabBoost? = null,
     /// Coins tipped on this video, all time (videos/{id}.coinTotal).
-    val coinTotal: Int = 0
+    val coinTotal: Int = 0,
+
+    // Stitch Landings (LANDINGS_CONTRACT). Written at upload when the post
+    // came from a Landing's post step; the server trigger clears them if the
+    // visit doesn't check out. `incentivized` is what puts the "Posted for a
+    // perk" label on the video everywhere it renders.
+    val landingID: String? = null,
+    val landingSpot: String? = null,
+    val incentivized: Boolean = false,
+    // Addendum 1: written by the server trigger once the tag checks out. When
+    // `landingSlug` is set the video carries the "At {landingName}" chip.
+    val landingName: String? = null,
+    val landingSlug: String? = null
 ) {
     // Computed properties
 

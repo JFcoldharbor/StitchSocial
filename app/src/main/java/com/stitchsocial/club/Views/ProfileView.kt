@@ -664,6 +664,24 @@ fun ProfileView(
                         )
                     }
 
+                    // Stitch Landings: My perks, and a business owner's Landing tab.
+                    if (isOwnProfile) {
+                        item {
+                            com.stitchsocial.club.landing.ProfileLandingEntries(
+                                isBusiness = currentUser?.isBusiness == true,
+                                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
+                            )
+                        }
+                    } else if (currentUser?.isBusiness == true) {
+                        // A restaurant's profile: its Landing (source "profile").
+                        item {
+                            com.stitchsocial.club.landing.RestaurantProfileLandingEntry(
+                                businessID = userID,
+                                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs)
+                            )
+                        }
+                    }
+
                     // Collections row — contextual, show-grouped, mirrors iOS ProfileCollectionsRow
                     item {
                         ProfileCollectionsRow(

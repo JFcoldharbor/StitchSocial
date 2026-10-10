@@ -100,6 +100,10 @@ class SearchViewModel(
     private val _videoResults = MutableStateFlow<List<CoreVideoMetadata>>(emptyList())
     val videoResults: StateFlow<List<CoreVideoMetadata>> = _videoResults.asStateFlow()
 
+    /** Addendum 1: restaurants (live Landings) matching the query, via landing_search. */
+    private val _landingResults = MutableStateFlow<List<com.stitchsocial.club.landing.LandingSearchResult>>(emptyList())
+    val landingResults: StateFlow<List<com.stitchsocial.club.landing.LandingSearchResult>> = _landingResults.asStateFlow()
+
     private val _hasSearched = MutableStateFlow(false)
     val hasSearched: StateFlow<Boolean> = _hasSearched.asStateFlow()
 
@@ -166,10 +170,17 @@ class SearchViewModel(
             _isSearching.value = true
             _hasSearched.value = true
             try {
+                // Restaurants alongside people and videos; a failure here
+                // just means no Restaurants section.
+                val landings = async {
+                    runCatching { com.stitchsocial.club.landing.LandingService.search(query) }
+                        .getOrDefault(emptyList())
+                }
                 val users = searchService.searchUsers(query, limit = 30)
                 val videos = searchService.searchVideos(query, limit = 20)
                 _userResults.value = users
                 _videoResults.value = videos
+                _landingResults.value = landings.await()
                 followManager.loadFollowStatesForUsers(users)
                 if (BuildConfig.DEBUG) { println("🔍 SEARCH: query='$query' users=${users.size} videos=${videos.size}") }
             } catch (e: Exception) {
@@ -228,6 +239,7 @@ class SearchViewModel(
     fun clearResults() {
         _userResults.value = emptyList()
         _videoResults.value = emptyList()
+        _landingResults.value = emptyList()
         _hasSearched.value = false
     }
 
@@ -256,6 +268,7 @@ fun SearchView(
     val isSearching by viewModel.isSearching.collectAsState()
     val userResults by viewModel.userResults.collectAsState()
     val videoResults by viewModel.videoResults.collectAsState()
+    val landingResults by viewModel.landingResults.collectAsState()
     val hasSearched by viewModel.hasSearched.collectAsState()
     val suggestedUsers by viewModel.suggestedUsers.collectAsState()
     val recentUsers by viewModel.recentUsers.collectAsState()
@@ -316,6 +329,7 @@ fun SearchView(
                     selectedTab = selectedTab,
                     userResults = userResults,
                     videoResults = videoResults,
+                    landingResults = landingResults,
                     hasSearched = hasSearched,
                     followingStates = followingStates,
                     viewModel = viewModel,
@@ -461,6 +475,7 @@ private fun ResultsSection(
     selectedTab: SearchTab,
     userResults: List<BasicUserInfo>,
     videoResults: List<CoreVideoMetadata>,
+    landingResults: List<com.stitchsocial.club.landing.LandingSearchResult>,
     hasSearched: Boolean,
     followingStates: Map<String, Boolean>,
     viewModel: SearchViewModel,
@@ -478,6 +493,25 @@ private fun ResultsSection(
 
         val showUsers = selectedTab == SearchTab.ALL || selectedTab == SearchTab.USERS
         val showVideos = selectedTab == SearchTab.ALL || selectedTab == SearchTab.VIDEOS
+
+        // Restaurants, above everything else, when landing_search found any.
+        if (selectedTab == SearchTab.ALL && landingResults.isNotEmpty()) {
+            item(key = "restaurants_header") {
+                Text(
+                    "Restaurants", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    color = AppTheme.colors.textPrimary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+            items(landingResults, key = { "landing_${it.landingID}" }) { landing ->
+                RestaurantSearchRow(landing) {
+                    com.stitchsocial.club.landing.LandingPresenter.route(
+                        slug = landing.slug,
+                        source = com.stitchsocial.club.landing.LandingSource.SEARCH
+                    )
+                }
+            }
+        }
 
         if (showUsers) {
             items(userResults, key = { it.id }) { user ->
@@ -498,8 +532,35 @@ private fun ResultsSection(
             }
         }
 
-        if (hasSearched && userResults.isEmpty() && videoResults.isEmpty()) {
+        if (hasSearched && userResults.isEmpty() && videoResults.isEmpty() && landingResults.isEmpty()) {
             item { NoResultsView(Modifier.fillParentMaxSize()) }
+        }
+    }
+}
+
+@Composable
+private fun RestaurantSearchRow(
+    landing: com.stitchsocial.club.landing.LandingSearchResult,
+    onTap: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        com.stitchsocial.club.landing.LandingLogo(landing.name, landing.logoURL, 44.dp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                landing.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                color = AppTheme.colors.textPrimary, maxLines = 1
+            )
+            Text(
+                landing.neighborhood?.let { "Restaurant · $it" } ?: "Restaurant",
+                fontSize = 13.sp, color = AppTheme.colors.textSecondary, maxLines = 1
+            )
         }
     }
 }

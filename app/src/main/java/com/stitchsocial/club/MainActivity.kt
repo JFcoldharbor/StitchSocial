@@ -130,6 +130,11 @@ class MainActivity : ComponentActivity() {
         // ExoPlayer playback (black video) and all prefetch. One-shot setup.
         com.stitchsocial.club.services.VideoDiskCache.init(this)
 
+        // Stitch Landings: read the Play Install Referrer once per install, so a
+        // guest who scanned a table QR before having the app lands on that
+        // restaurant after signup (first-launch routing, LandingArrival).
+        com.stitchsocial.club.landing.LandingReferrer.readOnce(this)
+
         // Bootstrap LinkedAccountManager so AuthService can use the
         // static `shared` accessor when seeding linked accounts on signIn.
         com.stitchsocial.club.services.LinkedAccountManager.getInstance(this)
@@ -291,6 +296,17 @@ class MainActivity : ComponentActivity() {
         segmentAfter("e")?.let { eventID ->
             Log.d("STITCH_MAIN", "🔗 LINK: event $eventID")
             NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("eventID" to eventID))
+            return
+        }
+
+        // /l/{slug}?t={spot}: a Landing (a restaurant's table QR). Routed like
+        // any shared link, so it interrupts and asks "Leave?" the same way.
+        segmentAfter("l")?.let { slug ->
+            val spot = uri.getQueryParameter("t")?.takeIf { it.isNotBlank() }
+            Log.d("STITCH_MAIN", "🔗 LINK: landing $slug (spot=$spot)")
+            val data = mutableMapOf("landingSlug" to slug)
+            spot?.let { data["landingSpot"] = it }
+            NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, data)
             return
         }
 
@@ -775,6 +791,8 @@ fun MainScreen() {
         notificationVideo = null
         notificationScreen = null
         notificationCampaign = null
+        com.stitchsocial.club.landing.LandingPresenter.dismissAll()
+        com.stitchsocial.club.landing.LandingPostRouter.cancel()
         interruptGeneration++
 
         when (destination) {
@@ -830,6 +848,11 @@ fun MainScreen() {
             NotificationDestination.Campaigns,
             NotificationDestination.AdOpportunities,
             NotificationDestination.Wallet -> notificationScreen = destination
+            is NotificationDestination.Landing -> com.stitchsocial.club.landing.LandingPresenter.open(
+                com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
+                    destination.slug, destination.spot, destination.source, destination.autoClaim
+                )
+            )
             NotificationDestination.Home -> selectedTab = MainAppTab.HOME
             NotificationDestination.Inbox -> selectedTab = MainAppTab.NOTIFICATIONS
         }
@@ -912,6 +935,11 @@ fun MainScreen() {
                     }
                 }
 
+                // Stitch Landings first-launch routing (referrer → handoff →
+                // location → Home banner). Here for the same reason as the
+                // router above: this branch is "signed up, past the age gate".
+                com.stitchsocial.club.landing.LandingArrival(accountCreatedAt = currentUser?.createdAt)
+
                 routeAwaitingConfirm?.let { (request, loses) ->
                     AlertDialog(
                         onDismissRequest = { routeAwaitingConfirm = null },
@@ -932,6 +960,12 @@ fun MainScreen() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Tab content with explicit lower z-index
                     var isShowingCollectionPlayer by remember { mutableStateOf(false) }
+
+                    // Landing surfaces (guest page, My perks, owner tab, active
+                    // ticket) — see LandingPresenter.
+                    val landingScreen by com.stitchsocial.club.landing.LandingPresenter.screen
+                    val activePerk by com.stitchsocial.club.landing.LandingPresenter.activePerk
+                    val landingBanner by com.stitchsocial.club.landing.LandingPresenter.homeBanner
 
                     // Streak "or die" banner — loaded once per session, shown
                     // globally (every tab) when the streak is at risk, until dismissed.
@@ -1004,7 +1038,7 @@ fun MainScreen() {
                     // down there — it is what FRIENDS has instead of that tile,
                     // not as well as it.
                     if (streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
-                        notificationVideo == null && notificationScreen == null &&
+                        notificationVideo == null && notificationScreen == null && landingScreen == null &&
                         !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
                         StreakBanner(
@@ -1021,6 +1055,26 @@ fun MainScreen() {
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .zIndex(60f)
                         )
+                    }
+
+                    // First-launch fallback: the nearest Landing, on Home (and
+                    // Discovery, which is where the app opens). Same layer and
+                    // suppression rules as the streak banner.
+                    landingBanner?.let { nearest ->
+                        if ((selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.DISCOVERY) &&
+                            currentModal == ModalState.NONE && !isShowingThreadView && notificationVideo == null &&
+                            notificationScreen == null && landingScreen == null && !isShowingAnnouncement &&
+                            !isShowingCollectionPlayer && !isShowingCommunity
+                        ) {
+                            com.stitchsocial.club.landing.LandingHomeBanner(
+                                landing = nearest,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    .zIndex(61f)
+                            )
+                        }
                     }
 
                     // ThreadView and ModalOverlay are intentionally moved OUT
@@ -1052,7 +1106,8 @@ fun MainScreen() {
                         .FullScreenSurfaceState.isUp.collectAsState()
                     val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement &&
                         !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity &&
-                        !fullScreenSurfaceUp && notificationVideo == null && notificationScreen == null
+                        !fullScreenSurfaceUp && notificationVideo == null && notificationScreen == null &&
+                        landingScreen == null && activePerk == null
                     LaunchedEffect(shouldShowTabBar, fullScreenSurfaceUp, isShowingCommunity) {
                         Log.d(
                             "STITCH_MAIN",
@@ -1290,6 +1345,41 @@ fun MainScreen() {
                     }
                 }
 
+                // Landing screens — same layer as the notification screens. The
+                // recorder (500) opens over a guest Landing and closes back
+                // onto it, which is where "Unlocking…" is waiting.
+                com.stitchsocial.club.landing.LandingPresenter.screen.value?.let { screen ->
+                    val closeLanding = { com.stitchsocial.club.landing.LandingPresenter.close() }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)
+                            .background(Color.Black)
+                    ) {
+                        when (screen) {
+                            is com.stitchsocial.club.landing.LandingPresenter.Screen.Guest ->
+                                com.stitchsocial.club.landing.LandingScreen(
+                                    slug = screen.slug,
+                                    spot = screen.spot,
+                                    source = screen.source,
+                                    autoClaim = screen.autoClaim,
+                                    onDismiss = closeLanding,
+                                    onRecord = {
+                                        navigationCoordinator.showModal(
+                                            ModalState.RECORDING,
+                                            mapOf("context" to RecordingContext.NewThread)
+                                        )
+                                    },
+                                    onOpenVideo = { video -> notificationVideo = video }
+                                )
+                            com.stitchsocial.club.landing.LandingPresenter.Screen.MyPerks ->
+                                com.stitchsocial.club.landing.MyPerksScreen(onDismiss = closeLanding)
+                            com.stitchsocial.club.landing.LandingPresenter.Screen.Owner ->
+                                com.stitchsocial.club.landing.LandingOwnerScreen(onDismiss = closeLanding)
+                        }
+                    }
+                }
+
                 // ModalOverlay — recording, video review, thread composer, etc.
                 Box(modifier = Modifier.fillMaxSize().zIndex(500f)) {
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
@@ -1315,6 +1405,18 @@ fun MainScreen() {
                                 isShowingProfileView = true
                             },
                             onDismiss = { notificationVideo = null }
+                        )
+                    }
+                }
+
+                // The active perk ticket — above everything the guest might
+                // have open, because it's what they're holding up at a register.
+                com.stitchsocial.club.landing.LandingPresenter.activePerk.value?.let { perk ->
+                    Box(modifier = Modifier.fillMaxSize().zIndex(700f)) {
+                        com.stitchsocial.club.landing.ActivePerkScreen(
+                            perk = perk,
+                            username = currentUser?.username ?: "",
+                            onDismiss = { com.stitchsocial.club.landing.LandingPresenter.activePerk.value = null }
                         )
                     }
                 }
@@ -1411,6 +1513,7 @@ private fun ModalOverlay(
                         onCancel = {
                             if (BuildConfig.DEBUG) { println("❌ MAINACT: Camera CANCELLED - dismissing modal") }
                             com.stitchsocial.club.community.CommunityClipRouter.cancel()
+                            com.stitchsocial.club.landing.LandingPostRouter.cancel()
                             navigationCoordinator.dismissModal()
                         },
                         onStopAllVideos = {},
@@ -1587,6 +1690,7 @@ private fun ModalOverlay(
                             onCancel = {
                                 if (BuildConfig.DEBUG) { println("❌ MAINACT: Video editing CANCELLED") }
                                 com.stitchsocial.club.community.CommunityClipRouter.cancel()
+                                com.stitchsocial.club.landing.LandingPostRouter.cancel()
                                 navigationCoordinator.dismissModal()
                             },
                             modifier = Modifier.fillMaxSize()
@@ -1645,7 +1749,10 @@ private fun ModalOverlay(
                                 draftManager.deleteActiveDraftAfterPost()
                                 navigationCoordinator.dismissModal(); onTabChange(MainAppTab.HOME)
                             },
-                            onCancel = { navigationCoordinator.dismissModal() },
+                            onCancel = {
+                                com.stitchsocial.club.landing.LandingPostRouter.cancel()
+                                navigationCoordinator.dismissModal()
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {

@@ -151,6 +151,11 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.0.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
+    // Play Install Referrer — a Landing QR scan sends Android to the Play Store
+    // with referrer=landing=<slug>&t=<spot>; read once on first launch so the
+    // new account lands on that restaurant (LandingReferrer).
+    implementation("com.android.installreferrer:installreferrer:2.2")
+
     // Google Play Billing — HypeCoin in-app purchases
     implementation("com.android.billingclient:billing-ktx:7.0.0")
 

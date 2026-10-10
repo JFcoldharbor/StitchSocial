@@ -886,7 +886,7 @@ class VideoCoordinator(
         // This will be set after document creation
         var finalThreadID = metadata.threadID
 
-        val documentData = mapOf(
+        val baseDocumentData = mapOf(
             "title" to metadata.title,
             "description" to metadata.description,
             "videoURL" to metadata.videoURL,
@@ -952,12 +952,21 @@ class VideoCoordinator(
             "publicVisibility" to "pending"
         )
 
+        // Stitch Landings: a post recorded from a Landing's post step carries
+        // landingID / landingSpot / landingVisitID / incentivized. Write-once
+        // fields (create only, per firestore.rules); onLandingVideoCreated
+        // validates the visit and issues the post perk. Taking the fields
+        // disarms the router, so only this one post is tagged.
+        val landingTag = com.stitchsocial.club.landing.LandingPostRouter.takeFields()
+        val documentData = if (landingTag != null) baseDocumentData + landingTag.second else baseDocumentData
+
         return try {
             if (BuildConfig.DEBUG) { println("💾 DATABASE: Adding document to 'videos' collection...") }
             println("👥 DATABASE: Tagged users: ${taggedUserIDs.size}") // NEW: Log tagged users
 
             val documentRef = db.collection("videos").add(documentData).await()
             val videoId = documentRef.id
+            landingTag?.let { com.stitchsocial.club.landing.LandingPostRouter.didPost(it.first.landingID, videoId) }
 
             // ✅ CRITICAL: For new threads, update threadID to match video ID
             if (metadata.contentType == ContentType.THREAD && metadata.threadID == null) {
@@ -976,7 +985,10 @@ class VideoCoordinator(
                 creatorID = creatorID,
                 createdAt = now.toDate(),
                 threadID = finalThreadID,
-                taggedUserIDs = taggedUserIDs // NEW: Include in returned metadata
+                taggedUserIDs = taggedUserIDs, // NEW: Include in returned metadata
+                landingID = landingTag?.first?.landingID,
+                landingSpot = landingTag?.first?.spot,
+                incentivized = landingTag != null
             )
 
         } catch (e: Exception) {

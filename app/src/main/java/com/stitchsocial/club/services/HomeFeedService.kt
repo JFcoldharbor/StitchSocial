@@ -455,7 +455,13 @@ class HomeFeedService(
                 collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 collaborators = com.stitchsocial.club.services.Collaborator.list(data["collaborators"]),
-                collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"])
+                collabBoost = com.stitchsocial.club.services.CollabBoost.from(data["collabBoost"]),
+                // Landings: drives the "Posted for a perk" label.
+                landingID = data["landingID"] as? String,
+                landingSpot = data["landingSpot"] as? String,
+                incentivized = data["incentivized"] as? Boolean ?: false,
+                landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
+                landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
             )
 
             return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())

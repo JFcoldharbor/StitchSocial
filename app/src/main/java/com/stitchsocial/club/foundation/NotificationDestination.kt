@@ -31,6 +31,19 @@ sealed class NotificationDestination {
 
     data class Event(val eventID: String) : NotificationDestination()
 
+    /**
+     * A restaurant's Landing (stitchsocial.me/l/{slug}?t={spot}). `spot` is
+     * the table or counter the QR was printed for, carried onto the post.
+     */
+    data class Landing(
+        val slug: String,
+        val spot: String?,
+        /** landing_claimWelcome's `source` (LandingSource): a link with `t` is a scan. */
+        val source: String = if (spot.isNullOrBlank()) "link" else "scan",
+        /** Claim the welcome perk once on open (a sponsored card's CTA). */
+        val autoClaim: Boolean = false
+    ) : NotificationDestination()
+
     data class Community(val communityID: String) : NotificationDestination()
 
     /** One creator campaign's detail screen. Falls back to [Campaigns] if it can't be read. */
@@ -90,12 +103,25 @@ sealed class NotificationDestination {
                 (type == "system" && (data.containsKey("evidence") || data.containsKey("reason")))
             ) return Inbox
 
-            // 2. Events: invites are written as SYSTEM (notificationType
+            // 2. Landings carry only the slug (a link, or a Landing nudge).
+            //    In-app entry points add landingSource / landingAutoClaim;
+            //    a bare link derives its source from whether it carries `t`.
+            str("landingSlug")?.let { slug ->
+                val spot = str("landingSpot")
+                return Landing(
+                    slug = slug,
+                    spot = spot,
+                    source = str("landingSource") ?: if (spot == null) "link" else "scan",
+                    autoClaim = str("landingAutoClaim") == "true"
+                )
+            }
+
+            // 3. Events: invites are written as SYSTEM (notificationType
             //    "event_invite", or "eventInvite" from older iOS builds), so the
             //    eventID is the only dependable signal. Reminders/updates too.
             str("eventID", "eventId", "event_id")?.let { return Event(it) }
 
-            // 3. Live. A streamID in the payload means live regardless of type;
+            // 4. Live. A streamID in the payload means live regardless of type;
             //    the community falls back to the creator, then the sender, who
             //    IS its owner.
             val streamID = str("streamID", "streamId", "stream_id")
@@ -106,12 +132,12 @@ sealed class NotificationDestination {
                 if (community != null) return Live(community, streamID)
             }
 
-            // 4. Collab invites carry the video, but the decision is what the
+            // 5. Collab invites carry the video, but the decision is what the
             //    notification is asking for, and Accept/Decline live on the
             //    inbox row.
             if (type == "collabinvite") return Inbox
 
-            // 5. Money and progression have their own screens, and may carry a
+            // 6. Money and progression have their own screens, and may carry a
             //    videoID (a deliverable) that isn't the point of the tap.
             if (type in CAMPAIGN_TYPES) {
                 return str("campaignID", "campaignId", "campaign_id")?.let { Campaign(it) } ?: Campaigns
@@ -120,17 +146,17 @@ sealed class NotificationDestination {
             if (type == "stripeconnectactive") return Wallet
             if (type in OWN_PROFILE_TYPES) return OwnProfile
 
-            // 6. Anything carrying a video plays that video.
+            // 7. Anything carrying a video plays that video.
             str("videoID", "videoId", "video_id")?.let { videoID ->
                 return Video(videoID, str("threadID", "threadId", "thread_id"))
             }
 
-            // 7. A community post with no video.
+            // 8. A community post with no video.
             if (type == "community_post" || type == "community_xp") {
                 str("communityID", "communityId", "community_id")?.let { return Community(it) }
             }
 
-            // 8. Notifications ABOUT a person: the payload's user (a birthday
+            // 9. Notifications ABOUT a person: the payload's user (a birthday
             //    milestone names the birthday user), else the sender.
             val isFollowEngagement = type == "engagement" && str("engagementType")?.lowercase() == "follow"
             val isBirthday = type == "milestone" && kind == "birthday"
@@ -139,7 +165,7 @@ sealed class NotificationDestination {
                 str("userID", "user_id", "userId", "senderID", "senderId")?.let { return Profile(it) }
             }
 
-            // 9. Nudges and recaps.
+            // 10. Nudges and recaps.
             if (type in HOME_TYPES) return Home
 
             return Inbox

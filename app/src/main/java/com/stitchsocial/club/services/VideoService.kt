@@ -899,7 +899,13 @@ class VideoServiceImpl {
                     collaboratorIDs = (data["collaboratorIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                     participantIDs = (data["participantIDs"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                     collaborators = Collaborator.list(data["collaborators"]),
-                    collabBoost = CollabBoost.from(data["collabBoost"])
+                    collabBoost = CollabBoost.from(data["collabBoost"]),
+                    // Landings: tagged at upload; drives "Posted for a perk".
+                    landingID = data["landingID"] as? String,
+                    landingSpot = data["landingSpot"] as? String,
+                    incentivized = data["incentivized"] as? Boolean ?: false,
+                    landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
+                    landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }
