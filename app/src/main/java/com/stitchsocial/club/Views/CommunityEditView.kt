@@ -57,6 +57,8 @@ fun CommunityEditView(
     val isDirty = displayName.trim() != community.displayName
         || description.trim() != community.description
     val canSave = isDirty && displayName.trim().isNotBlank() && !isSaving
+    // A notification/link tap asks "Leave?" while there are unsaved edits.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(com.stitchsocial.club.foundation.ComposerPresence.Kind.CHANGES, active = isDirty)
 
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // Top bar — Back + Edit Community + Save

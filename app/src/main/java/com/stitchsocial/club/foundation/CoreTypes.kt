@@ -275,7 +275,10 @@ data class BasicUserInfo(
     // Custom revenue share override
     val customSubShare: Double? = null,
     val customSubShareExpiresAt: Date? = null,
-    val customSubSharePermanent: Boolean = false
+    val customSubSharePermanent: Boolean = false,
+    // users/{id}.brandRating = {average, count} — server-written from campaign reviews
+    val brandRatingAverage: Double = 0.0,
+    val brandRatingCount: Int = 0
 ) {
     val isBusiness: Boolean get() = accountType == AccountType.BUSINESS
 
@@ -298,7 +301,10 @@ data class BasicUserInfo(
 
                 val username = data["username"] as? String ?: return null
                 val displayName = data["displayName"] as? String ?: username
-                val email = data["email"] as? String ?: ""
+                // Email is not on the public user doc (owner-only, in
+                // users/{uid}/private/profile). The own user's email comes
+                // from FirebaseAuth.currentUser.email.
+                val email = ""
                 val bio = data["bio"] as? String ?: ""
                 val tierString = data["tier"] as? String ?: "rookie"
                 val isVerified = data["isVerified"] as? Boolean ?: false
@@ -394,6 +400,7 @@ data class BasicUserInfo(
                     is Timestamp -> value.toDate(); else -> null
                 }
                 val customSubSharePermanent = data["customSubSharePermanent"] as? Boolean ?: false
+                val brandRating = data["brandRating"] as? Map<*, *>
 
                 BasicUserInfo(
                     id = doc.id,
@@ -424,7 +431,9 @@ data class BasicUserInfo(
                     referralGoal = referralGoal,
                     customSubShare = customSubShare,
                     customSubShareExpiresAt = customSubShareExpiresAt,
-                    customSubSharePermanent = customSubSharePermanent
+                    customSubSharePermanent = customSubSharePermanent,
+                    brandRatingAverage = (brandRating?.get("average") as? Number)?.toDouble() ?: 0.0,
+                    brandRatingCount = (brandRating?.get("count") as? Number)?.toInt() ?: 0
                 )
             } catch (e: Exception) {
                 null

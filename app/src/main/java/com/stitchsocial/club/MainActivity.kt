@@ -285,9 +285,12 @@ class MainActivity : ComponentActivity() {
             return if (i >= 0 && i + 1 < segments.size) segments[i + 1] else null
         }
 
+        // Content links go through the same router as notification taps, so a
+        // link opened over a recording / live stream / composer asks "Leave?"
+        // and interrupts exactly the way a tap does.
         segmentAfter("e")?.let { eventID ->
             Log.d("STITCH_MAIN", "🔗 LINK: event $eventID")
-            com.stitchsocial.club.events.EventDeepLink.request(eventID)
+            NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("eventID" to eventID))
             return
         }
 
@@ -312,23 +315,18 @@ class MainActivity : ComponentActivity() {
                     Log.d("STITCH_MAIN", "🔗 LINK: no user for @$username")
                     return@launch
                 }
-                com.stitchsocial.club.foundation.ProfileDeepLink.request(userID)
+                Log.d("STITCH_MAIN", "🔗 LINK: profile @$username -> $userID")
+                NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("userID" to userID))
             }
             return
         }
 
-        // /v/{videoID}: the link the share button hands out. The thread overlay
-        // takes a thread, so look the video up for its thread first; a reply
-        // opens in its parent's thread with the reply in focus.
+        // /v/{videoID}: the link the share button hands out. Opens the
+        // fullscreen player on that video, same as a notification about it;
+        // the route fetches it (and stays put if it's gone).
         segmentAfter("v")?.let { videoID ->
-            lifecycleScope.launch {
-                val video = VideoServiceImpl().getVideoById(videoID)
-                if (video == null) {
-                    Log.d("STITCH_MAIN", "🔗 LINK: no video $videoID")
-                    return@launch
-                }
-                com.stitchsocial.club.foundation.VideoDeepLink.request(video.threadID ?: videoID, videoID)
-            }
+            Log.d("STITCH_MAIN", "🔗 LINK: video $videoID")
+            NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("videoID" to videoID))
             return
         }
 
@@ -434,6 +432,10 @@ fun MainScreen() {
     // Campaign / ad / wallet screen a notification opened (they otherwise live
     // deep inside Settings, which a tap can't reach).
     var notificationScreen by remember { mutableStateOf<NotificationDestination?>(null) }
+    // The campaign a NotificationDestination.Campaign screen shows, fetched by the route.
+    var notificationCampaign by remember {
+        mutableStateOf<com.stitchsocial.club.services.CreatorCampaign?>(null)
+    }
     // Bumped by a notification tap to remount the tab content, which closes
     // everything open INSIDE a tab (fullscreen decks, sheets, platform Dialog
     // windows) — state this layer can't reach any other way. Feeds are kept in
@@ -491,10 +493,6 @@ fun MainScreen() {
         }
     }
 
-    // Same hand-off for a tapped stitchsocial.me/u/{username} link. The Activity
-    // resolves the username to an id and parks it; this is the first point where
-    // the profile overlay's state actually exists, which on a cold start is well
-    // after the tap.
     // Go-live taps: open the community AND the stream, not just the community.
     val pendingLive by com.stitchsocial.club.live.LiveDeepLink.pending
     LaunchedEffect(pendingLive) {
@@ -512,29 +510,6 @@ fun MainScreen() {
                 // Gone or unreadable — the inbox beats a tap that does nothing.
                 selectedTab = MainAppTab.NOTIFICATIONS
             }
-        }
-    }
-
-    val pendingVideoLink by com.stitchsocial.club.foundation.VideoDeepLink.pending
-    LaunchedEffect(pendingVideoLink) {
-        com.stitchsocial.club.foundation.VideoDeepLink.consume()?.let { target ->
-            Log.d("STITCH_MAIN", "🔗 Video deep-link -> ${target.threadID}/${target.videoID}")
-            isShowingProfileView = false
-            isShowingCommunity = false
-            threadViewThreadID = target.threadID
-            threadViewTargetVideoID = target.videoID
-            isShowingThreadView = true
-        }
-    }
-
-    val pendingProfileUserID by ProfileDeepLink.pending
-    LaunchedEffect(pendingProfileUserID) {
-        ProfileDeepLink.consume()?.let { id ->
-            Log.d("STITCH_MAIN", "🔗 Profile deep-link -> $id")
-            isShowingThreadView = false
-            isShowingCommunity = false
-            profileViewUserID = id
-            isShowingProfileView = true
         }
     }
 
@@ -634,8 +609,15 @@ fun MainScreen() {
             if (ageGroupRaw == "blocked") {
                 ageGateState = "blocked"
             } else {
-                val dob = (privacy?.get("birthdate") as? com.google.firebase.Timestamp)?.toDate()
-                if (dob == null) {
+                // Birthdate lives in the owner-only users/{uid}/private/profile.
+                val dob = com.stitchsocial.club.services.PrivateProfileService
+                    .resolveOwnBirthdate(uid, privacy)
+                if (dob == null && (ageGroupRaw == "adult" || ageGroupRaw == "teen")) {
+                    // Already through the gate (server-derived ageGroup) but the
+                    // birthdate isn't readable here — don't prompt again.
+                    ageGateState = if (ageGroupRaw == "teen") "teen" else "ok"
+                    TeenSafety.setLane(ageGroupRaw)
+                } else if (dob == null) {
                     ageGateState = "prompt"
                 } else {
                     val cal = java.util.Calendar.getInstance().apply { time = dob }
@@ -792,6 +774,7 @@ fun MainScreen() {
         autoOpenStreamID = null
         notificationVideo = null
         notificationScreen = null
+        notificationCampaign = null
         interruptGeneration++
 
         when (destination) {
@@ -805,8 +788,13 @@ fun MainScreen() {
                 val video = videoService.getVideoById(destination.videoID)
                 if (token != routeToken) return@launch  // a newer tap took over
                 if (video == null || video.isDeleted) {
-                    Log.d("STITCH_MAIN", "📱 Notification video ${destination.videoID} missing -> inbox")
-                    selectedTab = MainAppTab.NOTIFICATIONS
+                    // A dead shared link has no inbox row to land on; stay put.
+                    if (request.type != NotificationRouter.TYPE_SHARED_LINK) {
+                        Log.d("STITCH_MAIN", "📱 Notification video ${destination.videoID} missing -> inbox")
+                        selectedTab = MainAppTab.NOTIFICATIONS
+                    } else {
+                        Log.d("STITCH_MAIN", "🔗 Linked video ${destination.videoID} missing")
+                    }
                 } else {
                     notificationVideo = video
                 }
@@ -824,6 +812,19 @@ fun MainScreen() {
                     isShowingCommunity = true
                 } else {
                     selectedTab = MainAppTab.NOTIFICATIONS
+                }
+            }
+            is NotificationDestination.Campaign -> scope.launch {
+                val campaign = com.stitchsocial.club.services.CreatorCampaignService.getInstance()
+                    .fetchCampaign(destination.campaignID)
+                if (token != routeToken) return@launch
+                if (campaign != null) {
+                    notificationCampaign = campaign
+                    notificationScreen = destination
+                } else {
+                    // Gone or unreadable: the marketplace still beats nothing.
+                    Log.d("STITCH_MAIN", "📱 Campaign ${destination.campaignID} unreadable -> hub")
+                    notificationScreen = NotificationDestination.Campaigns
                 }
             }
             NotificationDestination.Campaigns,
@@ -891,7 +892,8 @@ fun MainScreen() {
                 val pendingRoute by NotificationRouter.pending
                 LaunchedEffect(pendingRoute) {
                     val request = NotificationRouter.consume() ?: return@LaunchedEffect
-                    // Ask before throwing away a recording or ending a broadcast.
+                    // Ask before throwing away a recording, a post in progress,
+                    // or ending a broadcast.
                     val loses = when {
                         com.stitchsocial.club.live.CreatorScreenPresence.isHostingAny() ->
                             "Your live stream will end."
@@ -899,7 +901,9 @@ fun MainScreen() {
                             ModalState.RECORDING, ModalState.REACTION, ModalState.VIDEO_REVIEW,
                             ModalState.PARALLEL_PROCESSING, ModalState.THREAD_COMPOSER
                         ) -> "Your recording will be lost."
-                        else -> null
+                        // In-screen composers (community clip, episode, event,
+                        // live video comment, edits) register while they hold work.
+                        else -> com.stitchsocial.club.foundation.ComposerPresence.lossMessage()
                     }
                     if (loses != null) {
                         routeAwaitingConfirm = request to loses  // newest tap wins
@@ -1252,7 +1256,7 @@ fun MainScreen() {
                 // layer as ProfileView; the screens themselves take (user, onDismiss).
                 notificationScreen?.let { screen ->
                     val user = currentUser!!
-                    val close = { notificationScreen = null }
+                    val close = { notificationScreen = null; notificationCampaign = null }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1268,6 +1272,15 @@ fun MainScreen() {
                                 brandLogoURL = user.profileImageURL,
                                 onDismiss = close
                             )
+                            // Same role rule as the hub: a business account is the brand.
+                            is NotificationDestination.Campaign -> notificationCampaign?.let { campaign ->
+                                CreatorCampaignDetailView(
+                                    campaign = campaign,
+                                    currentUserID = user.id,
+                                    isBrandAccount = user.isBusiness,
+                                    onDismiss = close
+                                )
+                            }
                             NotificationDestination.AdOpportunities ->
                                 AdOpportunitiesView(user = user, onDismiss = close)
                             NotificationDestination.Wallet ->

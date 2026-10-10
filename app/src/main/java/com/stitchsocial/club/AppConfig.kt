@@ -109,9 +109,17 @@ object AppConfig {
 
     object URLs {
         const val BASE     = "https://stitchsocial.me"
-        const val WALLET   = "$BASE/app/account"
         const val SUPPORT  = "$BASE/support"
         const val TERMS    = "$BASE/terms"
         const val PRIVACY  = "$BASE/privacy"
+
+        // Brand portal. Brands pay on the web (Stripe Checkout); the app only
+        // links here and never takes a brand payment itself.
+        const val BRAND              = "$BASE/brand"
+        const val BRAND_NEW_CAMPAIGN = "$BRAND/campaigns/new"
+        const val BRAND_NEW_AD       = "$BRAND/ads/new"
+
+        fun brandPromote(videoID: String): String =
+            "$BRAND/promote?videoID=${android.net.Uri.encode(videoID)}"
     }
 }

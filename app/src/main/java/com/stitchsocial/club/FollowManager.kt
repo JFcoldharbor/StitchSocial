@@ -207,27 +207,10 @@ class FollowManager(private val context: Context) : ViewModel() {
      * Check if user is protected from unfollowing (James Fortune only)
      */
     private suspend fun isProtectedFromUnfollow(userID: String): Boolean {
-        return try {
-            if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: Checking unfollow protection for user $userID") }
-
-            // Get user email to check against protected accounts
-            val userProfile = userService.getUserProfile(userID)
-            val userEmail = userProfile?.email ?: ""
-            val isProtected = SpecialUsersConfig.isProtectedFromUnfollow(userEmail)
-
-            if (isProtected) {
-                if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: User $userID ($userEmail) IS PROTECTED from unfollowing") }
-            } else {
-                if (BuildConfig.DEBUG) { println("✅ FOLLOW MANAGER: User $userID ($userEmail) can be unfollowed") }
-            }
-
-            isProtected
-
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) { println("⚠️ FOLLOW MANAGER: Could not check protection status for $userID: ${e.message}") }
-            // If we can't check, allow the unfollow (fail open)
-            false
-        }
+        // Keyed by UID — other users' emails are not readable any more.
+        val isProtected = SpecialUsersConfig.isProtectedFromUnfollowByUid(userID)
+        if (BuildConfig.DEBUG) { println("🔒 FOLLOW MANAGER: User $userID protected from unfollow: $isProtected") }
+        return isProtected
     }
 
     /**

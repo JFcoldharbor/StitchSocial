@@ -507,7 +507,8 @@ class AuthService {
             // Base user fields — same for all account types
             val userData = mutableMapOf<String, Any>(
                 "id" to firebaseUser.uid,
-                "email" to (firebaseUser.email ?: ""),
+                // Email is NOT written here — it lives in the owner-only
+                // users/{uid}/private/profile doc (written below).
                 "username" to resolvedUsername,
                 "displayName" to resolvedDisplayName,
                 "profileImageURL" to (firebaseUser.photoUrl?.toString() ?: ""),
@@ -548,6 +549,14 @@ class AuthService {
                 .document(firebaseUser.uid)
                 .set(userData, SetOptions.merge())
                 .await()
+
+            firebaseUser.email?.takeIf { it.isNotBlank() }?.let { email ->
+                try {
+                    PrivateProfileService.writeEmail(firebaseUser.uid, email)
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) { println("AUTH SERVICE: ⚠️ Private profile email write failed (non-critical): ${e.message}") }
+                }
+            }
 
             if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User profile created for ${firebaseUser.email} (${accountType.rawValue})") }
 

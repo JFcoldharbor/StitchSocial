@@ -7,7 +7,7 @@
  * Dependencies: WalletViewModel, HypeCoinCoordinator, HypeCoinBillingManager
  *
  * ANDROID DELTA vs iOS:
- *   - Buy tab uses Google Play Billing (not web/Stripe)
+ *   - Buy tab uses Google Play Billing (coins are never sold on the web)
  *   - WalletViewModel drives all state via StateFlow
  *   - Pull-to-refresh via SwipeRefresh
  *

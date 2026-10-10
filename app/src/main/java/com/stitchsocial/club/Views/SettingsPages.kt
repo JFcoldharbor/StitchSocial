@@ -32,7 +32,7 @@ import com.stitchsocial.club.ui.theme.Spacing
  */
 
 @Composable
-private fun SettingsSubPage(
+internal fun SettingsSubPage(
     title: String,
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -229,6 +229,7 @@ fun CreatorStudioPage(
 fun EarningsPayoutsPage(
     payoutsEnabled: Boolean,
     onDismiss: () -> Unit,
+    onPayoutMethod: () -> Unit,
     onSubscriptionTiers: () -> Unit,
 ) {
     SettingsSubPage(title = "Earnings & payouts", onDismiss = onDismiss) {
@@ -259,10 +260,9 @@ fun EarningsPayoutsPage(
         SettingsGroupCard {
             SettingsRow(
                 title = "Payout method",
-                subtitle = if (payoutsEnabled) "Connected" else "Coming soon",
+                subtitle = if (payoutsEnabled) "Connected" else "Connect a bank account to be paid",
                 badgeCount = if (payoutsEnabled) 0 else 1,
-                showChevron = false,
-                titleColor = AppTheme.colors.textSecondary,
+                onClick = onPayoutMethod,
             )
             SettingsDivider(inset = Spacing.md)
             SettingsRow(

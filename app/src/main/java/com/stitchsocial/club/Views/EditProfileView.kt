@@ -118,6 +118,8 @@ fun EditProfileView(
             bio != currentBio ||
             isPrivate != currentIsPrivate ||
             selectedImage != null
+    // A notification/link tap asks "Leave?" while there are unsaved edits.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(com.stitchsocial.club.foundation.ComposerPresence.Kind.CHANGES, active = hasChanges)
 
     val isFormValid = displayName.trim().isNotEmpty() &&
             username.trim().length >= 3 &&

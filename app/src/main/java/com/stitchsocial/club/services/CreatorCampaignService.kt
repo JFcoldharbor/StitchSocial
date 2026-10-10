@@ -3,7 +3,6 @@ package com.stitchsocial.club.services
 import android.util.Log
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.functions.FirebaseFunctions
@@ -21,12 +20,17 @@ import java.util.Date
  *   - applyToCreatorCampaign
  *   - decideCreatorCampaignApplication
  *   - submitCreatorCampaignDeliverable
- *   - approveCreatorCampaignDeliverable
+ *   - brand_acceptDeliverable (accept + optional 1–5 rating and review)
+ *   - createCreatorStripeOnboarding / refreshCreatorStripeStatus / retryHeldPayouts
  *
- * Stripe Connect onboarding is intentionally omitted on Android — Android
- * creators set up payouts on the web at stitchsocial.me/payouts. The
- * server-side held_no_connect_account bucket handles approvals that come
- * before a creator finishes web onboarding.
+ * Campaigns are created and paid for on the web (stitchsocial.me/brand) —
+ * the server writes creatorCampaigns, never the app. The brand pays up front,
+ * Stitch holds it, and the creator is paid when the brand accepts the content
+ * (or it auto-accepts). There is no reject and no revision: a rating and
+ * review is the brand's only quality remedy.
+ *
+ * Payouts reach a creator through Stripe Connect. Approvals that land before
+ * onboarding is finished go to the server's held_no_connect_account bucket.
  *
  * Layer 4: Core Services
  */
@@ -64,7 +68,7 @@ class CreatorCampaignService private constructor() {
         _isLoading.value = true
         try {
             val snap = db.collection(COL_CAMPAIGNS)
-                .whereIn("status", listOf("open", "reviewing"))
+                .whereIn("status", listOf("open", "in_progress", "reviewing"))
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get().await()
@@ -76,6 +80,15 @@ class CreatorCampaignService private constructor() {
             _isLoading.value = false
         }
     }
+
+    /** One campaign by id — a notification tap opens it directly. Null if gone or unreadable. */
+    suspend fun fetchCampaign(campaignID: String): CreatorCampaign? =
+        try {
+            CreatorCampaign.fromDoc(db.collection(COL_CAMPAIGNS).document(campaignID).get().await())
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchCampaign($campaignID) failed: ${e.message}")
+            null
+        }
 
     suspend fun fetchMyApplicationCampaigns(creatorID: String) {
         try {
@@ -156,49 +169,6 @@ class CreatorCampaignService private constructor() {
 
     // ===== Writes =====
 
-    suspend fun createCampaign(
-        brandID: String,
-        brandName: String,
-        brandLogoURL: String?,
-        title: String,
-        brief: String,
-        category: String?,
-        payoutCents: Int,
-        criteria: CreatorCampaignCriteria,
-        contentDueDate: Date?
-    ): String {
-        val ref = db.collection(COL_CAMPAIGNS).document()
-        val data = mutableMapOf<String, Any>(
-            "brandID" to brandID,
-            "brandName" to brandName,
-            "title" to title,
-            "brief" to brief,
-            "payoutCents" to payoutCents,
-            "status" to "open",
-            "applicationsCount" to 0,
-            "approvedCount" to 0,
-            "deliveredCount" to 0,
-            "paidOutCount" to 0,
-            "totalPayoutCents" to 0,
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to FieldValue.serverTimestamp()
-        )
-        category?.let { data["category"] = it }
-        brandLogoURL?.let { data["brandLogoURL"] = it }
-        contentDueDate?.let { data["contentDueDate"] = Timestamp(it) }
-
-        val critMap = mutableMapOf<String, Any>()
-        criteria.minTier?.let { critMap["minTier"] = it }
-        criteria.minStitchers?.let { critMap["minStitchers"] = it }
-        criteria.minViewsPerVideo?.let { critMap["minViewsPerVideo"] = it }
-        criteria.requiredHashtags?.takeIf { it.isNotEmpty() }?.let { critMap["requiredHashtags"] = it }
-        criteria.preferredCategories?.takeIf { it.isNotEmpty() }?.let { critMap["preferredCategories"] = it }
-        data["criteria"] = critMap
-
-        ref.set(data).await()
-        return ref.id
-    }
-
     suspend fun apply(campaignID: String, pitch: String): Int? {
         val result = functions.getHttpsCallable("applyToCreatorCampaign").call(
             mapOf("campaignID" to campaignID, "pitch" to pitch)
@@ -224,22 +194,56 @@ class CreatorCampaignService private constructor() {
         ).await()
     }
 
-    suspend fun reviewDeliverable(
+    /**
+     * The brand accepts a submitted deliverable, which pays the creator. The
+     * rating (1–5) and review are optional and recorded once.
+     */
+    suspend fun acceptDeliverable(
         campaignID: String,
         creatorID: String,
-        approve: Boolean,
-        revisionNotes: String = ""
+        rating: Int?,
+        review: String?
     ): Map<String, Any?>? {
-        val result = functions.getHttpsCallable("approveCreatorCampaignDeliverable").call(
-            mapOf(
-                "campaignID" to campaignID,
-                "creatorID" to creatorID,
-                "approved" to approve,
-                "revisionNotes" to revisionNotes
-            )
-        ).await()
+        val data = mutableMapOf<String, Any>("campaignID" to campaignID, "creatorID" to creatorID)
+        rating?.let { data["rating"] = it }
+        review?.trim()?.takeIf { it.isNotEmpty() }?.let { data["review"] = it }
+        val result = functions.getHttpsCallable("brand_acceptDeliverable").call(data).await()
         @Suppress("UNCHECKED_CAST")
         return result.data as? Map<String, Any?>
+    }
+
+    // ===== Stripe Connect (creator payouts) =====
+
+    /** A fresh Stripe-hosted onboarding link. They expire within minutes, so
+     *  ask for one per tap rather than caching it. */
+    suspend fun createStripeOnboarding(): String {
+        val result = functions.getHttpsCallable("createCreatorStripeOnboarding").call().await()
+        @Suppress("UNCHECKED_CAST")
+        val payload = result.data as? Map<String, Any?>
+        return payload?.get("onboardingURL") as? String
+            ?: throw IllegalStateException("No onboarding link came back")
+    }
+
+    /** Re-reads the Connect account from Stripe and mirrors it onto the user doc. */
+    suspend fun refreshStripeStatus(): StripeAccountStatus {
+        val result = functions.getHttpsCallable("refreshCreatorStripeStatus").call().await()
+        @Suppress("UNCHECKED_CAST")
+        val payload = result.data as? Map<String, Any?> ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        return StripeAccountStatus(
+            status = payload["stripeAccountStatus"] as? String ?: "none",
+            payoutsEnabled = payload["payoutsEnabled"] as? Boolean ?: false,
+            requirements = (payload["requirements"] as? List<String>).orEmpty()
+        )
+    }
+
+    /** Releases payouts held while the creator had no active Connect account. */
+    suspend fun retryHeldPayouts(): Pair<Int, Int> {
+        val result = functions.getHttpsCallable("retryHeldPayouts").call().await()
+        @Suppress("UNCHECKED_CAST")
+        val payload = result.data as? Map<String, Any?> ?: emptyMap()
+        return ((payload["succeeded"] as? Number)?.toInt() ?: 0) to
+            ((payload["failed"] as? Number)?.toInt() ?: 0)
     }
 }
 
@@ -252,6 +256,8 @@ data class CreatorCampaign(
     val brandLogoURL: String?,
     val title: String,
     val brief: String,
+    /** What the brand expects delivered — format, length, talking points. */
+    val expectations: String?,
     val category: String?,
     val payoutCents: Int,
     val status: String,
@@ -263,10 +269,19 @@ data class CreatorCampaign(
     val paidOutCount: Int,
     val criteria: CreatorCampaignCriteria?,
     val createdAt: Date?,
-    val updatedAt: Date?
+    val updatedAt: Date?,
+    // Brand billing (billingVersion 2). Older campaigns leave these empty.
+    val slots: Int? = null,
+    val fundedCents: Int? = null,
+    val refundedCents: Int = 0,
+    val acceptedCount: Int = 0,
+    /** awaiting_payment | funded | partially_refunded | refunded */
+    val paymentStatus: String? = null
 ) {
     val payoutDollars: Double get() = payoutCents / 100.0
-    val isOpen: Boolean get() = status == "open" || status == "reviewing"
+    val isOpen: Boolean get() = status == "open" || status == "in_progress" || status == "reviewing"
+    val isAwaitingPayment: Boolean
+        get() = status == "awaiting_payment" || paymentStatus == "awaiting_payment"
 
     companion object {
         fun fromDoc(doc: DocumentSnapshot): CreatorCampaign? {
@@ -280,6 +295,7 @@ data class CreatorCampaign(
                 brandLogoURL = data["brandLogoURL"] as? String,
                 title = data["title"] as? String ?: "",
                 brief = data["brief"] as? String ?: "",
+                expectations = (data["expectations"] as? String)?.takeIf { it.isNotBlank() },
                 category = data["category"] as? String,
                 payoutCents = (data["payoutCents"] as? Number)?.toInt() ?: 0,
                 status = data["status"] as? String ?: "draft",
@@ -291,7 +307,12 @@ data class CreatorCampaign(
                 paidOutCount = (data["paidOutCount"] as? Number)?.toInt() ?: 0,
                 criteria = criteriaMap?.let { CreatorCampaignCriteria.fromMap(it) },
                 createdAt = (data["createdAt"] as? Timestamp)?.toDate(),
-                updatedAt = (data["updatedAt"] as? Timestamp)?.toDate()
+                updatedAt = (data["updatedAt"] as? Timestamp)?.toDate(),
+                slots = (data["slots"] as? Number)?.toInt(),
+                fundedCents = (data["fundedCents"] as? Number)?.toInt(),
+                refundedCents = (data["refundedCents"] as? Number)?.toInt() ?: 0,
+                acceptedCount = (data["acceptedCount"] as? Number)?.toInt() ?: 0,
+                paymentStatus = data["paymentStatus"] as? String
             )
         }
     }
@@ -365,9 +386,11 @@ data class CreatorCampaignDeliverable(
     val creatorID: String,
     val draftURL: String?,
     val notes: String?,
-    val draftSubmittedAt: Date?,
+    val submittedAt: Date?,
+    /** As written. Read [status] instead — it folds in legacy values. */
     val approvalStatus: String,
-    val revisionNotes: String?,
+    val acceptedAt: Date?,
+    val autoAcceptAt: Date?,
     val approvedAt: Date?,
     val payoutAt: Date?,
     val grossAmountCents: Int?,
@@ -379,6 +402,18 @@ data class CreatorCampaignDeliverable(
     val payoutStatus: String?,
     val payoutError: String?
 ) {
+    /**
+     * awaiting (approved, nothing submitted) | submitted | accepted |
+     * auto_accepted | missed. The old revision_requested is no longer produced
+     * and reads as submitted, as does an old "awaiting" row that has a draft.
+     */
+    val status: String
+        get() = when {
+            approvalStatus == "revision_requested" -> "submitted"
+            approvalStatus == "awaiting" && submittedAt != null -> "submitted"
+            else -> approvalStatus
+        }
+
     companion object {
         fun fromDoc(doc: DocumentSnapshot): CreatorCampaignDeliverable? {
             if (!doc.exists()) return null
@@ -387,9 +422,10 @@ data class CreatorCampaignDeliverable(
                 creatorID = data["creatorID"] as? String ?: return null,
                 draftURL = data["draftURL"] as? String,
                 notes = data["notes"] as? String,
-                draftSubmittedAt = (data["draftSubmittedAt"] as? Timestamp)?.toDate(),
+                submittedAt = ((data["submittedAt"] ?: data["draftSubmittedAt"]) as? Timestamp)?.toDate(),
                 approvalStatus = data["approvalStatus"] as? String ?: "awaiting",
-                revisionNotes = data["revisionNotes"] as? String,
+                acceptedAt = (data["acceptedAt"] as? Timestamp)?.toDate(),
+                autoAcceptAt = (data["autoAcceptAt"] as? Timestamp)?.toDate(),
                 approvedAt = (data["approvedAt"] as? Timestamp)?.toDate(),
                 payoutAt = (data["payoutAt"] as? Timestamp)?.toDate(),
                 grossAmountCents = (data["grossAmountCents"] as? Number)?.toInt(),
@@ -403,3 +439,11 @@ data class CreatorCampaignDeliverable(
         }
     }
 }
+
+/** The creator's Stripe Connect state, from refreshCreatorStripeStatus. */
+data class StripeAccountStatus(
+    /** none | onboarding | pending_verification | active */
+    val status: String,
+    val payoutsEnabled: Boolean,
+    val requirements: List<String>
+)

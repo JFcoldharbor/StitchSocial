@@ -24,6 +24,7 @@ import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.ui.theme.AppTheme
 import com.stitchsocial.club.ui.theme.DismissX
 import com.stitchsocial.club.ui.theme.Spacing
+import com.stitchsocial.club.services.AdRevenueShare
 
 /**
  * Settings — one permanent place for everything. iOS parity
@@ -71,6 +72,8 @@ fun SettingsRootView(
     onOpenHelp: () -> Unit,
     onTaskAction: (SettingsTask) -> Unit,
     isAmbassador: Boolean = false,
+    /** Null until the Stripe status has been read — no task is raised on a guess. */
+    payoutsEnabled: Boolean? = null,
 ) {
     val context = LocalContext.current
     var showSignOut by remember { mutableStateOf(false) }
@@ -86,9 +89,14 @@ fun SettingsRootView(
 
     // The only conditional content on the screen. Two kinds can be produced;
     // see SettingsTask for why the other three are declared and never are.
-    val tasks = remember(isEmailVerified, userTier, isBusiness) {
+    val tasks = remember(isEmailVerified, userTier, isBusiness, payoutsEnabled) {
         buildList {
             if (email.isNotBlank() && !isEmailVerified) add(SettingsTask.emailUnverified(email))
+            // Only creators can be paid, so only creators can be missing a way
+            // to be paid. iOS parity (SettingsTaskStore.refresh).
+            if (!isBusiness && AdRevenueShare.canAccessAds(userTier) && payoutsEnabled == false) {
+                add(SettingsTask.payoutMethodMissing())
+            }
         }
     }
 

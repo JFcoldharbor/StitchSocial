@@ -62,7 +62,20 @@ enum class SpecialUserRole(val displayName: String, val defaultPriority: Int) {
  * Matches iOS SpecialUsersConfig.specialUsersList exactly
  */
 object SpecialUsersConfig {
-    
+
+    /**
+     * James Fortune's account UID. Users are never looked up by email any
+     * more (email lives in users/{uid}/private/profile, owner-only), so the
+     * auto-follow and unfollow protection key off the UID. Same value the
+     * server uses (StitchSocialFunctions/live.js FOUNDER_UIDS).
+     */
+    const val FOUNDER_UID = "4ifwg1CxDGbZ9amfPOvl0lMR6982"
+
+    /** Accounts that cannot be unfollowed ("unfollow_protection" perk), by UID. */
+    val UNFOLLOW_PROTECTED_UIDS: Set<String> = setOf(FOUNDER_UID)
+
+    fun isProtectedFromUnfollowByUid(uid: String): Boolean = uid in UNFOLLOW_PROTECTED_UIDS
+
     // MARK: - Special Users Database - COMPLETE UPDATED LIST (11 USERS)
     
     /**

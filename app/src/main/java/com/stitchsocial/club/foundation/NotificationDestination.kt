@@ -33,6 +33,9 @@ sealed class NotificationDestination {
 
     data class Community(val communityID: String) : NotificationDestination()
 
+    /** One creator campaign's detail screen. Falls back to [Campaigns] if it can't be read. */
+    data class Campaign(val campaignID: String) : NotificationDestination()
+
     /** Brand marketplace (creator campaigns). */
     object Campaigns : NotificationDestination()
 
@@ -110,7 +113,9 @@ sealed class NotificationDestination {
 
             // 5. Money and progression have their own screens, and may carry a
             //    videoID (a deliverable) that isn't the point of the tap.
-            if (type in CAMPAIGN_TYPES) return Campaigns
+            if (type in CAMPAIGN_TYPES) {
+                return str("campaignID", "campaignId", "campaign_id")?.let { Campaign(it) } ?: Campaigns
+            }
             if (type == "adopportunity") return AdOpportunities
             if (type == "stripeconnectactive") return Wallet
             if (type in OWN_PROFILE_TYPES) return OwnProfile
@@ -129,7 +134,8 @@ sealed class NotificationDestination {
             //    milestone names the birthday user), else the sender.
             val isFollowEngagement = type == "engagement" && str("engagementType")?.lowercase() == "follow"
             val isBirthday = type == "milestone" && kind == "birthday"
-            if (type in PROFILE_TYPES || isFollowEngagement || isBirthday) {
+            val isProfileLink = type == NotificationRouter.TYPE_SHARED_LINK
+            if (type in PROFILE_TYPES || isFollowEngagement || isBirthday || isProfileLink) {
                 str("userID", "user_id", "userId", "senderID", "senderId")?.let { return Profile(it) }
             }
 

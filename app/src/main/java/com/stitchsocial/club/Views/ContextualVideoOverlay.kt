@@ -822,6 +822,14 @@ private fun MoreOptionsMenu(
     var showHighlightSheet by remember { mutableStateOf(false) }
     var showCollabSheet by remember { mutableStateOf(false) }
 
+    // A brand can promote its own posts. Promotion is bought on the web
+    // portal, so the item only opens stitchsocial.me/brand/promote.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isBrandOwner by produceState(false, currentUserID, isUserVideo) {
+        value = isUserVideo &&
+            com.stitchsocial.club.services.BrandPortal.isBusinessAccount(currentUserID.orEmpty())
+    }
+
     Box {
         // 32dp circle to match the share + exit buttons in the vertical top stack.
         Box(
@@ -872,6 +880,18 @@ private fun MoreOptionsMenu(
             }
             // Owner only: createCollabInvite refuses anybody else, so offering
             // the item to a viewer would be offering a button that cannot work.
+            if (isBrandOwner) {
+                DropdownMenuItem(
+                    text = { Text("Promote this post") },
+                    leadingIcon = { Icon(Icons.Default.Campaign, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        com.stitchsocial.club.services.BrandPortal.open(
+                            context, com.stitchsocial.club.AppConfig.URLs.brandPromote(video.id)
+                        )
+                    }
+                )
+            }
             if (isUserVideo) {
                 DropdownMenuItem(
                     text = { Text("Collaborators") },

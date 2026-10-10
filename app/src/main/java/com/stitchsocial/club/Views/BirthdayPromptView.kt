@@ -3,8 +3,9 @@
  * STITCH SOCIAL - ANDROID KOTLIN
  *
  * Mirror of Swift BirthdayPromptView.swift — force-collects DOB and writes it
- * to users/{id}.privacySettings.birthdate. A Cloud Function (onUserBirthdateSet)
- * recomputes the ageGroup server-side and sets the audienceLane custom claim.
+ * to the owner-only users/{id}/private/profile.birthdate (never the public
+ * user doc); privacySettings.ageGroup/ageVerifiedAt stay on users/{id}. A Cloud
+ * Function recomputes the ageGroup server-side and sets the audienceLane claim.
  *
  * COPPA defensiveness:
  * - The gate is NEUTRAL: no live computed-age readout, no mention of a minimum age.
@@ -150,9 +151,12 @@ fun BirthdayPromptView(
                 }
 
                 val ageGroup = if (age >= 18) "adult" else "teen"
+                // The birthdate itself is owner-only: users/{id}/private/profile.
+                // Only the derived ageGroup goes on the public doc.
+                com.stitchsocial.club.services.PrivateProfileService
+                    .writeBirthdate(userID, selectedDate)
                 db.collection("users").document(userID).set(
                     mapOf("privacySettings" to mapOf(
-                        "birthdate" to Timestamp(selectedDate),
                         "ageGroup" to ageGroup,
                         "ageVerifiedAt" to Timestamp(Date())
                     )),

@@ -53,6 +53,12 @@ fun EventCreateScreen(
     var newRule by remember { mutableStateOf(GiveawayEntryRule.ATTENDED) }
     var isSaving by remember { mutableStateOf(false) }
     val error by vm.errorMessage.collectAsState()
+    // A notification/link tap asks "Leave?" once the form has been touched.
+    val initialDraft = remember { draft }
+    com.stitchsocial.club.foundation.RegisterComposerPresence(
+        if (isEditing) com.stitchsocial.club.foundation.ComposerPresence.Kind.CHANGES else com.stitchsocial.club.foundation.ComposerPresence.Kind.POST,
+        active = draft != initialDraft || giveaways.isNotEmpty()
+    )
 
     // Venue pin (Phase 3 location: current fix + Geocoder search).
     val context = LocalContext.current

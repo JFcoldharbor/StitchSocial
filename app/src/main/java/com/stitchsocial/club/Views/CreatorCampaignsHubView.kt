@@ -17,28 +17,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.stitchsocial.club.AppConfig
+import com.stitchsocial.club.services.BrandPortal
 import com.stitchsocial.club.services.CreatorCampaign
 import com.stitchsocial.club.services.CreatorCampaignService
-import kotlinx.coroutines.launch
 
 /**
  * CreatorCampaignsHubView — Mode B marketplace entry point.
  *
  * Role-aware:
- *   - Brand accounts: tabs for "My Campaigns" + "Drafts", + button to create
- *   - Creator accounts: tabs for "Browse" + "My Applications"
+ *   - Brand accounts: tabs for "My Campaigns" + "Unpaid", + button to create
+ *   - Creator accounts: tabs for "Browse" + "My Applications", and a Payouts
+ *     button for Stripe Connect setup (PayoutsSetupView)
  *
  * Tapping a row opens CreatorCampaignDetailView (full-screen Dialog).
- * Brand + button opens CreateCreatorCampaignView (full-screen Dialog).
- *
- * Stripe Connect onboarding is intentionally not surfaced on Android —
- * Android creators set up payouts on web at stitchsocial.me/payouts.
+ * The brand + button opens stitchsocial.me/brand/campaigns/new: campaigns are
+ * created and paid for on the web, never in the app.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,16 +52,16 @@ fun CreatorCampaignsHubView(
 ) {
     val service = remember { CreatorCampaignService.getInstance() }
     var selectedTab by rememberSaveable { mutableStateOf(0) }
-    var showingCreate by remember { mutableStateOf(false) }
+    var showingPayouts by remember { mutableStateOf(false) }
     var selectedCampaign by remember { mutableStateOf<CreatorCampaign?>(null) }
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val openCampaigns by service.openCampaigns.collectAsState()
     val myApplications by service.myApplications.collectAsState()
     val brandCampaigns by service.brandCampaigns.collectAsState()
     val isLoading by service.isLoading.collectAsState()
 
-    val tabs = if (isBrandAccount) listOf("My Campaigns", "Drafts") else listOf("Browse", "My Applications")
+    val tabs = if (isBrandAccount) listOf("My Campaigns", "Unpaid") else listOf("Browse", "My Applications")
 
     suspend fun loadActiveTab() {
         if (isBrandAccount) {
@@ -74,8 +75,8 @@ fun CreatorCampaignsHubView(
     LaunchedEffect(selectedTab) { loadActiveTab() }
 
     val currentList: List<CreatorCampaign> = when {
-        isBrandAccount && selectedTab == 0 -> brandCampaigns.filter { it.status != "draft" }
-        isBrandAccount && selectedTab == 1 -> brandCampaigns.filter { it.status == "draft" }
+        isBrandAccount && selectedTab == 0 -> brandCampaigns.filter { !it.isAwaitingPayment && it.status != "draft" }
+        isBrandAccount && selectedTab == 1 -> brandCampaigns.filter { it.isAwaitingPayment }
         !isBrandAccount && selectedTab == 0 -> openCampaigns
         else -> myApplications
     }
@@ -97,8 +98,12 @@ fun CreatorCampaignsHubView(
                 },
                 actions = {
                     if (isBrandAccount) {
-                        IconButton(onClick = { showingCreate = true }) {
+                        IconButton(onClick = { BrandPortal.open(context, AppConfig.URLs.BRAND_NEW_CAMPAIGN) }) {
                             Icon(Icons.Default.AddCircle, "New campaign", tint = Color.Cyan)
+                        }
+                    } else {
+                        IconButton(onClick = { showingPayouts = true }) {
+                            Icon(Icons.Default.AccountBalance, "Payouts", tint = AppTheme.colors.textPrimary)
                         }
                     }
                 },
@@ -167,21 +172,12 @@ fun CreatorCampaignsHubView(
         }
     }
 
-    if (showingCreate) {
+    if (showingPayouts) {
         Dialog(
-            onDismissRequest = { showingCreate = false },
+            onDismissRequest = { showingPayouts = false },
             properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
         ) {
-            CreateCreatorCampaignView(
-                brandID = currentUserID,
-                brandName = brandName,
-                brandLogoURL = brandLogoURL,
-                onCreated = {
-                    showingCreate = false
-                    scope.launch { loadActiveTab() }
-                },
-                onDismiss = { showingCreate = false }
-            )
+            PayoutsSetupView(onDismiss = { showingPayouts = false })
         }
     }
 
@@ -240,12 +236,15 @@ private fun CampaignRowCard(campaign: CreatorCampaign, onClick: () -> Unit) {
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusPill(campaign.status.replaceFirstChar { it.uppercase() }, statusColor(campaign.status))
+            StatusPill(statusLabel(campaign.status), statusColor(campaign.status))
             if (campaign.applicationsCount > 0) {
                 StatusPill("${campaign.applicationsCount} applied", Color.Cyan)
             }
             if (campaign.approvedCount > 0) {
-                StatusPill("${campaign.approvedCount} approved", Color(0xFF1E8E3E))
+                StatusPill(
+                    campaign.slots?.let { "${campaign.approvedCount}/$it hired" } ?: "${campaign.approvedCount} approved",
+                    Color(0xFF1E8E3E)
+                )
             }
         }
     }
@@ -264,8 +263,15 @@ private fun StatusPill(text: String, color: Color) {
     )
 }
 
+private fun statusLabel(status: String): String = when (status) {
+    "awaiting_payment" -> "Awaiting payment"
+    "in_progress" -> "In progress"
+    else -> status.replaceFirstChar { it.uppercase() }
+}
+
 @Composable
 private fun statusColor(status: String): Color = when (status) {
+    "awaiting_payment" -> Color(0xFFFFA000)
     "open" -> Color(0xFF1E8E3E)
     "reviewing" -> Color(0xFFFFA000)
     "in_progress" -> Color.Cyan
@@ -277,8 +283,8 @@ private fun statusColor(status: String): Color = when (status) {
 @Composable
 private fun EmptyState(isBrandAccount: Boolean, selectedTab: Int) {
     val msg = when {
-        isBrandAccount && selectedTab == 0 -> "No campaigns yet. Tap + to post your first creator brief."
-        isBrandAccount -> "No drafts."
+        isBrandAccount && selectedTab == 0 -> "No campaigns yet. Tap + to post your first creator brief on stitchsocial.me."
+        isBrandAccount -> "Nothing waiting on payment."
         selectedTab == 0 -> "No open campaigns right now. Check back soon."
         else -> "You haven't applied to anything yet."
     }

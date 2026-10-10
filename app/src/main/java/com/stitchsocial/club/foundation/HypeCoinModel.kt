@@ -8,9 +8,8 @@
  * EXACT PORT: HypeCoinPackage.swift (iOS)
  *
  * ANDROID DELTA:
- *   - Purchases handled via Google Play Billing (not web/Stripe like iOS)
+ *   - Purchases handled via Google Play Billing (iOS uses Apple in-app purchase)
  *   - HypeCoinPackage includes Play Billing productId
- *   - No webPath needed (iOS-only web redirect)
  *
  * CACHING NOTE:
  *   - HypeCoinBalance should be cached in HypeCoinCoordinator (1-min TTL)
@@ -30,7 +29,7 @@ import java.util.Date
 /**
  * Five purchase tiers — mirrors iOS HypeCoinPackage exactly.
  * Android purchases via Google Play Billing (productId maps to Play Console SKU).
- * iOS purchases via web/Stripe — not applicable here.
+ * Coins are never sold on the web.
  *
  * BATCHING: All packages are static enum values — zero Firestore reads.
  */

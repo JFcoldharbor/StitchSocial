@@ -5,9 +5,9 @@
  * Layer 4: Core Services — In-app purchase via Google Play Billing Library 6+
  * Dependencies: HypeCoinModel.kt, HypeCoinService.kt, FirebaseSchema.kt
  *
- * ANDROID ONLY — no iOS equivalent.
- * iOS purchases through web/Stripe to avoid Apple 30% cut.
- * Android uses Play Billing directly (Google takes 15% for first $1M/year).
+ * ANDROID ONLY — iOS has its own StoreKit equivalent.
+ * Coins are bought only in the apps (Play Billing here, Apple on iOS); web
+ * coin purchases are retired. Google takes 15% for the first $1M/year.
  *
  * FLOW:
  *   1. loadProducts()       — query Play Console for product details (1 call at init)

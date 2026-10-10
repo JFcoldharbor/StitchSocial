@@ -27,6 +27,8 @@ import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.gms.ads.nativead.NativeAdOptions
 import com.google.android.gms.ads.nativead.NativeAdView
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.services.BrandAd
+import com.stitchsocial.club.services.BrandAdService
 
 /**
  * A native advanced ad, rendered inside a real NativeAdView (Android parity with
@@ -44,6 +46,10 @@ import com.stitchsocial.club.BuildConfig
  * 4. setNativeAd() goes LAST, after every registration.
  * 5. Retain the loader while a request is in flight, and destroy the NativeAd
  *    when the card leaves composition or it leaks.
+ *
+ * A direct brand ad (BrandAdService.getBrandAd) gets the slot first. Only when
+ * none comes back within its short timeout does the slot go to AdMob — so a
+ * slow or failed brand call costs at most that timeout, never the slot.
  */
 @Composable
 fun NativeAdCard(
@@ -52,22 +58,42 @@ fun NativeAdCard(
     placement: String,
     modifier: Modifier = Modifier,
     /** Subscribers bought an ad-free experience — honour it. */
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    /** The video the slot sits beside, if any — context for brand ad targeting. */
+    videoID: String? = null
 ) {
     if (!enabled) return
 
     val context = LocalContext.current
     var nativeAd by remember(unitId) { mutableStateOf<NativeAd?>(null) }
+    var brandAd by remember(unitId) { mutableStateOf<BrandAd?>(null) }
 
     // ONE request per visit, not per recomposition. A feed that re-requests on
     // every scroll burns fill and looks like click-fraud from Google's side.
     LaunchedEffect(unitId) {
+        // Creator-owned inventory is a "thread" slot, credited to the owner the
+        // same way AdMob thread revenue is; anything else is a house "feed" slot.
+        val isThread = owner.type == AdConfig.OwnerType.CREATOR && owner.creatorID.isNotBlank()
+        val brand = BrandAdService.getBrandAd(
+            placement = if (isThread) "thread" else "feed",
+            threadOwnerID = if (isThread) owner.creatorID else null,
+            videoID = videoID
+        )
+        if (brand != null) {
+            brandAd = brand
+            return@LaunchedEffect
+        }
         if (!AdMobBootstrap.isStarted) return@LaunchedEffect
         loadNativeAd(context, unitId, owner, placement) { ad -> nativeAd = ad }
     }
 
     DisposableEffect(nativeAd) {
         onDispose { nativeAd?.destroy() }
+    }
+
+    brandAd?.let {
+        BrandAdCard(ad = it, modifier = modifier)
+        return
     }
 
     val ad = nativeAd ?: return

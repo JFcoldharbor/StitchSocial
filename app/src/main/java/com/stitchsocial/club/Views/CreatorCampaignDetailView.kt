@@ -2,6 +2,7 @@ package com.stitchsocial.club.views
 
 import com.stitchsocial.club.ui.theme.AppTheme
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -10,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -26,23 +29,29 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.stitchsocial.club.AppConfig
 import com.stitchsocial.club.services.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * CreatorCampaignDetailView — role-aware drill-down.
  *
  * Creator view:
- *   - Brief + criteria
+ *   - Brief, the brand's expectations (prominent), deadline + the delivery policy
  *   - "Apply" sheet (if no application yet) → calls applyToCreatorCampaign
  *   - Status badge once applied (pending / approved / rejected)
  *   - "Submit deliverable" sheet (if approved) → submitCreatorCampaignDeliverable
- *   - Deliverable status block (payout status, revision notes)
+ *   - Deliverable status: submitted / accepted / auto-accepted / missed, payout
  *
  * Brand view:
- *   - Brief
- *   - Applicant list with AI fit %, pitch, approve/reject
- *   - Deliverable list with approve / request revision
+ *   - Brief + billing (slots, funded, payment status; pay link if unpaid)
+ *   - Applicant list with AI fit %, pitch, approve/decline
+ *   - Deliverable list with "Accept content" + optional 1–5 rating and review
+ *     (brand_acceptDeliverable). There is no reject and no revision request —
+ *     the brand paid up front and a rating is its only quality remedy.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +72,7 @@ fun CreatorCampaignDetailView(
 
     var showingApply by remember { mutableStateOf(false) }
     var showingSubmit by remember { mutableStateOf(false) }
+    var showingPayouts by remember { mutableStateOf(false) }
 
     suspend fun reload() {
         isLoading = true
@@ -107,13 +117,19 @@ fun CreatorCampaignDetailView(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 BriefCard(campaign, splitLine = if (isBrandAccount) null else creatorSplitLine(campaign, myDeliverable))
+                campaign.expectations?.let { ExpectationsCard(it) }
+                if (isBrandAccount) {
+                    BillingCard(campaign)
+                } else {
+                    DeadlinePolicyCard(campaign.contentDueDate)
+                }
                 campaign.criteria?.let { CriteriaCard(it) }
 
                 if (isBrandAccount) {
                     BrandSections(
+                        campaign = campaign,
                         applications = applications,
                         deliverables = deliverables,
-                        campaignID = campaign.id,
                         onReload = { scope.launch { reload() } }
                     )
                 } else {
@@ -121,7 +137,8 @@ fun CreatorCampaignDetailView(
                         application = myApplication,
                         deliverable = myDeliverable,
                         onApply = { showingApply = true },
-                        onSubmit = { showingSubmit = true }
+                        onSubmit = { showingSubmit = true },
+                        onSetUpPayouts = { showingPayouts = true }
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
@@ -142,6 +159,15 @@ fun CreatorCampaignDetailView(
                 },
                 onDismiss = { showingApply = false }
             )
+        }
+    }
+
+    if (showingPayouts) {
+        Dialog(
+            onDismissRequest = { showingPayouts = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            PayoutsSetupView(onDismiss = { showingPayouts = false })
         }
     }
 
@@ -201,6 +227,112 @@ private fun BriefCard(campaign: CreatorCampaign, splitLine: String? = null) {
     }
 }
 
+/** What the brand expects delivered. It is the contract, so it sits high and
+ *  stands out — creators are paid on delivering this, not on taste. */
+@Composable
+private fun ExpectationsCard(expectations: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Cyan.copy(alpha = 0.08f))
+            .border(1.dp, Color.Cyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.Checklist, null, tint = Color.Cyan, modifier = Modifier.size(16.dp))
+            Text("What the brand expects", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
+        Text(expectations, color = AppTheme.colors.textPrimary, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun DeadlinePolicyCard(dueDate: Date?) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        dueDate?.let {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Event, null, tint = Color(0xFFFFA000), modifier = Modifier.size(16.dp))
+                Text("Deliver by ${formatDate(it)}", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+        }
+        Text(
+            "Brands can't reject delivered work — they can rate it. If you don't deliver by the deadline, the brand is refunded and you won't be paid.",
+            color = AppTheme.colors.textSecondary,
+            fontSize = 12.sp
+        )
+    }
+}
+
+/** Brand only: what was paid and what is left. Payment itself is on the web. */
+@Composable
+private fun BillingCard(campaign: CreatorCampaign) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(AppTheme.colors.surface)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Billing", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Spacer(modifier = Modifier.weight(1f))
+            PaymentStatusBadge(if (campaign.isAwaitingPayment) "awaiting_payment" else campaign.paymentStatus)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            campaign.slots?.let { MetricChip("Slots", "${campaign.approvedCount}/$it hired") }
+            campaign.fundedCents?.let { MetricChip("Funded", dollars(it)) }
+            if (campaign.refundedCents > 0) MetricChip("Refunded", dollars(campaign.refundedCents))
+        }
+        if (campaign.isAwaitingPayment) {
+            TextButton(
+                onClick = { BrandPortal.open(context, AppConfig.URLs.BRAND) },
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = Color.Cyan, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Pay on stitchsocial.me", color = Color.Cyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaymentStatusBadge(status: String?) {
+    val (label, color) = when (status) {
+        "awaiting_payment" -> "Awaiting payment" to Color(0xFFFFA000)
+        "funded" -> "Funded" to Color(0xFF1E8E3E)
+        "partially_refunded" -> "Partially refunded" to Color.Cyan
+        "refunded" -> "Refunded" to AppTheme.colors.textSecondary
+        null -> return
+        else -> status.replace("_", " ").replaceFirstChar { it.uppercase() } to AppTheme.colors.textSecondary
+    }
+    Text(
+        label,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.18f), CircleShape)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    )
+}
+
+private fun dollars(cents: Int): String = "$" + String.format("%.2f", cents / 100.0)
+
+private fun formatDate(date: Date): String =
+    SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
+
 @Composable
 private fun CriteriaCard(c: CreatorCampaignCriteria) {
     Column(
@@ -236,7 +368,8 @@ private fun CreatorSections(
     application: CreatorCampaignApplication?,
     deliverable: CreatorCampaignDeliverable?,
     onApply: () -> Unit,
-    onSubmit: () -> Unit
+    onSubmit: () -> Unit,
+    onSetUpPayouts: () -> Unit
 ) {
     if (application == null) {
         // Apply button
@@ -251,8 +384,10 @@ private fun CreatorSections(
     } else {
         ApplicationStatusCard(application)
         if (application.status == "approved") {
-            if (deliverable?.draftSubmittedAt != null) {
-                DeliverableStatusCard(deliverable, onResubmit = onSubmit)
+            // Nothing to submit once it is in, accepted or past the deadline —
+            // there are no revisions.
+            if (deliverable != null && deliverable.status != "awaiting") {
+                DeliverableStatusCard(deliverable, onSetUpPayouts = onSetUpPayouts)
             } else {
                 Button(
                     onClick = onSubmit,
@@ -292,7 +427,7 @@ private fun ApplicationStatusCard(app: CreatorCampaignApplication) {
 }
 
 @Composable
-private fun DeliverableStatusCard(d: CreatorCampaignDeliverable, onResubmit: () -> Unit) {
+private fun DeliverableStatusCard(d: CreatorCampaignDeliverable, onSetUpPayouts: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -304,26 +439,40 @@ private fun DeliverableStatusCard(d: CreatorCampaignDeliverable, onResubmit: () 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Deliverable", color = AppTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Spacer(modifier = Modifier.weight(1f))
-            StatusBadge(d.approvalStatus)
+            StatusBadge(d.status)
         }
         d.draftURL?.let {
             Text(it, color = Color.Cyan, fontSize = 12.sp, maxLines = 2)
         }
-        if (d.approvalStatus == "revision_requested" && !d.revisionNotes.isNullOrEmpty()) {
-            Text("Revision notes:", color = Color(0xFFFFA000), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(d.revisionNotes, color = AppTheme.colors.textPrimary.copy(alpha = 0.8f), fontSize = 12.sp)
-            TextButton(onClick = onResubmit) {
-                Text("Submit revision", color = Color(0xFFFFA000), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
+        when (d.status) {
+            "submitted" -> Text(
+                d.autoAcceptAt?.let { "Waiting on the brand. Accepted automatically on ${formatDate(it)} if they don't act." }
+                    ?: "Waiting on the brand to accept.",
+                color = AppTheme.colors.textSecondary,
+                fontSize = 12.sp
+            )
+            "auto_accepted" -> Text(
+                "The brand didn't respond in time, so this was accepted automatically.",
+                color = AppTheme.colors.textSecondary,
+                fontSize = 12.sp
+            )
+            "missed" -> Text(
+                "Not delivered by the deadline. The brand was refunded for this slot.",
+                color = Color.Red.copy(alpha = 0.85f),
+                fontSize = 12.sp
+            )
         }
         d.payoutStatus?.let { status ->
             PayoutStatusRow(status, d.creatorNetCents)
             if (status == "held_no_connect_account") {
-                Text(
-                    "Set up payouts at stitchsocial.me/payouts to release this payment.",
-                    color = Color(0xFFFFA000),
-                    fontSize = 11.sp
-                )
+                TextButton(onClick = onSetUpPayouts, contentPadding = PaddingValues(0.dp)) {
+                    Text(
+                        "Set up payouts to release this payment",
+                        color = Color(0xFFFFA000),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }
@@ -355,11 +504,16 @@ private fun PayoutStatusRow(status: String, net: Int?) {
 
 @Composable
 private fun BrandSections(
+    campaign: CreatorCampaign,
     applications: List<CreatorCampaignApplication>,
     deliverables: List<CreatorCampaignDeliverable>,
-    campaignID: String,
     onReload: () -> Unit
 ) {
+    val campaignID = campaign.id
+    // Hiring needs the money in and a free slot; the server enforces both,
+    // this only keeps the button from offering what it will refuse.
+    val canApprove = !campaign.isAwaitingPayment &&
+        (campaign.slots == null || campaign.approvedCount < campaign.slots)
     if (applications.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -369,7 +523,7 @@ private fun BrandSections(
                 fontSize = 16.sp
             )
             applications.forEach { app ->
-                ApplicantRow(app = app, campaignID = campaignID, onReload = onReload)
+                ApplicantRow(app = app, campaignID = campaignID, canApprove = canApprove, onReload = onReload)
             }
         }
     }
@@ -402,6 +556,7 @@ private fun BrandSections(
 private fun ApplicantRow(
     app: CreatorCampaignApplication,
     campaignID: String,
+    canApprove: Boolean,
     onReload: () -> Unit
 ) {
     val service = remember { CreatorCampaignService.getInstance() }
@@ -467,11 +622,11 @@ private fun ApplicantRow(
                             isDeciding = false
                         }
                     },
-                    enabled = !isDeciding,
+                    enabled = !isDeciding && canApprove,
                     modifier = Modifier.weight(1f)
                 )
                 ActionButton(
-                    "Reject",
+                    "Decline",
                     color = Color.Red,
                     onClick = {
                         scope.launch {
@@ -515,11 +670,7 @@ private fun DeliverableRow(
     campaignID: String,
     onReload: () -> Unit
 ) {
-    val service = remember { CreatorCampaignService.getInstance() }
-    val scope = rememberCoroutineScope()
-    var isReviewing by remember { mutableStateOf(false) }
-    var showRevisionDialog by remember { mutableStateOf(false) }
-    var revisionNotes by remember { mutableStateOf("") }
+    var showAcceptDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -537,12 +688,7 @@ private fun DeliverableRow(
                 maxLines = 1,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                deliverable.approvalStatus.replace("_", " ").replaceFirstChar { it.uppercase() },
-                color = AppTheme.colors.textSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            StatusBadge(deliverable.status)
         }
         deliverable.draftURL?.let { url ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -551,32 +697,21 @@ private fun DeliverableRow(
             }
         }
 
-        if (deliverable.approvalStatus == "awaiting" && deliverable.draftURL != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ActionButton(
-                    "Approve & pay",
-                    color = Color(0xFF1E8E3E),
-                    onClick = {
-                        scope.launch {
-                            isReviewing = true
-                            try {
-                                service.reviewDeliverable(campaignID, deliverable.creatorID, true)
-                                onReload()
-                            } catch (e: Exception) { }
-                            isReviewing = false
-                        }
-                    },
-                    enabled = !isReviewing,
-                    modifier = Modifier.weight(1f)
-                )
-                ActionButton(
-                    "Request revision",
-                    color = Color(0xFFFFA000),
-                    onClick = { showRevisionDialog = true },
-                    enabled = !isReviewing,
-                    modifier = Modifier.weight(1f)
+        if (deliverable.status == "submitted") {
+            deliverable.autoAcceptAt?.let {
+                Text(
+                    "Accepted automatically on ${formatDate(it)} if you don't act.",
+                    color = AppTheme.colors.textSecondary,
+                    fontSize = 11.sp
                 )
             }
+            ActionButton(
+                "Accept content",
+                color = Color(0xFF1E8E3E),
+                onClick = { showAcceptDialog = true },
+                enabled = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         deliverable.payoutStatus?.let {
@@ -584,44 +719,112 @@ private fun DeliverableRow(
         }
     }
 
-    if (showRevisionDialog) {
-        AlertDialog(
-            onDismissRequest = { showRevisionDialog = false },
-            title = { Text("Request revision", color = AppTheme.colors.textPrimary) },
-            text = {
-                BasicTextField(
-                    value = revisionNotes,
-                    onValueChange = { revisionNotes = it },
-                    textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 100.dp)
-                        .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
-                        .padding(10.dp),
-                    cursorBrush = SolidColor(Color.White)
-                )
+    if (showAcceptDialog) {
+        AcceptContentDialog(
+            campaignID = campaignID,
+            creatorID = deliverable.creatorID,
+            onAccepted = {
+                showAcceptDialog = false
+                onReload()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        isReviewing = true
-                        try {
-                            service.reviewDeliverable(campaignID, deliverable.creatorID, false, revisionNotes)
-                            showRevisionDialog = false
-                            onReload()
-                        } catch (e: Exception) { }
-                        isReviewing = false
-                    }
-                }) { Text("Send", color = Color(0xFFFFA000)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRevisionDialog = false }) {
-                    Text("Cancel", color = AppTheme.colors.textSecondary)
-                }
-            },
-            containerColor = Color(0xFF1A1A1A)
+            onDismiss = { showAcceptDialog = false }
         )
     }
+}
+
+/**
+ * Accepting pays the creator. The rating and review are optional and are the
+ * brand's only say on quality, so they live here rather than on a separate
+ * screen nobody comes back to.
+ */
+@Composable
+private fun AcceptContentDialog(
+    campaignID: String,
+    creatorID: String,
+    onAccepted: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val service = remember { CreatorCampaignService.getInstance() }
+    val scope = rememberCoroutineScope()
+    var rating by remember { mutableIntStateOf(0) }
+    var review by remember { mutableStateOf("") }
+    var isAccepting by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isAccepting) onDismiss() },
+        title = { Text("Accept content", color = AppTheme.colors.textPrimary) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Accepting releases the creator's payment. You can rate their work too (optional).",
+                    color = AppTheme.colors.textSecondary,
+                    fontSize = 13.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    (1..5).forEach { star ->
+                        Icon(
+                            if (star <= rating) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = "$star star${if (star > 1) "s" else ""}",
+                            tint = if (star <= rating) Color(0xFFFFC107) else AppTheme.colors.textSecondary,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable(enabled = !isAccepting) { rating = if (rating == star) 0 else star }
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 80.dp)
+                        .background(AppTheme.colors.surface, RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    if (review.isEmpty()) {
+                        Text(if (rating == 0) "Pick a rating to add a review" else "Review (optional)", color = AppTheme.colors.textSecondary.copy(alpha = 0.6f), fontSize = 14.sp)
+                    }
+                    BasicTextField(
+                        value = review,
+                        onValueChange = { review = it.take(1000) },
+                        enabled = rating > 0 && !isAccepting,
+                        textStyle = TextStyle(color = AppTheme.colors.textPrimary, fontSize = 14.sp),
+                        modifier = Modifier.fillMaxWidth(),
+                        cursorBrush = SolidColor(Color.White)
+                    )
+                }
+                errorMsg?.let { Text(it, color = Color.Red, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        isAccepting = true
+                        errorMsg = null
+                        try {
+                            service.acceptDeliverable(
+                                campaignID = campaignID,
+                                creatorID = creatorID,
+                                rating = rating.takeIf { it in 1..5 },
+                                review = review.takeIf { rating in 1..5 }
+                            )
+                            onAccepted()
+                        } catch (e: Exception) {
+                            errorMsg = e.message ?: "Couldn't accept"
+                        }
+                        isAccepting = false
+                    }
+                },
+                enabled = !isAccepting
+            ) { Text(if (isAccepting) "Accepting…" else "Accept", color = Color(0xFF1E8E3E)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isAccepting) {
+                Text("Cancel", color = AppTheme.colors.textSecondary)
+            }
+        },
+        containerColor = Color(0xFF1A1A1A)
+    )
 }
 
 @Composable
@@ -655,8 +858,12 @@ private fun StatusBadge(status: String) {
         "approved" -> Color(0xFF1E8E3E) to "Approved"
         "rejected" -> Color.Red to "Rejected"
         "withdrawn" -> AppTheme.colors.textSecondary to "Withdrawn"
-        "awaiting" -> Color.Yellow to "Awaiting review"
-        "revision_requested" -> Color(0xFFFFA000) to "Revision requested"
+        // Deliverable states. "awaiting" = approved, nothing submitted yet.
+        "awaiting" -> Color.Yellow to "Not submitted"
+        "submitted" -> Color.Cyan to "Submitted"
+        "accepted" -> Color(0xFF1E8E3E) to "Accepted"
+        "auto_accepted" -> Color(0xFF1E8E3E) to "Auto-accepted"
+        "missed" -> Color.Red to "Missed deadline"
         else -> AppTheme.colors.textSecondary to status.replaceFirstChar { it.uppercase() }
     }
     Text(
@@ -870,7 +1077,7 @@ private fun SubmitDeliverableSheet(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    if (isSubmitting) "Sending…" else "Submit for review",
+                    if (isSubmitting) "Sending…" else "Submit content",
                     fontWeight = FontWeight.SemiBold
                 )
             }

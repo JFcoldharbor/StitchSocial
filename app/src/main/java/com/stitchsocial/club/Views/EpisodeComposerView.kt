@@ -103,6 +103,11 @@ fun EpisodeComposerView(
 
     var phase by remember { mutableStateOf<EpisodeFinalizeService.Phase?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A notification/link tap asks "Leave?" once a video has been picked.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(
+        com.stitchsocial.club.foundation.ComposerPresence.Kind.POST,
+        active = sourceUri != null
+    )
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()

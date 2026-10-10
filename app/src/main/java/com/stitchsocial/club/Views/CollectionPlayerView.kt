@@ -78,7 +78,7 @@ import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.SpecialUsersConfig
 import com.stitchsocial.club.ads.CollectionAdBreakController
 import com.stitchsocial.club.ads.CollectionAdBreakOverlay
-import com.google.android.gms.ads.nativead.NativeAd
+import com.stitchsocial.club.ads.BreakAd
 import com.stitchsocial.club.services.CollectionService
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.AuthService
@@ -146,7 +146,7 @@ fun CollectionPlayerView(
     val adBreaks = remember(collection.id) { CollectionAdBreakController() }
     /** The break on screen and the part it precedes. That part only becomes
      *  current when the break ends. */
-    var adBreak by remember { mutableStateOf<Pair<NativeAd, Int>?>(null) }
+    var adBreak by remember { mutableStateOf<Pair<BreakAd, Int>?>(null) }
     DisposableEffect(adBreaks) { onDispose { adBreaks.release() } }
 
     /** Every forward move goes through here: a break point with an ad in hand

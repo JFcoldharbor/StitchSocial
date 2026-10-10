@@ -130,7 +130,7 @@ fun PrivacySettingsView(
     fun saveCelebrateBirthday(enabled: Boolean) {
         scope.launch {
             try {
-                // Merge-write so birthdate / ageGroup siblings are preserved.
+                // Merge-write so ageGroup and other siblings are preserved.
                 db.collection("users").document(userID).set(
                     mapOf("privacySettings" to mapOf("celebrateBirthday" to enabled)),
                     com.google.firebase.firestore.SetOptions.merge()

@@ -5,9 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 
 /**
  * The one hand-off for "a notification was tapped" — push (MainActivity) and
- * inbox row (NotificationViewModel) alike.
+ * inbox row (NotificationViewModel) alike — and for a tapped shared link
+ * ([TYPE_SHARED_LINK]), so links interrupt and ask "Leave?" the same way.
  *
- * Same shape as [VideoDeepLink]: the tap arrives where the presentation state
+ * Same shape as [com.stitchsocial.club.events.EventDeepLink]: the tap arrives where the presentation state
  * doesn't live (the Activity, a ViewModel), and on a cold start before
  * MainScreen exists at all. So the raw notification is parked here and MainScreen
  * resolves it through [NotificationDestination.resolve] once the user is signed
@@ -28,6 +29,12 @@ object NotificationRouter {
         /** Distinguishes two taps on the same notification. */
         val requestedAt: Long = System.currentTimeMillis()
     )
+
+    /**
+     * Type for a tapped stitchsocial.me link (/v/, /u/, /e/). Links carry only
+     * the id, so [NotificationDestination.resolve] reads it from the payload.
+     */
+    const val TYPE_SHARED_LINK = "shared_link"
 
     val pending: MutableState<Request?> = mutableStateOf(null)
 

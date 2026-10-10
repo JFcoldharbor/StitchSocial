@@ -18,6 +18,7 @@ import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.AdRevenueShare
 import com.stitchsocial.club.services.AuthService
+import com.stitchsocial.club.services.CreatorCampaignService
 import com.stitchsocial.club.services.LinkedAccountManager
 import com.stitchsocial.club.services.SubscriptionService
 import kotlinx.coroutines.launch
@@ -52,6 +53,9 @@ fun SettingsHost(
     var emailVerified by remember { mutableStateOf(true) }
     var deleteConfirm by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    // Stripe Connect state. Null until read, so the payout task never shows
+    // on a guess.
+    var payoutsEnabled by remember { mutableStateOf<Boolean?>(null) }
 
     val linkedAccounts by LinkedAccountManager.getInstance(context).accounts.collectAsState()
     val isCreator = AdRevenueShare.canAccessAds(currentUser.tier)
@@ -78,6 +82,12 @@ fun SettingsHost(
         runCatching {
             subscriptionCount = SubscriptionService.shared.fetchMySubscriptions(currentUser.id).size
         }
+        // Payout state lived only inside the payouts screen, so nothing else
+        // could tell you it was missing. iOS parity.
+        if (isCreator && !currentUser.isBusiness) {
+            runCatching { CreatorCampaignService.getInstance().refreshStripeStatus() }
+                .onSuccess { payoutsEnabled = it.payoutsEnabled }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -93,6 +103,7 @@ fun SettingsHost(
             notificationsEnabled = notificationsGranted,
             subscriptionCount = subscriptionCount,
             isAmbassador = isAmbassador,
+            payoutsEnabled = payoutsEnabled,
             onDismiss = onDismiss,
             onSignOut = {
                 scope.launch {
@@ -122,11 +133,12 @@ fun SettingsHost(
                 }
             },
             onTaskAction = { task ->
-                // Only the email task can be acted on today; the rest deep-link
-                // to the row that fixes them when they exist.
-                when (task.destination) {
-                    SettingsDestination.ACCOUNTS_CENTER -> page = SettingsPage.ACCOUNTS_CENTER
-                    SettingsDestination.EARNINGS -> page = SettingsPage.EARNINGS
+                // A missing payout method goes straight to Stripe setup; the
+                // rest deep-link to the row that fixes them.
+                when {
+                    task.kind == SettingsTaskKind.PAYOUT_METHOD_MISSING -> page = SettingsPage.PAYOUTS
+                    task.destination == SettingsDestination.ACCOUNTS_CENTER -> page = SettingsPage.ACCOUNTS_CENTER
+                    task.destination == SettingsDestination.EARNINGS -> page = SettingsPage.EARNINGS
                     else -> Unit
                 }
             },
@@ -162,9 +174,15 @@ fun SettingsHost(
                     )
 
                     SettingsPage.EARNINGS -> EarningsPayoutsPage(
-                        payoutsEnabled = false,
+                        payoutsEnabled = payoutsEnabled == true,
                         onDismiss = close,
+                        onPayoutMethod = { page = SettingsPage.PAYOUTS },
                         onSubscriptionTiers = { page = SettingsPage.SUBSCRIPTION_SETTINGS },
+                    )
+
+                    SettingsPage.PAYOUTS -> PayoutsSetupView(
+                        onDismiss = { page = SettingsPage.EARNINGS },
+                        onStatusChanged = { payoutsEnabled = it.payoutsEnabled },
                     )
 
                     SettingsPage.NOTIFICATIONS -> NotificationSettingsPage(
@@ -269,7 +287,7 @@ enum class SettingsPage {
     ACCOUNTS_CENTER, CREATOR_STUDIO, EARNINGS, NOTIFICATIONS, PLAYBACK, TERMS,
     PRIVACY, WALLET, SUBSCRIPTIONS, SUBSCRIBERS, SUBSCRIPTION_SETTINGS,
     COMMUNITY, AD_OPPORTUNITIES, BRAND_MARKETPLACE, REFERRAL, ACCOUNT_SWITCHER,
-    EDIT_PROFILE,
+    EDIT_PROFILE, PAYOUTS,
 }
 
 /**

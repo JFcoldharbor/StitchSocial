@@ -103,6 +103,11 @@ fun CommunityVideoComposerSheet(
     var caption by remember { mutableStateOf("") }
     var state by remember { mutableStateOf<Submit>(Submit.Idle) }
     var progress by remember { mutableStateOf(0f) }
+    // A notification/link tap asks "Leave?" while a clip or caption is in hand.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(
+        com.stitchsocial.club.foundation.ComposerPresence.Kind.POST,
+        active = pickedUri != null || caption.isNotBlank()
+    )
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),

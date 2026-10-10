@@ -232,6 +232,7 @@ object FirebaseSchema {
         const val ID               = "id"
         const val USERNAME         = "username"
         const val DISPLAY_NAME     = "displayName"
+        /** NOT on the public user doc — owner-only, in users/{uid}/private/profile. */
         const val EMAIL            = "email"
         const val PROFILE_IMAGE_URL = "profileImageURL"
         const val BIO              = "bio"

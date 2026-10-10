@@ -542,7 +542,8 @@ fun ProfileView(
         launch { loadVideos() }
         launch { loadPinnedVideos() }
 
-        // Age gate — own profile only.  Reads users/{id}.privacySettings.birthdate.
+        // Age gate — own profile only.  Reads users/{id}/private/profile.birthdate
+        // (legacy: users/{id}.privacySettings.birthdate).
         // Server-side custom claim (audienceLane) is set by onUserBirthdateSet
         // Cloud Function — this client check is for UX only.
         if (isOwnProfileForAgeGate && !ageGateChecked) {
@@ -556,8 +557,14 @@ fun ProfileView(
                     if (ageGroupRaw == "blocked") {
                         showingUnder13Block = true
                     } else {
-                        val dob = (privacy?.get("birthdate") as? com.google.firebase.Timestamp)?.toDate()
-                        if (dob == null) {
+                        // Birthdate lives in the owner-only users/{id}/private/profile.
+                        val dob = com.stitchsocial.club.services.PrivateProfileService
+                            .resolveOwnBirthdate(userID, privacy)
+                        if (dob == null && ageGroupRaw == "teen") {
+                            TeenSafety.setLane("teen")
+                        } else if (dob == null && ageGroupRaw == "adult") {
+                            // Already through the gate; nothing to do.
+                        } else if (dob == null) {
                             showingBirthdayPrompt = true
                         } else {
                             val age = java.util.Calendar.getInstance().let { now ->
@@ -1411,6 +1418,17 @@ private fun ProfileHeader(
 
                 Text("@${user.username}", fontSize = 14.sp, color = AppTheme.colors.textSecondary)
 
+                // Brand rating — from accepted campaign work. Only once a brand
+                // has actually rated them; "no ratings" reads as a bad rating.
+                if (!user.isBusiness && user.brandRatingCount > 0) {
+                    Text(
+                        "★ ${String.format("%.1f", user.brandRatingAverage)} · ${user.brandRatingCount} brand " +
+                            if (user.brandRatingCount == 1) "rating" else "ratings",
+                        fontSize = 13.sp,
+                        color = AppTheme.colors.textSecondary
+                    )
+                }
+
                 // Bio sits directly under the handle, not under the badges (iOS parity).
                 BioSection(user = user, isOwnProfile = isOwnProfile, isShowingFullBio = isShowingFullBio, onToggleBio = onToggleBio, onEditProfile = onEditProfile)
             }
@@ -1730,10 +1748,16 @@ private fun ProfileTopBar(
                     // The money item comes first, as on iOS: Advertise for a
                     // business, Ad opportunities for an eligible creator.
                     if (isBusiness) {
+                        // Brands buy on the web portal; the app takes no brand payments.
                         DropdownMenuItem(
                             text = { Text("Advertise") },
                             leadingIcon = { Icon(Icons.Default.Campaign, null) },
-                            onClick = { menuOpen = false; onAdOpportunities() }
+                            onClick = {
+                                menuOpen = false
+                                com.stitchsocial.club.services.BrandPortal.open(
+                                    context, com.stitchsocial.club.AppConfig.URLs.BRAND
+                                )
+                            }
                         )
                     } else if (AdRevenueShare.canAccessAds(userTier)) {
                         DropdownMenuItem(

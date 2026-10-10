@@ -76,6 +76,9 @@ fun VideoCommentRecordSheet(
     var isPriority by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<SubmissionState>(SubmissionState.Idle) }
     var progress by remember { mutableStateOf(0f) }
+    // Opens on a camera: a notification/link tap asks "Leave?" with the
+    // recording wording, as the main recorder does.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(com.stitchsocial.club.foundation.ComposerPresence.Kind.CAMERA)
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),

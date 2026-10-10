@@ -95,7 +95,9 @@ class UserService(private val context: Context) {
             // Create user document
             val userData = hashMapOf<String, Any>(
                 "id" to id,
-                "email" to email,
+                // Email goes to the owner-only users/{id}/private/profile doc,
+                // never the public user doc. It is still used above to pick
+                // the special-user tier/clout/verification.
                 "username" to finalUsername,
                 "displayName" to finalDisplayName,
                 "bio" to initialBio,
@@ -114,6 +116,11 @@ class UserService(private val context: Context) {
             }
 
             db.collection("users").document(id).set(userData).await()
+            try {
+                PrivateProfileService.writeEmail(id, email)
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("USER SERVICE: ⚠️ Private profile email write failed (non-critical): ${e.message}") }
+            }
 
             val user = BasicUserInfo(
                 id = id,
@@ -151,22 +158,14 @@ class UserService(private val context: Context) {
      */
     private suspend fun performAutoFollow(newUserID: String, email: String) {
         try {
-            // Get James Fortune's user ID
-            val founderEmail = "james@stitchsocial.me"
-            val founderDoc = db.collection("users")
-                .whereEqualTo("email", founderEmail)
-                .limit(1)
-                .get()
-                .await()
+            // Founder is identified by UID — users are never queried by email
+            // (email is owner-only in users/{uid}/private/profile).
+            val founderID = SpecialUsersConfig.FOUNDER_UID
 
-            if (founderDoc.documents.isNotEmpty()) {
-                val founderID = founderDoc.documents.first().id
-
-                // Don't auto-follow yourself
-                if (newUserID != founderID) {
-                    if (BuildConfig.DEBUG) { println("USER SERVICE: Auto-following founder for new user") }
-                    followUser(newUserID, founderID)
-                }
+            // Don't auto-follow yourself
+            if (newUserID != founderID) {
+                if (BuildConfig.DEBUG) { println("USER SERVICE: Auto-following founder for new user") }
+                followUser(newUserID, founderID)
             }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) { println("USER SERVICE: ⚠️ Auto-follow failed (non-critical): ${e.message}") }
@@ -605,10 +604,8 @@ class UserService(private val context: Context) {
     suspend fun unfollowUser(followerID: String, followeeID: String): Boolean {
         return try {
             // FOUNDER PROTECTION: Prevent unfollowing James Fortune
-            val followeeDoc = db.collection("users").document(followeeID).get().await()
-            val followeeEmail = followeeDoc.getString("email")
-
-            if (followeeEmail == "james@stitchsocial.me") {
+            // Keyed by UID — other users' emails are not readable.
+            if (SpecialUsersConfig.isProtectedFromUnfollowByUid(followeeID)) {
                 if (BuildConfig.DEBUG) { println("USER SERVICE: ⚠️ Cannot unfollow founder (James Fortune)") }
                 handleError("You cannot unfollow the founder")
                 return false

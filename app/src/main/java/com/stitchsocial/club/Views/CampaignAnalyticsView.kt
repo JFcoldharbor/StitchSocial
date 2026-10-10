@@ -35,6 +35,9 @@ import kotlinx.coroutines.tasks.await
  * No Android entry point is wired yet — call this from a future
  * BusinessAdDashboardView equivalent (or stub it from Settings) once that
  * exists. The Composable is parameterized to be reusable from anywhere.
+ *
+ * Read-only by design: brands create, fund, pause and cancel ad campaigns on
+ * stitchsocial.me/brand (AppConfig.URLs.BRAND). Nothing here takes payment.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

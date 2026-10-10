@@ -156,6 +156,10 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.5.0")
 
+    // Custom Tabs — Stripe Connect payout onboarding opens in one. Stripe's
+    // hosted KYC page is meant for a real browser, not an embedded WebView.
+    implementation("androidx.browser:browser:1.8.0")
+
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     // Required for HLS (.m3u8) ABR playback from the CDN pipeline — without this
     // ExoPlayer can't resolve the master playlist. See project_stitch_cdn_integration.

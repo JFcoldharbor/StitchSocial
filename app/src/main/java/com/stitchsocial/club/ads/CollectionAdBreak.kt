@@ -34,6 +34,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.services.BrandAd
+import com.stitchsocial.club.services.BrandAdService
 import com.stitchsocial.club.services.SubscriptionService
 import com.stitchsocial.club.services.TeenSafety
 import kotlinx.coroutines.delay
@@ -53,6 +55,8 @@ import kotlinx.coroutines.tasks.await
  *  - at most 3 per viewing session
  *  - forward moves only; going back never shows one
  *  - no ad in hand at the break → no break; nobody waits on a request
+ *  - a direct brand ad (BrandAdService) is asked for first at prefetch; AdMob
+ *    only fills the break when none comes back
  *  - nobody sees one who is: a subscriber to the creator (ad-free is what they
  *    pay for), the creator, a founder, in the teen lane, or signed out
  */
@@ -66,6 +70,12 @@ object CollectionAdBreakPolicy {
     fun isBreak(nextIndex: Int): Boolean = nextIndex >= 2 && (nextIndex - 2) % 3 == 0
 }
 
+/** What fills a break: a direct brand ad, or AdMob's native ad. */
+sealed class BreakAd {
+    data class Brand(val ad: BrandAd) : BreakAd()
+    class Native(val ad: NativeAd) : BreakAd()
+}
+
 /** Per-player state: whether this viewer gets breaks, and the prefetched ads. */
 class CollectionAdBreakController {
 
@@ -77,7 +87,7 @@ class CollectionAdBreakController {
 
     private val shownBefore = mutableSetOf<Int>()
     /** Ads by the part they precede; null value = request in flight or failed. */
-    private val ads = mutableMapOf<Int, NativeAd?>()
+    private val ads = mutableMapOf<Int, BreakAd?>()
 
     /** Decides once per open whether this viewer sees breaks, and who earns. */
     suspend fun configure(
@@ -120,23 +130,40 @@ class CollectionAdBreakController {
     }
 
     /** Call when the current part changes: requests the ad for the next break
-     *  if it comes right after this part. */
-    fun prefetch(context: Context, currentIndex: Int, segmentCount: Int) {
+     *  if it comes right after this part. Brand ad first, then AdMob. */
+    suspend fun prefetch(context: Context, currentIndex: Int, segmentCount: Int) {
         val next = currentIndex + 1
         if (!enabled || next >= segmentCount || !CollectionAdBreakPolicy.isBreak(next)) return
         if (next in shownBefore || shownBefore.size >= CollectionAdBreakPolicy.MAX_PER_SESSION) return
-        if (ads.containsKey(next) || !AdMobBootstrap.isStarted) return
+        if (ads.containsKey(next)) return
         ads[next] = null
         if (BuildConfig.DEBUG) println("📺 AD BREAK: prefetching for the break before Part ${next + 1}")
+
+        // The episode is the creator's thread, so a brand impression credits
+        // them exactly as an AdMob one would.
+        val brand = try {
+            BrandAdService.getBrandAd(placement = "thread", threadOwnerID = owner.creatorID)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            ads.remove(next)   // part changed mid-request; let the next call retry
+            throw e
+        }
+        if (brand != null) {
+            ads[next] = BreakAd.Brand(brand)
+            return
+        }
+        if (!AdMobBootstrap.isStarted) {
+            ads.remove(next)
+            return
+        }
         loadNativeAd(
             context, AdConfig.NativeUnit.collectionBreak, owner, CollectionAdBreakPolicy.PLACEMENT,
             onFailed = { ads.remove(next) }
-        ) { ad -> ads[next] = ad }
+        ) { ad -> ads[next] = BreakAd.Native(ad) }
     }
 
     /** The ready ad for a break before [nextIndex], if this move is a break and
      *  one has filled. Taking it uses up the break point. */
-    fun take(nextIndex: Int): NativeAd? {
+    fun take(nextIndex: Int): BreakAd? {
         if (!enabled || !CollectionAdBreakPolicy.isBreak(nextIndex)) return null
         if (nextIndex in shownBefore || shownBefore.size >= CollectionAdBreakPolicy.MAX_PER_SESSION) return null
         val ad = ads[nextIndex] ?: return null
@@ -147,7 +174,7 @@ class CollectionAdBreakController {
 
     /** Destroys anything prefetched and never shown. */
     fun release() {
-        ads.values.forEach { it?.destroy() }
+        ads.values.forEach { (it as? BreakAd.Native)?.ad?.destroy() }
         ads.clear()
     }
 }
@@ -158,7 +185,7 @@ class CollectionAdBreakController {
  */
 @Composable
 fun CollectionAdBreakOverlay(
-    ad: NativeAd,
+    ad: BreakAd,
     nextPartNumber: Int,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier
@@ -178,16 +205,19 @@ fun CollectionAdBreakOverlay(
         }
         finish()
     }
-    DisposableEffect(ad) { onDispose { ad.destroy() } }
+    DisposableEffect(ad) { onDispose { (ad as? BreakAd.Native)?.ad?.destroy() } }
 
     val remaining = (CollectionAdBreakPolicy.SKIP_AFTER_SECONDS - elapsed).coerceAtLeast(0)
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx -> buildBreakAdView(ctx) },
-            update = { root -> bindBreakAd(root, ad) }
-        )
+        when (ad) {
+            is BreakAd.Brand -> BrandAdCard(ad = ad.ad, fullScreen = true)
+            is BreakAd.Native -> AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx -> buildBreakAdView(ctx) },
+                update = { root -> bindBreakAd(root, ad.ad) }
+            )
+        }
 
         Text(
             "Ad · Part $nextPartNumber next",

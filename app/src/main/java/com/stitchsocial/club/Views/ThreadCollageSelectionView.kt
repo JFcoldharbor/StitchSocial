@@ -71,6 +71,11 @@ fun ThreadCollageSelectionView(
     var trimEditingClipID by remember { mutableStateOf<String?>(null) }
     var showOverBudgetAlert by remember { mutableStateOf(false) }
     var buildError by remember { mutableStateOf<String?>(null) }
+    // A notification/link tap asks "Leave?" once clips have been picked.
+    com.stitchsocial.club.foundation.RegisterComposerPresence(
+        com.stitchsocial.club.foundation.ComposerPresence.Kind.CHANGES,
+        active = selectedClips.any { !it.isMainClip }
+    )
 
     // Set main video on first composition; never re-runs unless the
     // thread changes (which it shouldn't during this flow).
