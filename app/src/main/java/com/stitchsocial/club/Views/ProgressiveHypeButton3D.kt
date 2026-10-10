@@ -354,7 +354,7 @@ fun ProgressiveHypeButton3D(
  * "1.0K" where every other counter in the app reads "1K", and a big number
  * pushed its own column wide enough to shove the rail's neighbours off centre.
  */
-private fun formatHypeCount(count: Int): String {
+internal fun formatHypeCount(count: Int): String {
     fun trim(value: Double, suffix: String): String {
         val rounded = kotlin.math.floor(value * 10) / 10
         return if (rounded == kotlin.math.floor(rounded)) "${rounded.toInt()}$suffix"

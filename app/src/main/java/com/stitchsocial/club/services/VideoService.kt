@@ -854,6 +854,7 @@ class VideoServiceImpl {
                     coolCount = (data["coolCount"] as? Long)?.toInt() ?: 0,
                     replyCount = (data["replyCount"] as? Long)?.toInt() ?: 0,
                     shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0,
+                    coinTotal = (data["coinTotal"] as? Number)?.toInt() ?: 0,
                     lastEngagementAt = (data["lastEngagementAt"] as? Timestamp)?.toDate(),
                     duration = (data["duration"] as? Number)?.toDouble() ?: 30.0,
                     aspectRatio = (data["aspectRatio"] as? Number)?.toDouble() ?: (9.0/16.0),

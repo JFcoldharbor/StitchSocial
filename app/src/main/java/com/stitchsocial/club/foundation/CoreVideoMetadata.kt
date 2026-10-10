@@ -127,7 +127,9 @@ data class CoreVideoMetadata(
     /// post still matches exactly one profile.
     val participantIDs: List<String> = emptyList(),
     val collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
-    val collabBoost: com.stitchsocial.club.services.CollabBoost? = null
+    val collabBoost: com.stitchsocial.club.services.CollabBoost? = null,
+    /// Coins tipped on this video, all time (videos/{id}.coinTotal).
+    val coinTotal: Int = 0
 ) {
     // Computed properties
 

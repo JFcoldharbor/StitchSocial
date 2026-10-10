@@ -262,7 +262,9 @@ internal data class ContextualVideoEngagement(
     var shareCount: Int,
     var replyCount: Int,
     var viewCount: Int,
-    var lastEngagementAt: Date
+    var lastEngagementAt: Date,
+    /// Coins tipped on this video, all time (videos/{id}.coinTotal).
+    var coinTotal: Int = 0
 ) {
     val totalEngagements: Int get() = hypeCount + coolCount
     val engagementRatio: Double get() {
@@ -579,7 +581,8 @@ fun ContextualVideoOverlay(
             shareCount = video.shareCount,
             replyCount = video.replyCount,
             viewCount = video.viewCount,
-            lastEngagementAt = Date()
+            lastEngagementAt = Date(),
+            coinTotal = video.coinTotal
         )
         // Step 2 — refresh from Firestore
         try {
@@ -593,7 +596,8 @@ fun ContextualVideoOverlay(
                     shareCount = fresh.shareCount,
                     replyCount = fresh.replyCount,
                     viewCount = fresh.viewCount,
-                    lastEngagementAt = Date()
+                    lastEngagementAt = Date(),
+                    coinTotal = fresh.coinTotal
                 )
             }
         } catch (e: Exception) {
@@ -619,7 +623,8 @@ fun ContextualVideoOverlay(
                         shareCount = fresh.shareCount,
                         replyCount = fresh.replyCount,
                         viewCount = fresh.viewCount,
-                        lastEngagementAt = Date()
+                        lastEngagementAt = Date(),
+                        coinTotal = fresh.coinTotal
                     )
                 }
             } catch (_: Exception) { /* swallow — visual feedback already happened */ }
@@ -2081,6 +2086,10 @@ internal fun SwappableEngagementSlot(
 ) {
     var dragAccum by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0f) }
     val switchThreshold = 60f
+    // Tips sent from this screen, held here rather than in TipButton: the
+    // button leaves composition when the slot swaps back to Hype, and its own
+    // count went with it.
+    var sessionTips by androidx.compose.runtime.remember(video.id) { androidx.compose.runtime.mutableStateOf(0) }
 
     androidx.compose.foundation.layout.Box(
         modifier = androidx.compose.ui.Modifier
@@ -2143,9 +2152,10 @@ internal fun SwappableEngagementSlot(
                         videoID = video.id,
                         creatorID = video.creatorID,
                         currentUserID = currentUserID,
-                        coinTotal = 0,
+                        coinTotal = (videoEngagement?.coinTotal ?: video.coinTotal) + sessionTips,
                         isSelfTip = isSelfTip,
-                        onAction = onAction
+                        onAction = onAction,
+                        onTipSent = { sessionTips += it }
                     )
                 }
             }
@@ -2181,14 +2191,16 @@ internal fun TipButton(
     currentUserID: String,
     coinTotal: Int,
     isSelfTip: Boolean,
-    onAction: ((OverlayAction) -> Unit)?
+    onAction: ((OverlayAction) -> Unit)?,
+    /** Coins sent (negative when a send fails and is taken back). */
+    onTipSent: (Int) -> Unit = {}
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val db = androidx.compose.runtime.remember { FirebaseFirestore.getInstance("stitchfin") }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
-    var sessionTotal by androidx.compose.runtime.remember(videoID) { androidx.compose.runtime.mutableStateOf(0) }
-    val displayCount = coinTotal + sessionTotal
+    // coinTotal already includes this session's tips — the host adds them.
+    val displayCount = coinTotal
 
     var isPressed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showBurst by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -2198,7 +2210,7 @@ internal fun TipButton(
     val scale by animateFloatAsState(if (isPressed) 0.9f else 1f, label = "tip_scale")
 
     fun sendTip(amount: Int) {
-        sessionTotal += amount
+        onTipSent(amount)
         scope.launch {
             try {
                 db.collection("coin_balances").document(currentUserID)
@@ -2223,7 +2235,7 @@ internal fun TipButton(
                     amount = amount
                 )
             } catch (e: Exception) {
-                sessionTotal -= amount
+                onTipSent(-amount)
                 errorMsg = "Tip failed"
                 showError = true
                 scope.launch { delay(2000); showError = false }
@@ -2236,14 +2248,6 @@ internal fun TipButton(
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        // Count display (mirrors tipCountDisplay)
-        androidx.compose.material3.Text(
-            "$displayCount",
-            fontSize = 12.fixedSp(),
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
-
         // Button circle
         androidx.compose.foundation.layout.Box(
             modifier = androidx.compose.ui.Modifier
@@ -2292,10 +2296,14 @@ internal fun TipButton(
             }
         }
 
-        // Label — "Tip" on your own video too (greyed): a dash said nothing
-        // about what the swipe had turned the button into.
+        // Label — count and word together, like Hype; the word alone until
+        // there is a count. "Tip" on your own video too (greyed).
         androidx.compose.material3.Text(
-            "Tip",
+            when {
+                displayCount <= 0 -> "Tip"
+                displayCount == 1 -> "1 Tip"
+                else -> "${formatHypeCount(displayCount)} Tips"
+            },
             fontSize = 10.fixedSp(),
             fontWeight = FontWeight.Medium,
             color = if (isSelfTip) Color.Gray else Color.White.copy(0.8f)
