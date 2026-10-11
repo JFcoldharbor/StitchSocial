@@ -42,7 +42,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +59,8 @@ import androidx.compose.ui.platform.LocalContext
 import com.stitchsocial.club.services.UserService
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.SponsoredSlot
+import com.stitchsocial.club.foundation.MediaFit
+import com.stitchsocial.club.foundation.MediaFitMode
 import com.stitchsocial.club.foundation.VideoCollection
 import com.stitchsocial.club.foundation.CollectionContentType
 import com.stitchsocial.club.foundation.Temperature
@@ -236,74 +241,82 @@ private val SponsoredMagenta = Color(0xFFE91E63)
 
 /**
  * First-party sponsored ad card for the swipe feed — port of iOS sponsored slot card.
- * 9:16 creative, NO engagement overlay:
- *   - Full-bleed creative: slot.videoURL plays (looped, only while [isActive])
- *     when set, otherwise the image (slot.imageURL)
- *   - "SPONSORED" capsule badge (top-left)
- *   - Advertiser name + title over a bottom gradient
- *   - CTA button in brand magenta with the slot's ctaText
+ * NO engagement overlay:
+ *   - The creative: slot.videoURL plays (looped, only while [isActive]) when
+ *     set, otherwise the image (slot.imageURL). Media fit decides how
+ *     (MEDIA_FIT_CONTRACT): a 9:16 creative fills the card as always; a flyer,
+ *     square or landscape creative is shown whole in the clear area — below the
+ *     top chrome, above the bottom block, 12dp in from the sides — over a
+ *     blurred copy of itself. slot.fit can force either.
+ *   - Bottom block: "SPONSORED" capsule, advertiser name, title, CTA in brand
+ *     magenta. Its measured height is the clear area's bottom edge.
  * The CTA button records the tap + opens ctaURL via the onCtaClick callback;
  * tapping anywhere else on the card routes through DiscoveryView's onVideoTap
  * sponsored branch (same behavior).
+ *
+ * [topInset] is the host's floating chrome and [bottomInset] its tab bar: the
+ * card is full-bleed under both, so it has to clear them itself.
  */
 @Composable
 fun SponsoredSwipeCard(
     slot: SponsoredSlot,
     onCtaClick: () -> Unit,
     modifier: Modifier = Modifier,
-    isActive: Boolean = false
+    isActive: Boolean = false,
+    topInset: Dp = 0.dp,
+    bottomInset: Dp = 0.dp
 ) {
+    val density = LocalDensity.current
+    // Small phones (SE-class) lose a lot of clear area to a two-line title.
+    val titleMaxLines = if (LocalConfiguration.current.screenHeightDp < 700) 1 else 2
+    var bottomBlockHeight by remember(slot.id) { mutableStateOf(0.dp) }
+    val isFit = MediaFit.mode(slot.aspectRatio, slot.fit) == MediaFitMode.FIT
+    val clearArea = MediaFitBand.clearArea(top = topInset, bottom = bottomInset + bottomBlockHeight)
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(20.dp))
             .background(Color(0xFF1A1A2E))
     ) {
-        // Full-bleed 9:16 creative. The image stays underneath a video ad as its
-        // poster until the first frame arrives.
+        // The image stays underneath a video ad as its poster until the first
+        // frame arrives — in the same rect, so nothing jumps.
         var videoStarted by remember(slot.id) { mutableStateOf(false) }
-        if (slot.hasVideo) {
-            val clip = remember(slot.id, slot.videoURL) { slot.playerMetadata() }
-            VideoPlayerComposable(
-                video = clip,
-                isActive = isActive,
-                modifier = Modifier.fillMaxSize(),
-                onPlaybackStarted = { videoStarted = true }
-            )
-        }
-        if (!slot.hasVideo || !videoStarted) {
-            AsyncImage(
-                model = slot.imageURL,
-                contentDescription = slot.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // "SPONSORED" capsule badge — top-left
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(12.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Text(
-                text = "SPONSORED",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                letterSpacing = 1.5.sp
-            )
+        MediaFitFrame(
+            aspect = slot.aspectRatio,
+            fitOverride = slot.fit,
+            band = clearArea,
+            backdropURL = slot.imageURL,
+            modifier = Modifier.fillMaxSize()
+        ) { fitted ->
+            if (slot.hasVideo) {
+                val clip = remember(slot.id, slot.videoURL) { slot.playerMetadata() }
+                VideoPlayerComposable(
+                    video = clip,
+                    isActive = isActive,
+                    modifier = Modifier.fillMaxSize(),
+                    onPlaybackStarted = { videoStarted = true }
+                )
+            }
+            if (!slot.hasVideo || !videoStarted) {
+                AsyncImage(
+                    model = slot.imageURL,
+                    contentDescription = slot.title,
+                    contentScale = if (fitted) ContentScale.Fit else ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
-        // Dark gradient overlay at bottom
+        // Dark gradient overlay at bottom. Fitted, it only backs the bottom
+        // block — over the creative it would darken what the brand paid to show.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.55f)
+                .then(
+                    if (isFit && bottomBlockHeight > 0.dp) Modifier.height(bottomInset + bottomBlockHeight + 32.dp)
+                    else Modifier.fillMaxHeight(0.55f)
+                )
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
@@ -312,14 +325,38 @@ fun SponsoredSwipeCard(
                 )
         )
 
-        // Bottom info panel: advertiser, title, CTA
+        // Bottom block: SPONSORED, advertiser, title, CTA. Its measured top is
+        // the clear area's bottom edge.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
+                .padding(bottom = bottomInset)
+                .onSizeChanged { size ->
+                    val h = with(density) { size.height.toDp() }
+                    if (h != bottomBlockHeight) bottomBlockHeight = h
+                }
                 .padding(horizontal = 20.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // "SPONSORED" capsule — always labelled. In the bottom block (iOS
+            // parity), not top-left where the host's chrome covered it.
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = "SPONSORED",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    letterSpacing = 1.5.sp
+                )
+            }
+
             Text(
                 text = slot.advertiserName,
                 fontSize = 13.sp,
@@ -334,7 +371,7 @@ fun SponsoredSwipeCard(
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                maxLines = 2,
+                maxLines = titleMaxLines,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 26.sp
             )

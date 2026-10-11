@@ -80,7 +80,16 @@ fun VideoPlayerComposable(
      * black flash back, too long and a still frame sits on top of a playing
      * video. Optional, so every existing call site is unaffected.
      */
-    onPlaybackStarted: (() -> Unit)? = null
+    onPlaybackStarted: (() -> Unit)? = null,
+    /**
+     * Media fit (MEDIA_FIT_CONTRACT). Null keeps the old behaviour: fill the
+     * frame, cropping (RESIZE_MODE_ZOOM) — grid tiles, the carousel and the
+     * other surfaces that keep filling pass nothing. Non-null is the band (or
+     * clear area) a "fit" video is centred in, over its blurred poster.
+     */
+    fitBand: MediaFitBand? = null,
+    /** "fill" / "fit" overrides the shape rule (sponsored slots); null = auto. */
+    fitOverride: String? = null
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
@@ -398,6 +407,17 @@ fun VideoPlayerComposable(
             }
             else -> {
                 // ExoPlayer View - NO BUFFERING INDICATOR
+                //
+                // Fill: full frame, cropped, as it always was. Fit: the view is
+                // sized to the fit rect inside the band and letterboxes there,
+                // over the blurred poster — never a second decoder.
+                MediaFitFrame(
+                    aspect = videoModel?.aspectRatio,
+                    fitOverride = fitOverride,
+                    band = fitBand,
+                    backdropURL = videoModel?.thumbnailURL,
+                    modifier = Modifier.fillMaxSize()
+                ) { isFit ->
                 AndroidView(
                     factory = { ctx ->
                         // SurfaceView (PlayerView's default), NOT TextureView.
@@ -436,8 +456,17 @@ fun VideoPlayerComposable(
                     modifier = Modifier.fillMaxSize(),
                     update = { playerView ->
                         playerView.player = exoPlayer
+                        val wanted = if (isFit) AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        if (playerView.resizeMode != wanted) playerView.resizeMode = wanted
+                        // Fit: let the backdrop show around a frame whose real
+                        // shape differs slightly from the stored aspectRatio.
+                        val bg = if (isFit) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK
+                        playerView.setBackgroundColor(bg)
+                        playerView.setShutterBackgroundColor(bg)
                     }
                 )
+                }
 
                 // NOTE: Gesture detection removed - handled by ContextualVideoOverlay
                 // This allows HorizontalPager swipes to work properly

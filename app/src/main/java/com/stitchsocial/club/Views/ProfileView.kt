@@ -961,7 +961,9 @@ fun ProfileView(
                 VideoPlayerComposable(
                     video = currentVid,
                     isActive = true,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    // No header; the tab bar's measured clearance is 0 when it's hidden.
+                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
                 )
             }
 

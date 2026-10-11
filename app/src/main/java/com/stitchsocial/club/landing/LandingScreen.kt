@@ -92,6 +92,12 @@ fun LandingScreen(
     var claiming by remember { mutableStateOf(false) }
     var checkingIn by remember { mutableStateOf(false) }
     var showAccessEntry by remember { mutableStateOf(false) }
+    // The visit card (addendum 2): the guest's count here, a check-in from
+    // the card (no recording after), and the reward a check-in just earned.
+    var member by remember(slug) { mutableStateOf<LandingMember?>(null) }
+    var visitCheckingIn by remember { mutableStateOf(false) }
+    var recordAfterCheckIn by remember { mutableStateOf(true) }
+    var rewardPerk by remember { mutableStateOf<Perk?>(null) }
     var confirmPerk by remember { mutableStateOf<Perk?>(null) }
     var activating by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -114,7 +120,7 @@ fun LandingScreen(
     // Today's post perk first; otherwise the newest unspent one from an
     // earlier visit, which is the one the guest came back to use.
     val postPerk = myPerks.firstOrNull { it.perkID == todayPostID }
-        ?: myPerks.firstOrNull { !it.isWelcome && it.effectiveStatus() in setOf("issued", "active") }
+        ?: myPerks.firstOrNull { it.isPost && it.effectiveStatus() in setOf("issued", "active") }
     val postedVideoID = l?.let { posted[it.landingID] }
     val unlocking = postedVideoID != null && myPerks.none { it.perkID == todayPostID }
 
@@ -124,6 +130,15 @@ fun LandingScreen(
         moments = LandingService.todaysMoments(current.landingID)
         ownPosts = LandingService.restaurantPosts(current.businessID)
     }
+
+    suspend fun refreshMember() {
+        val current = l ?: return
+        if (current.visitRewards.isEmpty() || uid.isEmpty()) return
+        runCatching { LandingService.member(current.landingID) }.onSuccess { member = it }
+    }
+
+    // Posting checks in too, so the card refreshes when the guest's post lands.
+    LaunchedEffect(l?.landingID, postedVideoID) { refreshMember() }
 
     fun explain(e: Throwable): String = when ((e as? LandingException)?.reason) {
         "device_limit" -> "This phone already claimed this perk."
@@ -172,15 +187,31 @@ fun LandingScreen(
         onRecord()
     }
 
-    // Record: check in by location first. Denied, or not on site, falls back
-    // to the access number printed with the QR.
+    fun setBusy(busy: Boolean) {
+        if (recordAfterCheckIn) checkingIn = busy else visitCheckingIn = busy
+    }
+
+    // Any on-site check-in counts as today's visit: show a reward it earned,
+    // refresh the card, then (post step only) open the recorder.
+    fun afterCheckIn(result: CheckInResult) {
+        result.perkIssued?.let { rewardPerk = it }
+        member = member?.let { m ->
+            m.copy(visitDays = result.visitDays ?: m.visitDays, checkedInToday = true)
+        }
+        scope.launch { refreshMember() }
+        if (recordAfterCheckIn) startRecording(result.visitID)
+    }
+
+    // Check in by location first. Denied, or not on site, falls back to the
+    // access number printed with the QR. Shared by the post step (record
+    // after) and the visit card's Check in (no recording).
     fun checkInWithLocation() {
         val current = l ?: return
-        checkingIn = true
+        setBusy(true)
         scope.launch {
             val fix = locationService.fetchCurrentLocation()
             if (fix == null) {
-                checkingIn = false
+                setBusy(false)
                 showAccessEntry = true
                 return@launch
             }
@@ -189,11 +220,11 @@ fun LandingScreen(
                     current.landingID, spot,
                     lat = fix.lat, lng = fix.lng, accuracyM = fix.accuracyMeters.toDouble()
                 )
-            }.onSuccess { visitID ->
-                checkingIn = false
-                startRecording(visitID)
+            }.onSuccess { result ->
+                setBusy(false)
+                afterCheckIn(result)
             }.onFailure { e ->
-                checkingIn = false
+                setBusy(false)
                 if ((e as? LandingException)?.reason == "not_on_site") showAccessEntry = true
                 else message = explain(e)
             }
@@ -206,12 +237,15 @@ fun LandingScreen(
         if (grants.values.any { it }) checkInWithLocation() else showAccessEntry = true
     }
 
-    fun record() {
+    fun beginCheckIn(recordAfter: Boolean) {
+        recordAfterCheckIn = recordAfter
         if (locationService.hasPermission()) checkInWithLocation()
         else permissionLauncher.launch(
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         )
     }
+
+    fun record() = beginCheckIn(recordAfter = true)
 
     fun share() {
         val current = l ?: return
@@ -284,8 +318,20 @@ fun LandingScreen(
                             else confirmPerk = perk
                         },
                         onRecord = { record() },
-                        onAccessNumber = { showAccessEntry = true }
+                        onAccessNumber = {
+                            recordAfterCheckIn = true
+                            showAccessEntry = true
+                        }
                     )
+
+                    if (l.visitRewards.isNotEmpty()) {
+                        VisitCard(
+                            landing = l,
+                            member = member,
+                            checkingIn = visitCheckingIn,
+                            onCheckIn = { beginCheckIn(recordAfter = false) }
+                        )
+                    }
 
                     if (moments.isNotEmpty()) {
                         MomentStrip(
@@ -354,16 +400,32 @@ fun LandingScreen(
                 onSubmit = { code, onResult ->
                     scope.launch {
                         runCatching { LandingService.checkIn(l.landingID, spot, accessCode = code) }
-                            .onSuccess { visitID ->
+                            .onSuccess { result ->
                                 onResult(null)
                                 showAccessEntry = false
-                                startRecording(visitID)
+                                afterCheckIn(result)
                             }
                             .onFailure { onResult(explain(it)) }
                     }
                 },
                 onDismiss = { showAccessEntry = false }
             )
+        }
+
+        rewardPerk?.let { perk ->
+            ModalBottomSheet(
+                onDismissRequest = { rewardPerk = null },
+                containerColor = colors.surface
+            ) {
+                VisitRewardSheet(
+                    perk = perk,
+                    onUse = {
+                        rewardPerk = null
+                        confirmPerk = perk
+                    },
+                    onLater = { rewardPerk = null }
+                )
+            }
         }
     }
 }
@@ -747,6 +809,122 @@ private fun PostStepCard(
                 )
             }
         }
+    }
+}
+
+// MARK: - Visit card (addendum 2)
+
+/**
+ * "Visit card · {n} visits": a progress bar to the next milestone, the next
+ * reward, the ladder with earned rungs ticked, and Check in (or "Checked in
+ * today ✓"). Until landing_member answers, the ladder comes from the Landing
+ * with nothing earned.
+ */
+@Composable
+private fun VisitCard(
+    landing: Landing,
+    member: LandingMember?,
+    checkingIn: Boolean,
+    onCheckIn: () -> Unit
+) {
+    val colors = AppTheme.colors
+    val visitDays = member?.visitDays ?: 0
+    val rungs = member?.rewards?.takeIf { it.isNotEmpty() }
+        ?: landing.visitRewards.map { MemberReward(it.visits, it.title, earned = visitDays >= it.visits) }
+    val next = if (member != null) member.nextReward
+    else landing.visitRewards.firstOrNull { it.visits > visitDays }
+    val previous = rungs.lastOrNull { next == null || it.visits < next.visits }?.visits ?: 0
+    val progress = when {
+        next == null -> 1f
+        next.visits <= previous -> 0f
+        else -> ((visitDays - previous).toFloat() / (next.visits - previous)).coerceIn(0f, 1f)
+    }
+
+    Column(
+        modifier = Modifier
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(colors.surface)
+            .border(1.dp, colors.hairline, RoundedCornerShape(20.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "Visit card · $visitDays ${if (visitDays == 1) "visit" else "visits"}",
+            fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary
+        )
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(999.dp)),
+            color = LandingColors.accent,
+            trackColor = colors.surfaceStrong,
+            drawStopIndicator = {}
+        )
+        Text(
+            if (next != null) "Next: Free ${next.title} at visit ${next.visits}" else "Every reward earned. Thanks for coming back.",
+            fontSize = 13.sp, color = colors.textSecondary
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            rungs.forEach { rung ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (rung.earned) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Earned", tint = LandingColors.done, modifier = Modifier.size(18.dp))
+                    } else {
+                        Box(
+                            Modifier.size(18.dp).border(1.5.dp, colors.hairline, androidx.compose.foundation.shape.CircleShape)
+                        )
+                    }
+                    Text(
+                        "Visit ${rung.visits}",
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.textSecondary,
+                        modifier = Modifier.width(64.dp)
+                    )
+                    Text(
+                        "Free ${rung.title}",
+                        fontSize = 14.sp, maxLines = 1,
+                        color = if (rung.earned) colors.textSecondary else colors.textPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+        if (member?.checkedInToday == true) {
+            Text(
+                "Checked in today ✓",
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, color = LandingColors.done,
+                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+            )
+        } else {
+            LandingButton("Check in", onClick = onCheckIn, busy = checkingIn)
+        }
+    }
+}
+
+/** The celebration when a check-in earns a rung: "Visit {n}! Free {title} is in your perks". */
+@Composable
+private fun VisitRewardSheet(perk: Perk, onUse: () -> Unit, onLater: () -> Unit) {
+    val colors = AppTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("🎉", fontSize = 44.sp)
+        Text(
+            "Visit ${perk.milestone ?: ""}! Free ${perk.title} is in your perks",
+            fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "Tap Use now when you order. It stays active for 15 minutes.",
+            fontSize = 13.sp, color = colors.textSecondary, textAlign = TextAlign.Center
+        )
+        LandingButton("Use now", onClick = onUse, enabled = perk.isUsable())
+        TextButton(onClick = onLater) { Text("Later", color = colors.textSecondary) }
     }
 }
 

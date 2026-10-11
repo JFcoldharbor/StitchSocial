@@ -23,6 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -209,9 +212,13 @@ fun CollectionAdBreakOverlay(
 
     val remaining = (CollectionAdBreakPolicy.SKIP_AFTER_SECONDS - elapsed).coerceAtLeast(0)
 
+    // Bottom of the "Ad · Part N next" pill — the top of a brand ad's clear area.
+    val density = LocalDensity.current
+    var topChromeHeight by remember { mutableStateOf(0.dp) }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         when (ad) {
-            is BreakAd.Brand -> BrandAdCard(ad = ad.ad, fullScreen = true)
+            is BreakAd.Brand -> BrandAdCard(ad = ad.ad, fullScreen = true, topInset = topChromeHeight)
             is BreakAd.Native -> AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx -> buildBreakAdView(ctx) },
@@ -226,6 +233,12 @@ fun CollectionAdBreakOverlay(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier
                 .align(Alignment.TopStart)
+                .onGloballyPositioned { coords ->
+                    val bottom = with(density) {
+                        (coords.positionInParent().y + coords.size.height).toDp() + 8.dp
+                    }
+                    if (bottom != topChromeHeight) topChromeHeight = bottom
+                }
                 .padding(start = 16.dp, top = 56.dp)
                 .clip(RoundedCornerShape(50))
                 .background(Color.Black.copy(alpha = 0.55f))

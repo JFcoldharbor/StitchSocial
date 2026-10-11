@@ -82,7 +82,8 @@ class UploadCoordinator(
                     shareCount = 0,
                     lastEngagementAt = null,
                     duration = 30.0,
-                    aspectRatio = 0.5625,
+                    aspectRatio = VideoAspectProbe.aspectRatio(videoPath)
+                        ?: com.stitchsocial.club.foundation.MediaFit.DEFAULT_ASPECT,
                     fileSize = 5000000,
                     contentType = determineContentType(recordingContext),
                     temperature = Temperature.WARM,

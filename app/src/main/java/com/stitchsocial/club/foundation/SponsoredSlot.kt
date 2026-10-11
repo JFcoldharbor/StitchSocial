@@ -8,8 +8,11 @@
  * Backend contract:
  *   - Authenticated read; client writes may ONLY increment impressionCount/tapCount
  *     (creative fields are admin-locked by security rules).
- *   - imageURL is a 9:16 creative; a non-empty videoURL makes it a video ad and
+ *   - imageURL is the creative; a non-empty videoURL makes it a video ad and
  *     the image becomes its poster. Created from the web admin's Sponsored page.
+ *   - aspectRatio (width ÷ height, optional) and fit ("auto" | "fill" | "fit",
+ *     optional) drive media fit (MEDIA_FIT_CONTRACT). Missing = 9:16 and auto,
+ *     which fills exactly as older slots always did.
  */
 package com.stitchsocial.club.foundation
 
@@ -32,7 +35,11 @@ data class SponsoredSlot(
     /// (stitchsocial.me/l/<slug>) is only the fallback for old builds.
     val ctaKind: String? = null,
     val landingID: String? = null,
-    val landingSlug: String? = null
+    val landingSlug: String? = null,
+    /** Creative shape, width ÷ height. Null = 9:16. */
+    val aspectRatio: Double? = null,
+    /** "auto" | "fill" | "fit" — a brand/admin override of the shape rule. */
+    val fit: String = "auto"
 ) {
     val hasVideo: Boolean get() = videoURL.isNotBlank()
 
@@ -58,7 +65,7 @@ data class SponsoredSlot(
         qualityScore = 75,
         engagementRatio = 0.5,
         velocityScore = 0.0, trendingScore = 0.0,
-        duration = 0.0, aspectRatio = 9.0 / 16.0, fileSize = 0L,
+        duration = 0.0, aspectRatio = aspectRatio ?: MediaFit.DEFAULT_ASPECT, fileSize = 0L,
         discoverabilityScore = 0.0,
         isPromoted = true,
         lastEngagementAt = null,
@@ -98,7 +105,9 @@ data class SponsoredSlot(
                 endAt = (data["endAt"] as? Timestamp)?.toDate(),
                 ctaKind = (data["ctaKind"] as? String)?.takeIf { it.isNotBlank() },
                 landingID = (data["landingID"] as? String)?.takeIf { it.isNotBlank() },
-                landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
+                landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
+                aspectRatio = MediaFit.aspectFrom(data["aspectRatio"]),
+                fit = MediaFit.normalizedFit(data["fit"])
             )
         }
     }

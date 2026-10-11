@@ -90,6 +90,8 @@ import com.stitchsocial.club.ui.components.ThreadDepthBadge
 import com.stitchsocial.club.ui.components.Thread3DInfoPanel
 import com.stitchsocial.club.views.CardVideoCarouselView
 import com.stitchsocial.club.views.ContextualVideoOverlay
+import com.stitchsocial.club.views.MediaFitBand
+import com.stitchsocial.club.views.TabBarMetrics
 import com.stitchsocial.club.views.OverlayContext
 import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.views.VideoPlayerComposable
@@ -762,7 +764,10 @@ private fun FullscreenThreadPlayer(
                 VideoPlayerComposable(
                     video = video,
                     isActive = isActive,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    // No header and no tab bar here, so the band is the screen
+                    // (plus the tab bar's clearance, should it ever be shown).
+                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
                 )
 
                 ContextualVideoOverlay(

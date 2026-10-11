@@ -253,7 +253,7 @@ class HashtagService {
                     shareCount = (data["shareCount"] as? Long)?.toInt() ?: 0,
                     lastEngagementAt = (data["lastEngagementAt"] as? Timestamp)?.toDate(),
                     duration = data["duration"] as? Double ?: 0.0,
-                    aspectRatio = data["aspectRatio"] as? Double ?: (9.0 / 16.0),
+                    aspectRatio = com.stitchsocial.club.foundation.MediaFit.aspectFrom(data["aspectRatio"]) ?: (9.0 / 16.0),
                     fileSize = data["fileSize"] as? Long ?: 0L,
                     contentType = contentType,
                     temperature = temperature,

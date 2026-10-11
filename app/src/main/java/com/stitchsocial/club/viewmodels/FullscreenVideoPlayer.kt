@@ -59,7 +59,9 @@ data class VideoInfo(
     val creatorName: String = "Unknown User",
     val threadID: String? = null,
     val conversationDepth: Int = 0,
-    val replyCount: Int = 0
+    val replyCount: Int = 0,
+    /** width ÷ height after rotation; drives media fit. Missing = 9:16. */
+    val aspectRatio: Double = 9.0 / 16.0
 )
 
 // MARK: - Main Composable
@@ -112,7 +114,8 @@ fun FullscreenVideoPlayer(
             onVideoClick = {
                 showControls = !showControls
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
         )
 
         // ContextualVideoOverlay with all required parameters
@@ -288,7 +291,9 @@ fun FullscreenVideoPlayer(
             VideoPlayerComposable(
                 video = video,
                 isActive = true,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                // A cover: no header, and the tab bar is hidden under it.
+                fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
             )
         }
 
@@ -373,7 +378,7 @@ private fun convertToMetadata(video: VideoInfo): CoreVideoMetadata {
         shareCount = 0,
         lastEngagementAt = null,
         duration = video.duration / 1000.0,
-        aspectRatio = 9.0 / 16.0,
+        aspectRatio = video.aspectRatio,
         fileSize = 0L,
         contentType = com.stitchsocial.club.foundation.ContentType.THREAD,
         temperature = com.stitchsocial.club.foundation.Temperature.WARM,

@@ -82,7 +82,11 @@ data class BrandAd(
     val videoURL: String?,
     val thumbnailURL: String?,
     val ctaText: String,
-    val ctaURL: String
+    val ctaURL: String,
+    /** Creative shape, width ÷ height (getBrandAd `aspectRatio`). Null = 9:16. */
+    val aspectRatio: Double? = null,
+    /** "auto" | "fill" | "fit" (getBrandAd `fit`). Media fit, MEDIA_FIT_CONTRACT. */
+    val fit: String = "auto"
 ) {
     companion object {
         fun fromMap(m: Map<String, Any?>): BrandAd? {
@@ -96,7 +100,9 @@ data class BrandAd(
                 videoURL = (m["videoURL"] as? String)?.takeIf { it.isNotBlank() },
                 thumbnailURL = (m["thumbnailURL"] as? String)?.takeIf { it.isNotBlank() },
                 ctaText = (m["ctaText"] as? String)?.takeIf { it.isNotBlank() } ?: "Learn more",
-                ctaURL = ctaURL
+                ctaURL = ctaURL,
+                aspectRatio = com.stitchsocial.club.foundation.MediaFit.aspectFrom(m["aspectRatio"]),
+                fit = com.stitchsocial.club.foundation.MediaFit.normalizedFit(m["fit"])
             )
         }
     }

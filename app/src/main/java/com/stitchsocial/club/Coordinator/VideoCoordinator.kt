@@ -33,6 +33,8 @@ import com.stitchsocial.club.services.VideoAnalysisResult
 import com.stitchsocial.club.services.CdnUploadService
 import com.stitchsocial.club.services.HlsReadinessPoller
 import com.stitchsocial.club.services.LocalVideoCache
+import com.stitchsocial.club.services.VideoAspectProbe
+import com.stitchsocial.club.foundation.MediaFit
 import com.stitchsocial.club.AppConfig
 
 // Firebase imports
@@ -235,7 +237,9 @@ class VideoCoordinator(
                 shareCount = 0,
                 lastEngagementAt = null,
                 duration = 30.0,
-                aspectRatio = 9.0/16.0,
+                // The real shape, rotation applied — a landscape import used to
+                // be recorded as 9:16 and cropped to a sliver in every feed.
+                aspectRatio = VideoAspectProbe.aspectRatio(videoPath) ?: MediaFit.DEFAULT_ASPECT,
                 fileSize = 0L,
                 contentType = ContentType.THREAD,
                 temperature = Temperature.WARM,
@@ -349,8 +353,14 @@ class VideoCoordinator(
             val hierarchyData = calculateThreadHierarchy(recordingContext)
             updateProgress(0.5, "Creating database record...")
 
+            // The shape of the file actually being uploaded (after trim, filters,
+            // captions), rotation applied. Every path — recorder, gallery import,
+            // reaction — ends here, so this is the one value that gets written.
+            val realAspect = VideoAspectProbe.aspectRatio(videoPath)
+
             // Create final metadata with user input AND hierarchy data
             val finalMetadata = metadata.copy(
+                aspectRatio = realAspect ?: metadata.aspectRatio,
                 title = userTitle.takeIf { it.isNotBlank() } ?: metadata.title,
                 description = userDescription,
                 videoURL = cdn.mp4URL,   // back-compat: legacy readers get the faststart MP4
@@ -549,7 +559,7 @@ class VideoCoordinator(
                 shareCount = 0,
                 lastEngagementAt = null,
                 duration = 0.0,
-                aspectRatio = 9.0/16.0,
+                aspectRatio = MediaFit.aspectFrom(data["aspectRatio"]) ?: MediaFit.DEFAULT_ASPECT,
                 fileSize = 0L,
                 contentType = ContentType.values().find { it.rawValue == contentTypeStr } ?: ContentType.THREAD,
                 temperature = Temperature.WARM,

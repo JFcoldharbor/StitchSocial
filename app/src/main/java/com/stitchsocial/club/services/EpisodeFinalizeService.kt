@@ -198,7 +198,9 @@ class EpisodeFinalizeService(private val context: Context) {
                     "velocityScore" to 0.0,
                     "trendingScore" to 0.0,
                     "duration" to seg.durationSeconds,
-                    "aspectRatio" to 9.0 / 16.0,
+                    // The cut's real shape, rotation applied (was a hard-coded 9:16).
+                    "aspectRatio" to (VideoAspectProbe.aspectRatio(cut.absolutePath)
+                        ?: com.stitchsocial.club.foundation.MediaFit.DEFAULT_ASPECT),
                     "fileSize" to cut.length(),
                     "discoverabilityScore" to 0.5,
                     "isPromoted" to false,

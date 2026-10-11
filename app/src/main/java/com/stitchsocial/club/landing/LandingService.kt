@@ -121,7 +121,11 @@ object LandingService {
         return Perk.from(data["perk"])
     }
 
-    /** Returns the visit id. Pass a location, or the access number off the sign. */
+    /**
+     * Pass a location, or the access number off the sign. The result carries
+     * the visit id and, per addendum 2, the visit card count and any reward
+     * the check-in just earned.
+     */
     suspend fun checkIn(
         landingID: String,
         spot: String?,
@@ -129,7 +133,7 @@ object LandingService {
         lng: Double? = null,
         accuracyM: Double? = null,
         accessCode: String? = null
-    ): String {
+    ): CheckInResult {
         val data = call(
             "landing_checkIn",
             mapOf(
@@ -138,8 +142,18 @@ object LandingService {
                 "accessCode" to accessCode
             )
         )
-        return data["visitID"] as? String ?: throw LandingException("unavailable")
+        val visitID = data["visitID"] as? String ?: throw LandingException("unavailable")
+        return CheckInResult(
+            visitID = visitID,
+            visitDays = (data["visitDays"] as? Number)?.toInt(),
+            newVisit = data["newVisit"] as? Boolean ?: false,
+            perkIssued = Perk.from(data["perkIssued"])
+        )
     }
+
+    /** The signed-in guest's visit card at this Landing (addendum 2). */
+    suspend fun member(landingID: String): LandingMember =
+        LandingMember.from(call("landing_member", mapOf("landingID" to landingID)))
 
     suspend fun activate(perkID: String): Perk? =
         Perk.from(call("perk_activate", mapOf("perkID" to perkID))["perk"])

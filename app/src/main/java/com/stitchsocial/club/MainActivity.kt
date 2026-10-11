@@ -1659,7 +1659,11 @@ private fun ModalOverlay(
                                             shareCount = 0,
                                             lastEngagementAt = null,
                                             duration = editedState.trimmedDuration,
-                                            aspectRatio = 9.0/16.0,
+                                            // From the edited file, rotation applied;
+                                            // VideoCoordinator re-probes before writing.
+                                            aspectRatio = com.stitchsocial.club.services.VideoAspectProbe
+                                                .aspectRatio(finalVideoPath)
+                                                ?: com.stitchsocial.club.foundation.MediaFit.DEFAULT_ASPECT,
                                             fileSize = 0L,
                                             contentType = ContentType.THREAD,
                                             temperature = Temperature.WARM,

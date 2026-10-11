@@ -96,7 +96,7 @@ fun ActivePerkScreen(perk: Perk, username: String, onDismiss: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 LandingLogo(perk.landingName, perk.landingLogoURL, 56.dp)
                 Text(
-                    "${perk.landingName} · ${if (perk.isWelcome) "Welcome perk" else "Moment perk"}",
+                    "${perk.landingName} · ${perk.kindLabel}",
                     fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA3A3B8), textAlign = TextAlign.Center
                 )
                 Text(

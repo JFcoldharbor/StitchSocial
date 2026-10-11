@@ -226,7 +226,8 @@ fun SavedVideosScreen(
                     VideoPlayerComposable(
                         video = video,
                         isActive = true,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
                     )
                 }
                 IconButton(

@@ -181,6 +181,31 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                     }
                 }
 
+                // Visit card ladder (addendum 2) — read-only; edited on the web.
+                OwnerCard {
+                    Text("Visit rewards", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+                    Spacer(Modifier.height(8.dp))
+                    if (landing.visitRewards.isEmpty()) {
+                        Text(
+                            "No visit card yet. Reward guests who keep coming back.",
+                            fontSize = 13.sp, color = colors.textSecondary
+                        )
+                    }
+                    landing.visitRewards.forEach { rung ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                            Text(
+                                "Visit ${rung.visits}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                color = colors.textSecondary, modifier = Modifier.width(72.dp)
+                            )
+                            Text("Free ${rung.title}", fontSize = 14.sp, color = colors.textPrimary, maxLines = 1)
+                        }
+                    }
+                    TextButton(
+                        onClick = { BrandPortal.open(context, LANDING_WEB_URL) },
+                        contentPadding = PaddingValues(0.dp)
+                    ) { Text("Edit on the web", color = LandingColors.accent, fontWeight = FontWeight.Bold) }
+                }
+
                 // Approvals queue.
                 OwnerCard {
                     Text("For your TV", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)

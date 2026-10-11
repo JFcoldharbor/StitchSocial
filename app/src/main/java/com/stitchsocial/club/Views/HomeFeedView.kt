@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -44,6 +45,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.stitchsocial.club.services.UserService
@@ -208,6 +211,11 @@ fun HomeFeedView(
     // landing surface in 51fbe51, but that decides the first screen every user
     // sees and is a product call, not a parity detail.
     var homeSurface by remember { mutableStateOf(HomeSurface.FRIENDS) }
+
+    // Bottom edge of the FRIENDS/DASH tabs — the top of the media-fit band.
+    // Measured, because it moves with the cutout and the font scale.
+    val homeDensity = LocalDensity.current
+    var belowTabsInset by remember { mutableStateOf(0.dp) }
     LaunchedEffect(homeSurface) { onDashActiveChange(homeSurface == HomeSurface.DASH) }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -351,7 +359,8 @@ fun HomeFeedView(
                                             )
                                         )
                                     },
-                                    onShowThreadView = onShowThreadView
+                                    onShowThreadView = onShowThreadView,
+                                    topInset = belowTabsInset
                                 )
                             }
                         }
@@ -399,7 +408,14 @@ fun HomeFeedView(
         HomeSurfaceTabs(
             selected = homeSurface,
             onSelect = { homeSurface = it },
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onGloballyPositioned { coords ->
+                    val bottom = with(homeDensity) {
+                        (coords.positionInParent().y + coords.size.height).toDp()
+                    }
+                    if (bottom != belowTabsInset) belowTabsInset = bottom
+                }
         )
 
         if (showingCreatorProfileID != null) {
@@ -425,11 +441,16 @@ private fun ThreadVideoCard(
     pauseAllVideos: () -> Unit,
     onCreatorProfileTap: (String) -> Unit,
     onStitchTap: (CoreVideoMetadata) -> Unit,
-    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    /** Bottom of Home's surface tabs — the top of the media-fit band. */
+    topInset: Dp = 0.dp
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+
+    // Media fit band: below the surface tabs, above the tab bar.
+    val fitBand = MediaFitBand(top = topInset, bottom = TabBarMetrics.clearance)
 
     val allVideos = remember(thread.childVideos.size) {
         listOf(thread.parentVideo) + thread.childVideos
@@ -521,7 +542,8 @@ private fun ThreadVideoCard(
                 VideoPlayerComposable(
                     video = currentVideo,
                     isActive = isActive,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    fitBand = fitBand
                 )
             }
 
@@ -562,7 +584,7 @@ private fun ThreadVideoCard(
                         .graphicsLayer { translationX = screenWidthPx + dragOffset }
                         .background(Color.Black)
                 ) {
-                    VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize())
+                    VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
                 }
             }
 
@@ -574,7 +596,7 @@ private fun ThreadVideoCard(
                         .graphicsLayer { translationX = -screenWidthPx + dragOffset }
                         .background(Color.Black)
                 ) {
-                    VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize())
+                    VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
                 }
             }
         }

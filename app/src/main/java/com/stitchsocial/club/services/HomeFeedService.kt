@@ -397,7 +397,7 @@ class HomeFeedService(
             val lastEngagementAt = (data[FirebaseSchema.VideoDocument.LAST_ENGAGEMENT_AT] as? Timestamp)?.toDate()
 
             val duration = data[FirebaseSchema.VideoDocument.DURATION] as? Double ?: 0.0
-            val aspectRatio = data[FirebaseSchema.VideoDocument.ASPECT_RATIO] as? Double ?: (9.0 / 16.0)
+            val aspectRatio = com.stitchsocial.club.foundation.MediaFit.aspectFrom(data[FirebaseSchema.VideoDocument.ASPECT_RATIO]) ?: (9.0 / 16.0)
             val fileSize = data[FirebaseSchema.VideoDocument.FILE_SIZE] as? Long ?: 0L
 
             @Suppress("UNCHECKED_CAST")

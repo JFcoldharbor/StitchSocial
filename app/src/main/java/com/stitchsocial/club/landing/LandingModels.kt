@@ -44,6 +44,22 @@ data class LandingOffer(
     }
 }
 
+/** One rung of a Landing's visit card (addendum 2): the reward at visit `visits`. */
+data class VisitReward(val visits: Int, val title: String) {
+    companion object {
+        fun from(raw: Any?): VisitReward? {
+            val m = raw as? Map<*, *> ?: return null
+            val visits = (m["visits"] as? Number)?.toInt() ?: return null
+            val title = (m["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+            return VisitReward(visits, title)
+        }
+
+        /** Sorted ascending, unique visit counts — the server's order, enforced. */
+        fun list(raw: Any?): List<VisitReward> =
+            (raw as? List<*>).orEmpty().mapNotNull { from(it) }.distinctBy { it.visits }.sortedBy { it.visits }
+    }
+}
+
 data class Landing(
     val landingID: String,
     val slug: String,
@@ -60,6 +76,8 @@ data class Landing(
     val serviceStyle: String = "sit_down",
     val welcomeOffer: LandingOffer? = null,
     val postOffer: LandingOffer? = null,
+    /** The visit card ladder (addendum 2); empty means no visit card. */
+    val visitRewards: List<VisitReward> = emptyList(),
     /** "draft" | "live" | "paused" | "removed" */
     val status: String = "live",
     val businessID: String = "",
@@ -87,6 +105,7 @@ data class Landing(
                 serviceStyle = m["serviceStyle"] as? String ?: "sit_down",
                 welcomeOffer = LandingOffer.from(m["welcomeOffer"]),
                 postOffer = LandingOffer.from(m["postOffer"]),
+                visitRewards = VisitReward.list(m["visitRewards"]),
                 status = m["status"] as? String ?: "live",
                 businessID = m["businessID"] as? String ?: "",
                 verified = m["verified"] as? Boolean ?: false
@@ -102,7 +121,7 @@ data class Perk(
     val landingName: String = "",
     val landingLogoURL: String? = null,
     val userID: String = "",
-    /** "welcome" | "post" */
+    /** "welcome" | "post" | "visit" */
     val kind: String = "welcome",
     val title: String = "",
     val smallPrint: String = "",
@@ -114,9 +133,20 @@ data class Perk(
     val activatedAt: Date? = null,
     val activeUntil: Date? = null,
     val usedAt: Date? = null,
-    val videoID: String? = null
+    val videoID: String? = null,
+    /** Visit perks only: the visit number that earned it. */
+    val milestone: Int? = null
 ) {
     val isWelcome: Boolean get() = kind == "welcome"
+    val isPost: Boolean get() = kind == "post"
+    val isVisit: Boolean get() = kind == "visit"
+
+    /** "Welcome perk" / "Moment perk" / "Visit 5 reward". */
+    val kindLabel: String get() = when {
+        isWelcome -> "Welcome perk"
+        isVisit -> milestone?.let { "Visit $it reward" } ?: "Visit reward"
+        else -> "Moment perk"
+    }
 
     /**
      * The status as of now, not as of the last server sweep. The expire job is
@@ -161,11 +191,44 @@ data class Perk(
                 activatedAt = landingDate(m["activatedAt"]),
                 activeUntil = landingDate(m["activeUntil"]),
                 usedAt = landingDate(m["usedAt"]),
-                videoID = m["videoID"] as? String
+                videoID = m["videoID"] as? String,
+                milestone = (m["milestone"] as? Number)?.toInt()
             )
         }
     }
 }
+
+/** One rung as landing_member reports it for the signed-in guest. */
+data class MemberReward(val visits: Int, val title: String, val earned: Boolean)
+
+/** landing_member: the guest's visit card at one Landing (addendum 2). */
+data class LandingMember(
+    val visitDays: Int = 0,
+    val checkedInToday: Boolean = false,
+    val nextReward: VisitReward? = null,
+    val rewards: List<MemberReward> = emptyList()
+) {
+    companion object {
+        fun from(raw: Map<*, *>): LandingMember = LandingMember(
+            visitDays = (raw["visitDays"] as? Number)?.toInt() ?: 0,
+            checkedInToday = raw["checkedInToday"] as? Boolean ?: false,
+            nextReward = VisitReward.from(raw["nextReward"]),
+            rewards = (raw["rewards"] as? List<*>).orEmpty().mapNotNull { r ->
+                val m = r as? Map<*, *> ?: return@mapNotNull null
+                val v = VisitReward.from(m) ?: return@mapNotNull null
+                MemberReward(v.visits, v.title, m["earned"] as? Boolean ?: false)
+            }.sortedBy { it.visits }
+        )
+    }
+}
+
+/** landing_checkIn's answer: the visit, plus the visit card's count (addendum 2). */
+data class CheckInResult(
+    val visitID: String,
+    val visitDays: Int?,
+    val newVisit: Boolean,
+    val perkIssued: Perk?
+)
 
 /** One row of landing_nearby. */
 data class NearbyLanding(

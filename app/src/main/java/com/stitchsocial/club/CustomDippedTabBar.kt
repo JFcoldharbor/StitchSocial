@@ -33,6 +33,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -141,10 +142,21 @@ fun CustomDippedTabBar(
         }
     }
 
+    // Media fit's band ends at the top of this bar (MEDIA_FIT_CONTRACT), so it
+    // reports its measured height while shown and 0 once it's gone.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    DisposableEffect(Unit) {
+        onDispose { TabBarMetrics.clearance = 0.dp }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(tabBarHeight)
+            .onSizeChanged { size ->
+                val h = with(density) { size.height.toDp() }
+                if (h != TabBarMetrics.clearance) TabBarMetrics.clearance = h
+            }
     ) {
         // Glassmorphism Background
         Canvas(

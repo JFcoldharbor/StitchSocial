@@ -2397,7 +2397,12 @@ private fun DiscoveryFullscreenDeck(
                             slot = sponsored,
                             onCtaClick = { onSponsoredCta(sponsored) },
                             modifier = Modifier.fillMaxSize(),
-                            isActive = isCurrentPage && !isAnnouncementShowing
+                            isActive = isCurrentPage && !isAnnouncementShowing,
+                            // Hosted, Discovery's chrome floats above and the tab
+                            // bar sits below — the card used to get neither, so
+                            // its creative and CTA ran under both.
+                            topInset = if (hosted) topInset else 0.dp,
+                            bottomInset = if (hosted) TabBarMetrics.clearance else 0.dp
                         )
                     }
                     // A page you have settled on is an impression. Session-deduped
@@ -2520,6 +2525,13 @@ private fun DiscoveryFullscreenCard(
     // resumes rather than restarts.
     val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
     val dragThreshold = screenWidthPx * 0.3f
+
+    // Media fit band: below Discovery's floating chrome and above the tab bar
+    // when hosted; a cover has neither, so it is the whole screen.
+    val fitBand = MediaFitBand(
+        top = if (hosted) topInset else 0.dp,
+        bottom = if (hosted) TabBarMetrics.clearance else 0.dp
+    )
     val velocityTracker = remember { VelocityTracker() }
 
     Box(
@@ -2589,7 +2601,7 @@ private fun DiscoveryFullscreenCard(
                         .fillMaxSize()
                         .graphicsLayer { translationX = screenWidthPx + dragOffset }
                         .background(Color.Black)
-                ) { VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize()) }
+                ) { VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand) }
             }
             if (dragOffset > 0 && currentIndex > 0) {
                 val prevVideo = allVideos[currentIndex - 1]
@@ -2598,7 +2610,7 @@ private fun DiscoveryFullscreenCard(
                         .fillMaxSize()
                         .graphicsLayer { translationX = -screenWidthPx + dragOffset }
                         .background(Color.Black)
-                ) { VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize()) }
+                ) { VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand) }
             }
         }
 
@@ -2626,14 +2638,17 @@ private fun DiscoveryFullscreenCard(
                     isActive = isActive && !tapPaused,
                     modifier = Modifier.fillMaxSize(),
                     onVideoClick = if (hosted) ({ tapPaused = !tapPaused }) else null,
-                    onPlaybackStarted = { showPoster = false }
+                    onPlaybackStarted = { showPoster = false },
+                    fitBand = fitBand
                 )
 
                 // Covers the prepare-and-buffer gap on the incoming video so the
                 // swipe doesn't land on black. Clears on the first frame; the
                 // delay is only a ceiling for a video that never starts.
                 if (showPoster) {
-                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize())
+                    // Same mode and rect as the player under it, so the first
+                    // frame lands where the poster was.
+                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
                 }
                 LaunchedEffect(currentVideo.id) {
                     kotlinx.coroutines.delay(2000)

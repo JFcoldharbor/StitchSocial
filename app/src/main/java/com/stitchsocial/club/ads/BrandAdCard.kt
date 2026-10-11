@@ -17,9 +17,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -31,6 +34,8 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.stitchsocial.club.services.BrandAd
 import com.stitchsocial.club.services.BrandAdService
+import com.stitchsocial.club.views.MediaFitBand
+import com.stitchsocial.club.views.MediaFitFrame
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -45,12 +50,19 @@ import kotlinx.coroutines.launch
  *
  * [fullScreen] is the collection-break layout (full-bleed creative, sound on);
  * otherwise it is the in-feed card (muted, plays only while visible).
+ *
+ * Media fit (MEDIA_FIT_CONTRACT): a 9:16 creative fills as before; anything
+ * wider — or ad.fit == "fit" — is shown whole over a blurred copy of itself.
+ * Full screen, it sits in the clear area: below [topInset] (the host's chrome),
+ * above the measured bottom block, 12dp in from the sides. In the feed card it
+ * fits the media box.
  */
 @Composable
 fun BrandAdCard(
     ad: BrandAd,
     modifier: Modifier = Modifier,
-    fullScreen: Boolean = false
+    fullScreen: Boolean = false,
+    topInset: Dp = 0.dp
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -77,12 +89,25 @@ fun BrandAdCard(
     }
 
     if (fullScreen) {
+        val density = LocalDensity.current
+        var bottomBlockHeight by remember(ad.token) { mutableStateOf(0.dp) }
         Box(modifier = modifier.fillMaxSize().background(Color.Black).then(tracking)) {
-            BrandAdMedia(ad, playing = halfVisible, muted = false, modifier = Modifier.fillMaxSize())
+            BrandAdMedia(
+                ad,
+                playing = halfVisible,
+                muted = false,
+                band = MediaFitBand.clearArea(top = topInset, bottom = bottomBlockHeight),
+                modifier = Modifier.fillMaxSize()
+            )
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    // The clear area ends where this block begins.
+                    .onSizeChanged { size ->
+                        val h = with(density) { size.height.toDp() }
+                        if (h != bottomBlockHeight) bottomBlockHeight = h
+                    }
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))))
                     .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -110,6 +135,8 @@ fun BrandAdCard(
                 ad,
                 playing = halfVisible,
                 muted = true,
+                // The media box is the whole clear area here.
+                band = MediaFitBand(),
                 modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(10.dp))
             )
             if (ad.title.isNotBlank()) {
@@ -143,20 +170,27 @@ private fun CtaButton(text: String, onClick: () -> Unit, modifier: Modifier) {
     }
 }
 
-/** Thumbnail underneath, the video over it once it has a frame. */
+/** Thumbnail underneath, the video over it once it has a frame — both in the
+ *  same fill frame or fit rect, so the first frame lands where the poster was. */
 @Composable
-private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, modifier: Modifier) {
+private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, band: MediaFitBand, modifier: Modifier) {
     val context = LocalContext.current
-    Box(modifier = modifier.background(Color.Black)) {
+    MediaFitFrame(
+        aspect = ad.aspectRatio,
+        fitOverride = ad.fit,
+        band = band,
+        backdropURL = ad.thumbnailURL,
+        modifier = modifier.background(Color.Black)
+    ) { fitted ->
         ad.thumbnailURL?.let {
             AsyncImage(
                 model = it,
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                contentScale = if (fitted) ContentScale.Fit else ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
         }
-        val videoURL = ad.videoURL ?: return@Box
+        val videoURL = ad.videoURL ?: return@MediaFitFrame
         val player = remember(videoURL) {
             ExoPlayer.Builder(context).build().apply {
                 volume = if (muted) 0f else 1f
@@ -172,7 +206,8 @@ private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, modifier
             factory = {
                 PlayerView(it).apply {
                     useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    resizeMode = if (fitted) AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     // Transparent shutter so the poster shows until the first frame.
                     setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     this.player = player

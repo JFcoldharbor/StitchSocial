@@ -155,7 +155,7 @@ private fun PerkRow(perk: Perk, now: Date, action: String?, onAction: () -> Unit
         LandingLogo(perk.landingName, perk.landingLogoURL, 40.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "${perk.landingName} · ${if (perk.isWelcome) "Welcome" else "Moment"}",
+                "${perk.landingName} · ${perk.kindLabel}",
                 fontSize = 12.sp, color = colors.textSecondary, maxLines = 1
             )
             Text("Free ${perk.title}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary, maxLines = 1)

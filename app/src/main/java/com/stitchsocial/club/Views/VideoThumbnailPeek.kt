@@ -22,21 +22,35 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 
+/**
+ * A video's still. [fitBand] is the band the player uses for this video: pass
+ * the same one and the still sits in the same rect, over the same backdrop, as
+ * the video that replaces it (MEDIA_FIT_CONTRACT). Null keeps the full-bleed crop.
+ */
 @Composable
 fun VideoThumbnailPeek(
     video: CoreVideoMetadata,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fitBand: MediaFitBand? = null
 ) {
     Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        AsyncImage(
-            model = video.thumbnailURL,
-            contentDescription = video.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        MediaFitFrame(
+            aspect = video.aspectRatio,
+            fitOverride = null,
+            band = fitBand,
+            backdropURL = video.thumbnailURL,
+            modifier = Modifier.fillMaxSize()
+        ) { isFit ->
+            AsyncImage(
+                model = video.thumbnailURL,
+                contentDescription = video.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = if (isFit) ContentScale.Fit else ContentScale.Crop
+            )
+        }
 
         Box(
             modifier = Modifier
