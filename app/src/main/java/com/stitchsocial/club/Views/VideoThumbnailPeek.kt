@@ -31,7 +31,9 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 fun VideoThumbnailPeek(
     video: CoreVideoMetadata,
     modifier: Modifier = Modifier,
-    fitBand: MediaFitBand? = null
+    fitBand: MediaFitBand? = null,
+    /** "fill" / "fit" overrides the shape rule (the ad position); null = auto. */
+    fitOverride: String? = null
 ) {
     Box(
         modifier = modifier.background(Color.Black),
@@ -39,7 +41,7 @@ fun VideoThumbnailPeek(
     ) {
         MediaFitFrame(
             aspect = video.aspectRatio,
-            fitOverride = null,
+            fitOverride = fitOverride,
             band = fitBand,
             backdropURL = video.thumbnailURL,
             modifier = Modifier.fillMaxSize()
@@ -60,15 +62,17 @@ fun VideoThumbnailPeek(
 
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .background(Color.Black.copy(alpha = 0.5f), CircleShape),
+                // Same size as the player's play/pause indicator (48dp / 22dp),
+                // so the poster's glyph doesn't crowd the overlay either.
+                .size(48.dp)
+                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Default.PlayArrow,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.8f),
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(22.dp)
             )
         }
     }

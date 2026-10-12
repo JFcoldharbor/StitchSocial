@@ -34,8 +34,18 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.stitchsocial.club.services.BrandAd
 import com.stitchsocial.club.services.BrandAdService
+import androidx.compose.foundation.clickable
+import com.stitchsocial.club.foundation.CoreVideoMetadata
+import com.stitchsocial.club.foundation.NotificationRouter
+import com.stitchsocial.club.foundation.isPubliclyVisible
+import com.stitchsocial.club.views.ContextualVideoOverlay
 import com.stitchsocial.club.views.MediaFitBand
 import com.stitchsocial.club.views.MediaFitFrame
+import com.stitchsocial.club.views.OverlayAction
+import com.stitchsocial.club.views.OverlayContext
+import com.stitchsocial.club.views.SponsoredCta
+import com.stitchsocial.club.views.VideoPlayerComposable
+import com.stitchsocial.club.views.VideoThumbnailPeek
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -88,7 +98,34 @@ fun BrandAdCard(
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ad.ctaURL))) }
     }
 
-    if (fullScreen) {
+    // Promoted posts: the campaign's own post, when it names one and it can
+    // still be shown. Null = the creative card, exactly as before.
+    var post by remember(ad.token) { mutableStateOf<CoreVideoMetadata?>(null) }
+    LaunchedEffect(ad.token, ad.videoID) {
+        val id = ad.videoID ?: return@LaunchedEffect
+        post = runCatching { com.stitchsocial.club.services.VideoServiceImpl().getVideoById(id) }
+            .getOrNull()
+            ?.takeIf { !it.isDeleted && it.isPubliclyVisible && it.videoURL.isNotBlank() }
+    }
+    // Opens the post in the full-screen player — the same route a /v link takes.
+    val openPost: (() -> Unit)? = ad.videoID?.let { id ->
+        { NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("videoID" to id)) }
+    }
+
+    val fullScreenPost = post
+    if (fullScreen && fullScreenPost != null) {
+        // Rendered as the post, the same as Discovery's ad position: the
+        // creator, the Sponsored chip and the CTA, media fit in the clear area.
+        BrandAdPost(
+            post = fullScreenPost,
+            ad = ad,
+            playing = halfVisible,
+            topInset = topInset,
+            onCta = onCta,
+            onOpenPost = openPost ?: {},
+            modifier = modifier.fillMaxSize().then(tracking)
+        )
+    } else if (fullScreen) {
         val density = LocalDensity.current
         var bottomBlockHeight by remember(ad.token) { mutableStateOf(0.dp) }
         Box(modifier = modifier.fillMaxSize().background(Color.Black).then(tracking)) {
@@ -137,7 +174,9 @@ fun BrandAdCard(
                 muted = true,
                 // The media box is the whole clear area here.
                 band = MediaFitBand(),
+                // Compact as before; with a post behind it, a tap opens the post.
                 modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(10.dp))
+                    .then(if (openPost != null) Modifier.clickable { openPost() } else Modifier)
             )
             if (ad.title.isNotBlank()) {
                 Text(ad.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -215,5 +254,62 @@ private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, band: Me
             },
             modifier = Modifier.fillMaxSize()
         )
+    }
+}
+
+/**
+ * A full-screen brand ad whose campaign promotes a post: the post itself,
+ * playing with the contextual overlay (creator, Sponsored chip, the
+ * campaign's CTA). Engagement and replies happen on the post, so the overlay's
+ * profile / thread / stitch actions open it in the full-screen player.
+ */
+@Composable
+private fun BrandAdPost(
+    post: CoreVideoMetadata,
+    ad: BrandAd,
+    playing: Boolean,
+    topInset: Dp,
+    onCta: () -> Unit,
+    onOpenPost: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var bottomBlockHeight by remember(post.id) { mutableStateOf(0.dp) }
+    var showPoster by remember(post.id) { mutableStateOf(true) }
+    val band = MediaFitBand.clearArea(top = topInset, bottom = bottomBlockHeight)
+    val fitOverride = ad.fit.takeIf { it != "auto" } ?: post.promotion?.fit
+    val currentUserID = remember { com.stitchsocial.club.services.AuthService().getCurrentUserId() }
+
+    Box(modifier = modifier.background(Color.Black)) {
+        VideoPlayerComposable(
+            video = post,
+            isActive = playing,
+            modifier = Modifier.fillMaxSize(),
+            managed = false,
+            onPlaybackStarted = { showPoster = false },
+            fitBand = band,
+            fitOverride = fitOverride
+        )
+        if (showPoster) {
+            VideoThumbnailPeek(video = post, modifier = Modifier.fillMaxSize(), fitBand = band, fitOverride = fitOverride)
+        }
+        Box(modifier = Modifier.fillMaxSize().padding(top = topInset)) {
+            ContextualVideoOverlay(
+                video = post,
+                overlayContext = OverlayContext.HOME_FEED,
+                currentUserID = currentUserID,
+                bottomPaddingOverride = 40.dp,
+                onAction = { action ->
+                    when (action) {
+                        is OverlayAction.NavigateToProfile,
+                        is OverlayAction.NavigateToThread,
+                        is OverlayAction.StitchRecording -> onOpenPost()
+                        else -> {}
+                    }
+                },
+                sponsoredCta = SponsoredCta(ad.ctaText, onCta),
+                viewSource = "sponsored",
+                onBottomBlockHeight = { h -> if (h != bottomBlockHeight) bottomBlockHeight = h }
+            )
+        }
     }
 }

@@ -39,7 +39,15 @@ data class SponsoredSlot(
     /** Creative shape, width ÷ height. Null = 9:16. */
     val aspectRatio: Double? = null,
     /** "auto" | "fill" | "fit" — a brand/admin override of the shape rule. */
-    val fit: String = "auto"
+    val fit: String = "auto",
+    /**
+     * The post this slot promotes (PROMOTED_POSTS_CONTRACT). When set, the ad
+     * position loads `videos/{sourceVideoID}` and renders the real post; the
+     * copied videoURL/imageURL/title remain only as the fallback card for when
+     * the post can't be loaded (and for builds already in people's hands).
+     * Null on legacy admin-uploaded slots.
+     */
+    val sourceVideoID: String? = null
 ) {
     val hasVideo: Boolean get() = videoURL.isNotBlank()
 
@@ -91,7 +99,9 @@ data class SponsoredSlot(
         /** Lenient Firestore decode — returns null only when the doc is unusable. */
         fun fromFirestore(id: String, data: Map<String, Any?>): SponsoredSlot? {
             val imageURL = data["imageURL"] as? String ?: ""
-            if (imageURL.isBlank()) return null   // no creative = nothing to render
+            val sourceVideoID = (data["sourceVideoID"] as? String)?.takeIf { it.isNotBlank() }
+            // No creative and no post = nothing to render.
+            if (imageURL.isBlank() && sourceVideoID == null) return null
             return SponsoredSlot(
                 id = id,
                 advertiserName = data["advertiserName"] as? String ?: "",
@@ -107,7 +117,8 @@ data class SponsoredSlot(
                 landingID = (data["landingID"] as? String)?.takeIf { it.isNotBlank() },
                 landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
                 aspectRatio = MediaFit.aspectFrom(data["aspectRatio"]),
-                fit = MediaFit.normalizedFit(data["fit"])
+                fit = MediaFit.normalizedFit(data["fit"]),
+                sourceVideoID = sourceVideoID
             )
         }
     }

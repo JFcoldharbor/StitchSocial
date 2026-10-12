@@ -141,8 +141,19 @@ data class CoreVideoMetadata(
     // Addendum 1: written by the server trigger once the tag checks out. When
     // `landingSlug` is set the video carries the "At {landingName}" chip.
     val landingName: String? = null,
-    val landingSlug: String? = null
+    val landingSlug: String? = null,
+
+    // Promoted posts (PROMOTED_POSTS_CONTRACT). All three are server-only.
+    // `promotion` exists only while a paid run is attached; `wasPromoted` is
+    // permanent once a run has gone live; `isFlyer` marks a post rendered from
+    // an uploaded flyer image.
+    val promotion: VideoPromotion? = null,
+    val wasPromoted: Boolean = false,
+    val isFlyer: Boolean = false
 ) {
+    /** Sponsored right now: the label everywhere, the CTA in full-screen views. */
+    val isPromotedNow: Boolean get() = promotion?.isLive() == true
+
     // Computed properties
 
     /** True if this video is a challenge head. */

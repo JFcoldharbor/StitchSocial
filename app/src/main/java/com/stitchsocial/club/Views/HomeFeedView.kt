@@ -138,7 +138,11 @@ fun HomeFeedView(
 
     val threads by remember(baseThreads, loadedChildren.size) {
         derivedStateOf {
-            baseThreads.map { thread ->
+            // Session de-duplication (PROMOTED_POSTS_CONTRACT): a post already
+            // shown in Discovery's ad position isn't shown again organically.
+            baseThreads.filterNot {
+                com.stitchsocial.club.foundation.PromotedSessionDedupe.wasShownAsAd(it.parentVideo.id)
+            }.map { thread ->
                 val children = loadedChildren[thread.id]
                 if (children != null && children.isNotEmpty()) {
                     thread.copy(childVideos = children)
@@ -263,7 +267,11 @@ fun HomeFeedView(
 
                     if (item is FeedItem.VideoThread) {
                         val thread = item.thread
-                        val threadIndex = threads.indexOf(thread)
+                        // Index into baseThreads, which the position save and
+                        // preload use; `threads` may skip ad-shown posts.
+                        val threadIndex = baseThreads.indexOfFirst { it.id == thread.id }
+                        // Seen organically: not used for the ad position later.
+                        com.stitchsocial.club.foundation.PromotedSessionDedupe.markOrganic(thread.parentVideo.id)
 
                         // Load children
                         val cachedChildren = feedService.getCachedChildren(thread.id)
@@ -543,7 +551,8 @@ private fun ThreadVideoCard(
                     video = currentVideo,
                     isActive = isActive,
                     modifier = Modifier.fillMaxSize(),
-                    fitBand = fitBand
+                    fitBand = fitBand,
+                    tapToPause = true
                 )
             }
 

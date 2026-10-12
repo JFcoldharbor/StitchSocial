@@ -86,7 +86,13 @@ data class BrandAd(
     /** Creative shape, width ÷ height (getBrandAd `aspectRatio`). Null = 9:16. */
     val aspectRatio: Double? = null,
     /** "auto" | "fill" | "fit" (getBrandAd `fit`). Media fit, MEDIA_FIT_CONTRACT. */
-    val fit: String = "auto"
+    val fit: String = "auto",
+    /**
+     * The post this campaign promotes (getBrandAd `videoID`,
+     * PROMOTED_POSTS_CONTRACT). When set, tapping the ad opens the post and a
+     * full-screen ad renders as the post itself. Null on older campaigns.
+     */
+    val videoID: String? = null
 ) {
     companion object {
         fun fromMap(m: Map<String, Any?>): BrandAd? {
@@ -102,7 +108,8 @@ data class BrandAd(
                 ctaText = (m["ctaText"] as? String)?.takeIf { it.isNotBlank() } ?: "Learn more",
                 ctaURL = ctaURL,
                 aspectRatio = com.stitchsocial.club.foundation.MediaFit.aspectFrom(m["aspectRatio"]),
-                fit = com.stitchsocial.club.foundation.MediaFit.normalizedFit(m["fit"])
+                fit = com.stitchsocial.club.foundation.MediaFit.normalizedFit(m["fit"]),
+                videoID = (m["videoID"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }

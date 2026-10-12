@@ -264,7 +264,10 @@ class HashtagService {
                     discoverabilityScore = data["discoverabilityScore"] as? Double ?: 0.5,
                     isPromoted = data["isPromoted"] as? Boolean ?: false,
                     isProcessing = data["isProcessing"] as? Boolean ?: false,
-                    isDeleted = data["isDeleted"] as? Boolean ?: false
+                    isDeleted = data["isDeleted"] as? Boolean ?: false,
+                    promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
+                    wasPromoted = data["wasPromoted"] as? Boolean ?: false,
+                    isFlyer = data["isFlyer"] as? Boolean ?: false
                 )
 
                 videos.add(video)

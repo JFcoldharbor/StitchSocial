@@ -32,6 +32,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -89,7 +93,17 @@ fun VideoPlayerComposable(
      */
     fitBand: MediaFitBand? = null,
     /** "fill" / "fit" overrides the shape rule (sponsored slots); null = auto. */
-    fitOverride: String? = null
+    fitOverride: String? = null,
+    /**
+     * Feed players: a single tap on the video surface toggles pause (iOS
+     * parity). Only taps no overlay control consumed reach the player, so the
+     * action rail, creator pill, CTA and tab bar are unaffected. The pause is a
+     * local override of [isActive]: it survives recomposition and is cleared
+     * whenever the cell stops being active (swiped away, covered), so the next
+     * video — and this one when you come back — plays normally.
+     * Ignored when [onVideoClick] is set; that caller owns the tap.
+     */
+    tapToPause: Boolean = false
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
@@ -124,6 +138,14 @@ fun VideoPlayerComposable(
     // carried a previous video's error into the next one — and it would have been
     // inconsistent with retryCount/retryToken, which do reset.
     var isError by remember(videoId) { mutableStateOf(false) }
+    // Tap-to-pause override (see [tapToPause]). Keyed on the video, and cleared
+    // whenever the host deactivates the cell.
+    var userPaused by remember(videoId) { mutableStateOf(false) }
+    LaunchedEffect(isActive) { if (!isActive) userPaused = false }
+    val shouldPlay = isActive && !userPaused
+    // Read by the long-lived broadcast receiver, which would otherwise see the
+    // values from when it was registered.
+    val shouldPlayNow by rememberUpdatedState(shouldPlay)
 
     // Optimistic playback: if this doc was just uploaded and its local file is
     // still cached, play it instantly, then swap to HLS once the readiness poller
@@ -243,7 +265,7 @@ fun VideoPlayerComposable(
                     "com.stitchsocial.club.RESUME_ALL_VIDEOS" -> {
                         Log.i("VIDEO_PLAYER", "📡 RESUME BROADCAST RECEIVED for $videoId")
                         // Only resume if we were paused by broadcast AND this is the active video
-                        if (wasPausedByBroadcast && isActive && !isError) {
+                        if (wasPausedByBroadcast && shouldPlayNow && !isError) {
                             Log.i("VIDEO_PLAYER", "📡 RESUMING $videoId after broadcast")
                             wasPausedByBroadcast = false
                             exoPlayer.playWhenReady = true
@@ -323,9 +345,9 @@ fun VideoPlayerComposable(
     // Video Manager control - play when active.
     // Keyed on exoPlayer too: a recovery rebuilds the instance, and without that key
     // the new player would sit there never told to start.
-    LaunchedEffect(isActive, exoPlayer) {
-        Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive")
-        if (isActive && !isError) {
+    LaunchedEffect(shouldPlay, exoPlayer) {
+        Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive (tap-paused=$userPaused)")
+        if (shouldPlay && !isError) {
             if (managed) VideoManager.setActivePlayer(exoPlayer, videoId)
             exoPlayer.volume = if (muted) 0f else 1f
             exoPlayer.play()
@@ -363,6 +385,20 @@ fun VideoPlayerComposable(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .then(
+                // Single tap on the video surface. onTap only — no double-tap or
+                // long-press handlers, so taps aren't delayed and drags/swipes
+                // (pager, horizontal reply swipe) cancel it past touch slop.
+                when {
+                    onVideoClick != null -> Modifier.pointerInput(onVideoClick) {
+                        detectTapGestures(onTap = { onVideoClick() })
+                    }
+                    tapToPause -> Modifier.pointerInput(videoId) {
+                        detectTapGestures(onTap = { userPaused = !userPaused })
+                    }
+                    else -> Modifier
+                }
+            )
             .then(
                 // Add swipe up gesture if callback provided
                 if (onSwipeUp != null) {
@@ -471,21 +507,43 @@ fun VideoPlayerComposable(
                 // NOTE: Gesture detection removed - handled by ContextualVideoOverlay
                 // This allows HorizontalPager swipes to work properly
 
-                // Play Button Overlay (only in fullscreen)
-                if (showPlayButton) {
+                // Play/pause indicator. Small (48dp circle, 22dp glyph) and
+                // purely visual: no clickable or pointerInput, so it can never
+                // take a tap meant for the overlay's action rail. It shows
+                // "play" while paused and, once playback resumes, flips to
+                // "pause" and fades out after ~0.8s instead of vanishing.
+                // Tap-to-pause players show it only for a tap pause; others keep
+                // the old rule (paused while inactive).
+                val showPaused = if (tapToPause && onVideoClick == null) userPaused else showPlayButton
+                var indicatorVisible by remember { mutableStateOf(false) }
+                LaunchedEffect(showPaused) {
+                    if (showPaused) {
+                        indicatorVisible = true
+                    } else if (indicatorVisible) {
+                        kotlinx.coroutines.delay(800)
+                        indicatorVisible = false
+                    }
+                }
+                val indicatorAlpha by animateFloatAsState(
+                    targetValue = if (indicatorVisible) 1f else 0f,
+                    animationSpec = tween(durationMillis = 250),
+                    label = "playPauseIndicator"
+                )
+                if (indicatorAlpha > 0f) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .size(80.dp)
+                            .alpha(indicatorAlpha)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
+                            .background(Color.Black.copy(alpha = 0.45f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = "Play",
+                            imageVector = if (showPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                            contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }

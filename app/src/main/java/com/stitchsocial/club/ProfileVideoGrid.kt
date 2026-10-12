@@ -410,6 +410,13 @@ private fun VideoThumbnailContent(
             }
         }
 
+        // Sponsored badge — BOTTOM-LEFT, while a paid run is attached.
+        if (video.isPromotedNow) {
+            com.stitchsocial.club.views.SponsoredTileBadge(
+                modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+            )
+        }
+
         // Duration badge — BOTTOM-RIGHT.
         if (video.duration > 0) {
             Text(

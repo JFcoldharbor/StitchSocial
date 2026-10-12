@@ -670,12 +670,17 @@ class VideoServiceImpl {
      *
      * CACHING: interactionID is deterministic — idempotent set() won't double-write.
      * BATCHING: batch commit for interaction + viewCount — atomic, one round trip.
+     *
+     * [source] is "sponsored" for a view from the Discovery ad position
+     * (PROMOTED_POSTS_CONTRACT); the server counts those as the run's paid
+     * views. Null = organic, and the interaction doc is written exactly as before.
      */
     suspend fun recordVideoView(
         videoID: String,
         userID: String,
         userData: Map<String, Any>? = null,
-        watchTime: Double = 5.0
+        watchTime: Double = 5.0,
+        source: String? = null
     ) {
         try {
             val interactionID = "${videoID}_${userID}_view"
@@ -688,14 +693,16 @@ class VideoServiceImpl {
             val batch = db.batch()
 
             // Always refresh interaction timestamp
-            batch.set(interactionRef, hashMapOf(
+            val interaction = hashMapOf<String, Any>(
                 "userID"         to userID,
                 "videoID"        to videoID,
                 "engagementType" to "view",
                 "watchTime"      to watchTime,
                 "timestamp"      to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                 "isCompleted"    to true
-            ))
+            )
+            if (!source.isNullOrBlank()) interaction["source"] = source
+            batch.set(interactionRef, interaction)
 
             // Increment only on first view — matches iOS updateVideoEngagement
             if (isFirstView) {
@@ -722,7 +729,7 @@ class VideoServiceImpl {
                 .set(viewerData, com.google.firebase.firestore.SetOptions.merge())
                 .await()
 
-            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: View recorded $videoID by $userID (first=$isFirstView, watch=${watchTime}s)") }
+            if (BuildConfig.DEBUG) { println("VIDEO SERVICE: View recorded $videoID by $userID (first=$isFirstView, watch=${watchTime}s, source=${source ?: "organic"})") }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Failed to record view: ${e.message}") }
         }
@@ -905,7 +912,11 @@ class VideoServiceImpl {
                     landingSpot = data["landingSpot"] as? String,
                     incentivized = data["incentivized"] as? Boolean ?: false,
                     landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
-                    landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
+                    landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
+                    // Promoted posts: the Sponsored label + CTA while a run is attached.
+                    promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
+                    wasPromoted = data["wasPromoted"] as? Boolean ?: false,
+                    isFlyer = data["isFlyer"] as? Boolean ?: false
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }

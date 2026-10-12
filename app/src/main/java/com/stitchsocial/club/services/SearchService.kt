@@ -376,7 +376,11 @@ class SearchService {
                     landingSpot = data["landingSpot"] as? String,
                     incentivized = data["incentivized"] as? Boolean ?: false,
                     landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
-                    landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
+                    landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
+                    // Promoted posts: the Sponsored label + CTA while a run is attached.
+                    promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
+                    wasPromoted = data["wasPromoted"] as? Boolean ?: false,
+                    isFlyer = data["isFlyer"] as? Boolean ?: false
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("⚠️ SEARCH: Failed to process video ${doc.id}: ${e.message}") }

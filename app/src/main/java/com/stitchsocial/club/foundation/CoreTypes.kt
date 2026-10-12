@@ -231,7 +231,9 @@ data class BasicVideoInfo(
     val viewCount: Int = 0,
     val createdAt: Date = Date(),
     val contentType: ContentType = ContentType.THREAD,
-    val temperature: Temperature = Temperature.COOL
+    val temperature: Temperature = Temperature.COOL,
+    /** Promoted now (PROMOTED_POSTS_CONTRACT): the tile's "Sponsored" badge. */
+    val isPromotedNow: Boolean = false
 )
 
 data class RealUserStats(

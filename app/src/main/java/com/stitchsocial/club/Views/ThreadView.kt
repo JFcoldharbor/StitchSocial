@@ -767,7 +767,8 @@ private fun FullscreenThreadPlayer(
                     modifier = Modifier.fillMaxSize(),
                     // No header and no tab bar here, so the band is the screen
                     // (plus the tab bar's clearance, should it ever be shown).
-                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
+                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance),
+                    tapToPause = true
                 )
 
                 ContextualVideoOverlay(

@@ -293,7 +293,8 @@ fun FullscreenVideoPlayer(
                 isActive = true,
                 modifier = Modifier.fillMaxSize(),
                 // A cover: no header, and the tab bar is hidden under it.
-                fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
+                fitBand = MediaFitBand(bottom = TabBarMetrics.clearance),
+                tapToPause = true
             )
         }
 

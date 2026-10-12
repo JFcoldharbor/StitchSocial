@@ -81,6 +81,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import com.google.firebase.firestore.FirebaseFirestore
@@ -184,6 +185,15 @@ class DiscoveryViewModel(
     val sponsoredSlotMap = mutableMapOf<String, SponsoredSlot>()
     private val sponsoredSlotService = SponsoredSlotService()
     private var sponsoredCards: List<CoreVideoMetadata> = emptyList()
+
+    // Promoted posts (PROMOTED_POSTS_CONTRACT): slotID → the real post behind a
+    // slot with a sourceVideoID. A slot present here renders as the post with
+    // the full overlay; one missing falls back to the old card.
+    val sponsoredPostMap = mutableMapOf<String, CoreVideoMetadata>()
+    // Every live slot, in order. The cards actually placed are picked from it
+    // on each injection, skipping posts already seen organically this session.
+    private var sponsoredPool: List<CoreVideoMetadata> = emptyList()
+    private val maxSponsoredCards = 4
 
     private val _currentCategory = MutableStateFlow(DiscoveryCategory.FOR_YOU)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
@@ -426,7 +436,11 @@ class DiscoveryViewModel(
             landingSpot = data["landingSpot"] as? String,
             incentivized = data["incentivized"] as? Boolean ?: false,
             landingName = (data["landingName"] as? String)?.takeIf { it.isNotBlank() },
-            landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() }
+            landingSlug = (data["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
+            // Promoted posts: the Sponsored label + CTA while a run is attached.
+            promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
+            wasPromoted = data["wasPromoted"] as? Boolean ?: false,
+            isFlyer = data["isFlyer"] as? Boolean ?: false
         )
     }
 
@@ -635,27 +649,59 @@ class DiscoveryViewModel(
 
     /**
      * Fetches active sponsored slots (one read per feed load), builds pseudo
-     * CoreVideoMetadata cards and stores them in sponsoredCards + sponsoredSlotMap.
+     * CoreVideoMetadata cards and stores them in sponsoredPool + sponsoredSlotMap.
      * Mirrors iOS SponsoredSlot injection:
      *   - videoURL = "" — NEVER handed to a player
      *   - thumbnailURL = slot.imageURL — grid/thumbnail paths render the creative for free
      *   - creatorID = "" — guarded everywhere (engagement tracker, avatar fetch)
      *   - isPromoted = true
+     *
+     * A slot with a sourceVideoID also loads that post (sponsoredPostMap). The
+     * pseudo entry stays keyed by the slot id, so impressions and taps work as
+     * before; the deck renders the post in its place. If the post can't be
+     * loaded (gone, removed, hidden by moderation) the slot falls back to its
+     * card, or is dropped when it has no creative of its own.
      */
     private fun loadSponsoredSlots() {
         viewModelScope.launch {
             try {
-                val slots = sponsoredSlotService.getActiveSlots(4)
+                // The whole live set, not just four: a slot whose post was
+                // already seen organically gives way to the next one.
+                val slots = sponsoredSlotService.getActiveSlots(limit = 50)
                 if (slots.isEmpty()) return@launch
 
-                sponsoredCards = slots.map { slot ->
+                val posts: Map<String, CoreVideoMetadata?> = coroutineScope {
+                    slots.filter { it.sourceVideoID != null }
+                        .map { slot ->
+                            async {
+                                slot.id to runCatching { videoService.getVideoById(slot.sourceVideoID!!) }
+                                    .getOrNull()
+                                    ?.takeIf { post ->
+                                        !post.isDeleted && post.isPubliclyVisible &&
+                                            post.videoURL.isNotBlank()
+                                    }
+                            }
+                        }
+                        .awaitAll()
+                        .toMap()
+                }
+
+                val seenSources = mutableSetOf<String>()
+                sponsoredPool = slots.mapNotNull { slot ->
+                    val post = posts[slot.id]
+                    // The fallback card needs a creative of its own.
+                    if (post == null && slot.imageURL.isBlank()) return@mapNotNull null
+                    // Two slots on the same post would place it twice.
+                    if (post != null && !seenSources.add(post.id)) return@mapNotNull null
                     sponsoredSlotMap[slot.id] = slot
+                    if (post != null) sponsoredPostMap[slot.id] = post else sponsoredPostMap.remove(slot.id)
                     CoreVideoMetadata(
                         id = slot.id,
-                        title = slot.title,
+                        title = post?.title ?: slot.title,
                         description = "",
                         videoURL = "",  // empty = never reaches a player
-                        thumbnailURL = slot.imageURL,  // 9:16 creative renders via thumbnail paths
+                        // Grid tile: the post's own poster when it has one.
+                        thumbnailURL = post?.thumbnailURL?.takeIf { it.isNotBlank() } ?: slot.imageURL,
                         creatorID = "",  // pseudo entry — empty creatorID is guarded everywhere
                         creatorName = slot.advertiserName,
                         createdAt = java.util.Date(),
@@ -682,12 +728,24 @@ class DiscoveryViewModel(
                 }
 
                 applyFilterAndShuffle()  // re-space ads into the current feed
-                if (BuildConfig.DEBUG) { println("📣 DISCOVERY: Injected ${sponsoredCards.size} sponsored slot(s) into feed") }
+                if (BuildConfig.DEBUG) { println("📣 DISCOVERY: ${sponsoredPool.size} sponsored slot(s) live, ${sponsoredPostMap.size} as posts") }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY: Sponsored slot load failed — ${e.message}") }
             }
         }
     }
+
+    /**
+     * The cards to place this time: up to [maxSponsoredCards] from the pool,
+     * skipping any whose post this session has already shown organically
+     * (PROMOTED_POSTS_CONTRACT de-duplication — take the next slot).
+     */
+    private fun pickSponsoredCards(): List<CoreVideoMetadata> =
+        sponsoredPool.filter { card ->
+            val post = sponsoredPostMap[card.id] ?: return@filter true
+            !PromotedSessionDedupe.wasShownOrganically(post.id) ||
+                PromotedSessionDedupe.wasShownAsAd(post.id)
+        }.take(maxSponsoredCards)
 
     /**
      * Deterministically place sponsored cards into an organic feed:
@@ -702,11 +760,20 @@ class DiscoveryViewModel(
      *
      * Never index 0 or 1: a feed that opens on an ad feels like a different
      * product.
+     *
+     * A promoted post placed as an ad, or already shown as one this session,
+     * is taken out of the organic part so it never appears twice.
      */
     private fun injectSponsoredCards(feed: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
-        if (sponsoredCards.isEmpty()) return feed
-        val organic = feed.filterNot { sponsoredSlotMap.containsKey(it.id) }.toMutableList()
-        if (organic.isEmpty()) return organic  // no ads in empty/special feeds
+        if (sponsoredPool.isEmpty()) return feed
+        sponsoredCards = pickSponsoredCards()
+        val adPostIDs = sponsoredCards.mapNotNull { sponsoredPostMap[it.id]?.id }.toSet()
+        val organic = feed.filterNot {
+            sponsoredSlotMap.containsKey(it.id) ||
+                it.id in adPostIDs ||
+                PromotedSessionDedupe.wasShownAsAd(it.id)
+        }.toMutableList()
+        if (organic.isEmpty() || sponsoredCards.isEmpty()) return organic  // no ads in empty/special feeds
         // Drawn fresh per shuffle, and kept monotonic so two cards cannot land
         // on the same index or out of order.
         var cursor = (3..9).random()
@@ -1390,6 +1457,7 @@ fun DiscoveryView(
                                     isAnnouncementShowing = isAnnouncementShowing || showCollectionPlayer,
                                     collectionCardMap = viewModel.collectionCardMap,
                                     sponsoredSlotMap = viewModel.sponsoredSlotMap,
+                                    sponsoredPostMap = viewModel.sponsoredPostMap,
                                     onSponsoredCta = { slot -> openSponsoredSlot(slot) },
                                     onSponsoredShown = { slotID -> sponsoredSlotService.recordImpression(slotID) },
                                     onCollectionTap = { collection ->
@@ -1419,9 +1487,11 @@ fun DiscoveryView(
                                         sponsoredSlotService.recordImpression(slotID)
                                     },
                                     onVideoTapped = { video ->
-                                        // Sponsored card — recordTap + open ctaURL, never the player
+                                        // Sponsored card — recordTap + open ctaURL, never the player.
+                                        // A promoted post opens like any post (the deck renders
+                                        // it as the ad position, CTA and all).
                                         val slot = viewModel.sponsoredSlotMap[video.id]
-                                        if (slot != null) {
+                                        if (slot != null && !viewModel.sponsoredPostMap.containsKey(slot.id)) {
                                             openSponsoredSlot(slot)
                                             return@DiscoveryGridView
                                         }
@@ -1529,6 +1599,12 @@ fun DiscoveryView(
                 onShowThreadView = { threadID, targetVideoID ->
                     onShowThreadView(threadID, targetVideoID)
                 },
+                // Only the slots backed by a post: they are pages here. The
+                // old cards stay out of the cover, as before.
+                sponsoredSlotMap = viewModel.sponsoredSlotMap.filterKeys { it in viewModel.sponsoredPostMap },
+                sponsoredPostMap = viewModel.sponsoredPostMap,
+                onSponsoredCta = { slot -> openSponsoredSlot(slot) },
+                onSponsoredShown = { slotID -> sponsoredSlotService.recordImpression(slotID) },
                 modifier = Modifier.zIndex(100f)
             )
         }
@@ -1923,7 +1999,7 @@ private fun DiscoveryVideoCard(
         )
 
         // Sponsored capsule — first-party ad slot tile (creative renders via thumbnail).
-        if (isSponsored) {
+        if (isSponsored || video.isPromotedNow) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -2315,6 +2391,8 @@ private fun DiscoveryFullscreenDeck(
     initialIndex: Int? = null,
     collectionCardMap: Map<String, VideoCollection> = emptyMap(),
     sponsoredSlotMap: Map<String, SponsoredSlot> = emptyMap(),
+    /** slotID → the real post behind it (PROMOTED_POSTS_CONTRACT). */
+    sponsoredPostMap: Map<String, CoreVideoMetadata> = emptyMap(),
     onSponsoredCta: (SponsoredSlot) -> Unit = {},
     onSponsoredShown: (String) -> Unit = {},
     onCollectionTap: (VideoCollection) -> Unit = {},
@@ -2369,6 +2447,13 @@ private fun DiscoveryFullscreenDeck(
                 tracker.cardBecameActive(videoID = settled.id, creatorID = settled.creatorID)
             }
         }
+        // Session de-duplication: a post seen here organically is not used for
+        // the ad position later (the ad pages mark themselves below).
+        playable.getOrNull(pagerState.currentPage)?.let { settled ->
+            if (!sponsoredSlotMap.containsKey(settled.id) && !collectionCardMap.containsKey(settled.id)) {
+                PromotedSessionDedupe.markOrganic(settled.id)
+            }
+        }
         val warm = listOfNotNull(
             playable.getOrNull(pagerState.currentPage + 1)?.videoURL,
             playable.getOrNull(pagerState.currentPage - 1)?.videoURL
@@ -2387,9 +2472,56 @@ private fun DiscoveryFullscreenDeck(
             val root = playable[page]
             val isCurrentPage = pagerState.currentPage == page
             val sponsored = sponsoredSlotMap[root.id]
+            val sponsoredPost = sponsored?.let { sponsoredPostMap[it.id] }
             val collection = collectionCardMap[root.id]
+            val onStitchRecording: (CoreVideoMetadata) -> Unit = { video ->
+                val isOwn = video.creatorID == currentUserID
+                val ctx = if (isOwn) {
+                    RecordingContextFactory.createContinueThread(
+                        video.threadID ?: video.id, video.creatorName, video.title
+                    )
+                } else {
+                    RecordingContextFactory.createStitchToThread(
+                        video.threadID ?: video.id, video.creatorName, video.title
+                    )
+                }
+                navigationCoordinator?.showModal(
+                    ModalState.RECORDING,
+                    mapOf("context" to ctx, "parentVideo" to video)
+                )
+            }
             key(root.id) {
-                if (sponsored != null) {
+                if (sponsored != null && sponsoredPost != null) {
+                    // The ad IS the post: the normal cell, overlay and all
+                    // (creator, hype, cool, stitch, thread), plus the Sponsored
+                    // chip and the slot's CTA. Media fit uses the clear area.
+                    DiscoveryFullscreenCard(
+                        root = sponsoredPost,
+                        isCurrentPage = isCurrentPage,
+                        hosted = hosted,
+                        topInset = topInset,
+                        isAnnouncementShowing = isAnnouncementShowing,
+                        currentUserID = currentUserID,
+                        engagementViewModel = engagementViewModel,
+                        iconManager = iconManager,
+                        followManager = followManager,
+                        videoService = videoService,
+                        onExit = { onDismiss(currentFullIndex()) },
+                        onNavigateToProfile = { userID -> onNavigateToProfile(userID, currentFullIndex()) },
+                        onShowThreadView = onShowThreadView,
+                        onStitchRecording = onStitchRecording,
+                        sponsoredSlot = sponsored,
+                        onSponsoredCta = { onSponsoredCta(sponsored) }
+                    )
+                    // Impression as before (session-deduped by the service),
+                    // and the post is now spoken for this session.
+                    LaunchedEffect(isCurrentPage) {
+                        if (isCurrentPage) {
+                            onSponsoredShown(sponsored.id)
+                            PromotedSessionDedupe.markAd(sponsoredPost.id)
+                        }
+                    }
+                } else if (sponsored != null) {
                     // Full-bleed, not the inset card the deck used to draw. A
                     // sponsored page is a page like any other now.
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -2433,22 +2565,7 @@ private fun DiscoveryFullscreenDeck(
                     onExit = { onDismiss(currentFullIndex()) },
                     onNavigateToProfile = { userID -> onNavigateToProfile(userID, currentFullIndex()) },
                     onShowThreadView = onShowThreadView,
-                    onStitchRecording = { video ->
-                        val isOwn = video.creatorID == currentUserID
-                        val ctx = if (isOwn) {
-                            RecordingContextFactory.createContinueThread(
-                                video.threadID ?: video.id, video.creatorName, video.title
-                            )
-                        } else {
-                            RecordingContextFactory.createStitchToThread(
-                                video.threadID ?: video.id, video.creatorName, video.title
-                            )
-                        }
-                        navigationCoordinator?.showModal(
-                            ModalState.RECORDING,
-                            mapOf("context" to ctx, "parentVideo" to video)
-                        )
-                    }
+                    onStitchRecording = onStitchRecording
                 )
             }
         }
@@ -2473,7 +2590,15 @@ private fun DiscoveryFullscreenCard(
     onExit: () -> Unit,
     onNavigateToProfile: (String) -> Unit,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
-    onStitchRecording: (CoreVideoMetadata) -> Unit
+    onStitchRecording: (CoreVideoMetadata) -> Unit,
+    /**
+     * Set when this cell is the Discovery ad position showing a promoted post
+     * (PROMOTED_POSTS_CONTRACT). The root then gets the slot's CTA, the
+     * Sponsored chip, the clear-area media fit and a "sponsored" view source.
+     * Replies swiped to from it are ordinary posts.
+     */
+    sponsoredSlot: SponsoredSlot? = null,
+    onSponsoredCta: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -2484,6 +2609,9 @@ private fun DiscoveryFullscreenCard(
     var allVideos by remember(root.id) { mutableStateOf(listOf(root)) }
     LaunchedEffect(root.id) {
         val threadID = root.threadID
+        // A promoted reply stays itself in the ad position — its thread's
+        // strip would open on the thread head, not the post that was paid for.
+        if (sponsoredSlot != null && root.conversationDepth > 0) return@LaunchedEffect
         if (threadID != null) {
             runCatching {
                 val (parent, children) = videoService.getThreadData(threadID)
@@ -2528,10 +2656,22 @@ private fun DiscoveryFullscreenCard(
 
     // Media fit band: below Discovery's floating chrome and above the tab bar
     // when hosted; a cover has neither, so it is the whole screen.
-    val fitBand = MediaFitBand(
+    //
+    // The ad position uses the clear area instead: from the chrome down to
+    // the top of the overlay's bottom block (CTA + caption + actions),
+    // measured at runtime, 12dp in from the sides.
+    val isAdOnScreen = sponsoredSlot != null && isOnParent
+    var adBottomBlockHeight by remember(root.id) { mutableStateOf(0.dp) }
+    val fitBand = if (isAdOnScreen) MediaFitBand.clearArea(
+        top = if (hosted) topInset else 0.dp,
+        bottom = adBottomBlockHeight
+    ) else MediaFitBand(
         top = if (hosted) topInset else 0.dp,
         bottom = if (hosted) TabBarMetrics.clearance else 0.dp
     )
+    val fitOverride: String? = if (isAdOnScreen) {
+        sponsoredSlot?.fit?.takeIf { it != "auto" } ?: currentVideo.promotion?.fit
+    } else null
     val velocityTracker = remember { VelocityTracker() }
 
     Box(
@@ -2628,18 +2768,19 @@ private fun DiscoveryFullscreenCard(
         ) {
             key(currentVideo.id) {
                 var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
-                // Hosted, a tap pauses. It used to open this very deck, which is
-                // now what you are already looking at — so the gesture is free,
-                // and pause-on-tap is what every other feed surface does.
-                var tapPaused by remember(currentVideo.id) { mutableStateOf(false) }
-
+                // A tap pauses, hosted or as a cover. It used to open this very
+                // deck, which is now what you are already looking at — so the
+                // gesture is free, and pause-on-tap is what every other feed
+                // surface does. The player owns the override (tapToPause): it
+                // clears when the cell goes inactive, so the next page autoplays.
                 VideoPlayerComposable(
                     video = currentVideo,
-                    isActive = isActive && !tapPaused,
+                    isActive = isActive,
                     modifier = Modifier.fillMaxSize(),
-                    onVideoClick = if (hosted) ({ tapPaused = !tapPaused }) else null,
+                    tapToPause = true,
                     onPlaybackStarted = { showPoster = false },
-                    fitBand = fitBand
+                    fitBand = fitBand,
+                    fitOverride = fitOverride
                 )
 
                 // Covers the prepare-and-buffer gap on the incoming video so the
@@ -2648,7 +2789,7 @@ private fun DiscoveryFullscreenCard(
                 if (showPoster) {
                     // Same mode and rect as the player under it, so the first
                     // frame lands where the poster was.
-                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
+                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand, fitOverride = fitOverride)
                 }
                 LaunchedEffect(currentVideo.id) {
                     kotlinx.coroutines.delay(2000)
@@ -2690,7 +2831,14 @@ private fun DiscoveryFullscreenCard(
                         is OverlayAction.StitchRecording -> onStitchRecording(currentVideo)
                         else -> {}
                     }
-                }
+                },
+                sponsoredCta = if (isAdOnScreen && sponsoredSlot != null) {
+                    SponsoredCta(sponsoredSlot.ctaText) { onSponsoredCta() }
+                } else null,
+                viewSource = if (isAdOnScreen) "sponsored" else null,
+                onBottomBlockHeight = if (isAdOnScreen) ({ h ->
+                    if (h != adBottomBlockHeight) adBottomBlockHeight = h
+                }) else null
             )
             }
 

@@ -48,6 +48,7 @@ import com.stitchsocial.club.ui.theme.Spacing
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -304,7 +305,17 @@ fun ContextualVideoOverlay(
     // coordinated top-right row (no overlapping floating buttons).
     showShareInTop: Boolean = false,
     onExit: (() -> Unit)? = null,
-    onAction: ((OverlayAction) -> Unit)? = null
+    onAction: ((OverlayAction) -> Unit)? = null,
+    // Promoted posts (PROMOTED_POSTS_CONTRACT). The Discovery ad position
+    // passes the slot's CTA here, which also forces the Sponsored chip; every
+    // other host leaves it null and the post's own `promotion` decides.
+    sponsoredCta: SponsoredCta? = null,
+    // "sponsored" when this view comes from the ad position; null = organic.
+    viewSource: String? = null,
+    // Height from the bottom edge to the top of the bottom block (caption +
+    // CTA + actions). The ad position uses it as the media-fit clear area's
+    // bottom edge.
+    onBottomBlockHeight: ((Dp) -> Unit)? = null
 ) {
     // Early return if not visible
     if (!isVisible) return
@@ -395,7 +406,7 @@ fun ContextualVideoOverlay(
                         "tier"            to (userData?.tier?.name ?: "ROOKIE")
                     )
 
-                    videoService.recordVideoView(video.id, currentUserID, viewerData, watchTime = 5.0)
+                    videoService.recordVideoView(video.id, currentUserID, viewerData, watchTime = 5.0, source = viewSource)
                     Log.d("VIEW_TRACKING", "View recorded after 5s: ${video.id} by $currentUserID")
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     Log.d("VIEW_TRACKING", "View cancelled (scrolled away): ${video.id}")
@@ -633,6 +644,15 @@ fun ContextualVideoOverlay(
         }
     }
 
+    // Promoted now: the Sponsored chip by the name, and the CTA above the
+    // caption. The ad position's slot CTA wins over the post's own.
+    val isSponsored: Boolean = sponsoredCta != null || video.isPromotedNow
+    val ownCta: SponsoredCta? = remember(video.promotion) {
+        video.promotion?.takeIf { video.isPromotedNow }
+            ?.let { promo -> SponsoredCta.forPromotion(promo, context) }
+    }
+    val effectiveCta: SponsoredCta? = sponsoredCta ?: ownCta
+
     // Render
     Box(modifier = Modifier.fillMaxSize()) {
         if (shouldShowMinimalDisplay) {
@@ -712,7 +732,10 @@ fun ContextualVideoOverlay(
                     showThreadPanel = true
                 },
                 showShareInTop = showShareInTop,
-                onExit = onExit
+                onExit = onExit,
+                isSponsored = isSponsored,
+                sponsoredCta = effectiveCta,
+                onBottomBlockHeight = onBottomBlockHeight
             )
         }
 
@@ -1227,7 +1250,10 @@ private fun FullContextualOverlay(
     onAction: ((OverlayAction) -> Unit)?,
     onThreadTap: () -> Unit,
     showShareInTop: Boolean = false,
-    onExit: (() -> Unit)? = null
+    onExit: (() -> Unit)? = null,
+    isSponsored: Boolean = false,
+    sponsoredCta: SponsoredCta? = null,
+    onBottomBlockHeight: ((Dp) -> Unit)? = null
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // Top Section - hide for CAROUSEL to keep view clean
@@ -1246,7 +1272,8 @@ private fun FullContextualOverlay(
                 currentUserID = currentUserID,
                 currentUserTier = currentUserTier,
                 showShareInTop = showShareInTop,
-                onExit = onExit
+                onExit = onExit,
+                isSponsored = isSponsored
             )
         }
 
@@ -1293,6 +1320,8 @@ private fun FullContextualOverlay(
             onViewersTap = onViewersTap,
             onAction = onAction,
             onThreadTap = onThreadTap,
+            sponsoredCta = sponsoredCta,
+            onBottomBlockHeight = onBottomBlockHeight,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
@@ -1316,7 +1345,8 @@ private fun TopSection(
     currentUserID: String? = null,
     currentUserTier: UserTier = UserTier.ROOKIE,
     showShareInTop: Boolean = false,
-    onExit: (() -> Unit)? = null
+    onExit: (() -> Unit)? = null,
+    isSponsored: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -1337,6 +1367,7 @@ private fun TopSection(
                 isThread = false,
                 collaborators = video.collaborators,
                 landingVideo = video,
+                isSponsored = isSponsored,
                 onClick = {
                     pauseAllVideos(context)
                     onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
@@ -1426,19 +1457,38 @@ private fun BottomSection(
     onViewersTap: () -> Unit,
     onAction: ((OverlayAction) -> Unit)?,
     onThreadTap: () -> Unit,
+    sponsoredCta: SponsoredCta? = null,
+    onBottomBlockHeight: ((Dp) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Fixed text sizes
     val titleFontSize = OverlaySizes.TITLE.fixedSp()
     val descFontSize = OverlaySizes.LABEL_REGULAR.fixedSp()
     val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
+    val density = LocalDensity.current
 
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // Measured before the padding, so the height runs from the bottom
+            // edge to the top of the block — the clear area's bottom edge.
+            .then(
+                if (onBottomBlockHeight != null) Modifier.onSizeChanged { size ->
+                    onBottomBlockHeight(with(density) { size.height.toDp() })
+                } else Modifier
+            )
             .padding(bottom = bottomPadding),  // Use responsive padding
         verticalArrangement = Arrangement.spacedBy(8.dp)  // tightened (was 12)
     ) {
+        // Promoted post CTA, above the caption (PROMOTED_POSTS_CONTRACT).
+        if (sponsoredCta != null) {
+            SponsoredCtaButton(
+                cta = sponsoredCta,
+                onTap = { pauseAllVideos(context) },
+                modifier = Modifier.padding(start = 16.dp, end = 70.dp)
+            )
+        }
+
         // Video Title - with side padding to avoid right column
         if (video.title.isNotEmpty()) {
             Text(
@@ -1649,6 +1699,9 @@ private fun CreatorPill(
     /// The video whose Landing chips ("At {name}", "Posted for a perk") sit
     /// under the name. Only the video's own creator pill passes it.
     landingVideo: com.stitchsocial.club.foundation.CoreVideoMetadata? = null,
+    /// Promoted now (or shown in the ad position): the "Sponsored" chip beside
+    /// the name. Disclosure, so it shows on every surface the post renders.
+    isSponsored: Boolean = false,
     onClick: () -> Unit
 ) {
     val imageSize: Dp = if (isThread) OverlaySizes.PROFILE_IMAGE_THREAD else OverlaySizes.PROFILE_IMAGE
@@ -1737,6 +1790,9 @@ private fun CreatorPill(
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.6f)
                     )
+                }
+                if (isSponsored) {
+                    SponsoredChip(fontSize = threadLabelSize)
                 }
             }
             // Credit, once somebody has accepted. Under the creator rather
@@ -2445,4 +2501,116 @@ private suspend fun resolveDisplayName(db: FirebaseFirestore, userID: String): S
     } catch (_: Exception) {
         "Someone"
     }
+}
+
+// MARK: - Promoted posts (PROMOTED_POSTS_CONTRACT)
+
+/** The CTA a promoted post shows above its caption. */
+data class SponsoredCta(val text: String, val onClick: () -> Unit) {
+    companion object {
+        /**
+         * The post's own promotion CTA (every surface but the ad position,
+         * which passes its slot's). A landing_claim routes in-app and claims
+         * the welcome perk; anything else opens the link.
+         */
+        fun forPromotion(promo: VideoPromotion, context: Context): SponsoredCta? {
+            val slug = promo.landingSlug
+            if (promo.isLandingClaim && slug != null) {
+                return SponsoredCta(promo.displayCtaText) {
+                    com.stitchsocial.club.landing.LandingPresenter.route(
+                        slug = slug,
+                        source = com.stitchsocial.club.landing.LandingSource.SPONSORED,
+                        autoClaim = true
+                    )
+                }
+            }
+            val url = promo.resolvedCtaURL
+            if (url.isBlank()) return null
+            return SponsoredCta(promo.displayCtaText) {
+                try {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e: Exception) {
+                    Log.w("SPONSORED", "Could not open ctaURL: ${e.message}")
+                }
+            }
+        }
+    }
+}
+
+/** Stitch brand magenta, the sponsored CTA's colour everywhere. */
+private val SponsoredCtaMagenta = Color(0xFFE91E63)
+
+/** Small "Sponsored" label beside a creator's name. */
+@Composable
+internal fun SponsoredChip(fontSize: TextUnit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(50))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = "Sponsored",
+            fontSize = fontSize,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun SponsoredCtaButton(
+    cta: SponsoredCta,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50))
+            .background(SponsoredCtaMagenta)
+            .clickable {
+                onTap()
+                cta.onClick()
+            }
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = cta.text,
+            fontSize = 14.fixedSp(),
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+            imageVector = Icons.Default.ArrowForward,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(14.dp)
+        )
+    }
+}
+
+/** Small "Sponsored" badge for profile and grid tiles of a promoted post. */
+@Composable
+fun SponsoredTileBadge(modifier: Modifier = Modifier) {
+    Text(
+        text = "Sponsored",
+        color = Color.White,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.dp, vertical = 2.dp)
+    )
 }

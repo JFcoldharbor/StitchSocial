@@ -963,7 +963,8 @@ fun ProfileView(
                     isActive = true,
                     modifier = Modifier.fillMaxSize(),
                     // No header; the tab bar's measured clearance is 0 when it's hidden.
-                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
+                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance),
+                    tapToPause = true
                 )
             }
 
@@ -2116,7 +2117,8 @@ private fun CoreVideoMetadata.toBasicVideoInfo(): BasicVideoInfo {
         viewCount = this.viewCount,
         createdAt = this.createdAt,
         contentType = this.contentType,
-        temperature = this.temperature
+        temperature = this.temperature,
+        isPromotedNow = this.isPromotedNow
     )
 }
 

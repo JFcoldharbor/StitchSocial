@@ -205,9 +205,8 @@ fun ThreadVideoView(
             onEngagement = { interactionType ->
                 if (BuildConfig.DEBUG) { println("🎯 THREAD NAV: Engagement $interactionType on ${video.title}") }
             },
-            onVideoClick = {
-                if (BuildConfig.DEBUG) { println("🔹 THREAD NAV: Video clicked: ${video.title}") }
-            },
+            // Was a debug-only onVideoClick, which never fired; a tap now pauses.
+            tapToPause = true,
             modifier = Modifier.fillMaxSize()
         )
 
