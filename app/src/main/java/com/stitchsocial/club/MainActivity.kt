@@ -665,16 +665,18 @@ fun MainScreen() {
                     TeenSafety.setLane(if (ageGateState == "teen") "teen" else "adult")
                 }
             }
+            if (ageGateState != "prompt") {
+                com.stitchsocial.club.services.AgeGateFallback.remember(context, uid, ageGateState)
+            }
         } catch (e: Exception) {
-            // Network / read failure — fall through to "ok" so users aren't
-            // hard-blocked by a transient error.  Next launch retries.
-            //
-            // The CONTENT lane does not follow it there. Letting an adult into
-            // the app on a failed read costs nothing if they turn out to be an
-            // adult; showing unfiltered video to someone who turns out to be
-            // thirteen is the mistake this exists to prevent, so TeenSafety
-            // keeps its cautious default until a read succeeds.
-            ageGateState = "ok"
+            // Network / read failure. This used to open the full app, so a
+            // teen who could make the read fail was an adult for the session.
+            // Now: the server's audienceLane claim on the cached token, else
+            // the last state this device resolved for this account, else the
+            // teen lane — fail closed. An adult with neither who launches
+            // offline sees the teen lane until the next successful read.
+            ageGateState = com.stitchsocial.club.services.AgeGateFallback.resolve(context, uid)
+            TeenSafety.setLane(com.stitchsocial.club.services.AgeGateFallback.laneFor(ageGateState))
         }
     }
 
@@ -917,6 +919,7 @@ fun MainScreen() {
                         com.stitchsocial.club.services.TeenSafety.setLane(
                             if (ageGateState == "ok") "adult" else "teen"
                         )
+                        com.stitchsocial.club.services.AgeGateFallback.remember(context, uid, ageGateState)
                     }
                 )
             }
