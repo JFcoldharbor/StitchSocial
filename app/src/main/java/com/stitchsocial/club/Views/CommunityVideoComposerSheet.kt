@@ -171,6 +171,7 @@ fun CommunityVideoComposerSheet(
                             },
                             onSubmit = {
                                 val uri = pickedUri ?: return@PreviewPanel
+                                if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@PreviewPanel
                                 state = Submit.Uploading
                                 progress = 0f
                                 scope.launch {
@@ -212,7 +213,10 @@ fun CommunityVideoComposerSheet(
                                         delay(900)
                                         onDismiss()
                                     }.onFailure { err ->
-                                        state = Submit.Failed(err.localizedMessage ?: "Upload failed")
+                                        val blocked = com.stitchsocial.club.services.AccountStanding
+                                            .suspensionMessageFor(err)
+                                        state = if (blocked != null) Submit.Failed(blocked, retryable = false)
+                                                else Submit.Failed(err.localizedMessage ?: "Upload failed")
                                     }
                                 }
                             },
@@ -221,7 +225,7 @@ fun CommunityVideoComposerSheet(
                 }
                 is Submit.Uploading -> UploadingPanel(progress)
                 is Submit.Done -> DonePanel()
-                is Submit.Failed -> FailedPanel(s.message) { state = Submit.Idle }
+                is Submit.Failed -> FailedPanel(s.message, onRetry = if (s.retryable) ({ state = Submit.Idle }) else null)
             }
         }
     }
@@ -231,7 +235,7 @@ private sealed interface Submit {
     data object Idle : Submit
     data object Uploading : Submit
     data object Done : Submit
-    data class Failed(val message: String) : Submit
+    data class Failed(val message: String, val retryable: Boolean = true) : Submit
 }
 
 @Composable
@@ -400,13 +404,15 @@ private fun DonePanel() {
 }
 
 @Composable
-private fun FailedPanel(error: String, onRetry: () -> Unit) {
+private fun FailedPanel(error: String, onRetry: (() -> Unit)?) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(32.dp)) {
         Text("⚠️", fontSize = 40.sp)
         Spacer(Modifier.height(8.dp))
         Text("Upload failed", color = VC.txt, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
         Text(error, color = VC.txt2, fontSize = 12.sp)
+        // No retry for a suspension refusal — it can only fail again.
+        if (onRetry == null) return@Column
         Spacer(Modifier.height(16.dp))
         Box(
             modifier = Modifier

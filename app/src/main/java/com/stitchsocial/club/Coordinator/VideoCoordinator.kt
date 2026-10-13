@@ -137,6 +137,8 @@ class VideoCoordinator(
         metadata: CoreVideoMetadata,
         recordingContext: com.stitchsocial.club.camera.RecordingContext
     ) = withContext(Dispatchers.IO) {
+        // Suspended: no compression, AI or upload starts at all.
+        com.stitchsocial.club.services.AccountStanding.requirePosting()
 
         val startTime = System.currentTimeMillis()
 
@@ -210,6 +212,7 @@ class VideoCoordinator(
     suspend fun processGalleryVideo(videoUri: Uri) = withContext(Dispatchers.IO) {
         if (BuildConfig.DEBUG) { println("📹 VIDEO COORDINATOR: Processing gallery video") }
         if (BuildConfig.DEBUG) { println("📁 URI: $videoUri") }
+        com.stitchsocial.club.services.AccountStanding.requirePosting()
 
         try {
             // Convert URI to file path
@@ -321,6 +324,10 @@ class VideoCoordinator(
         val recordingContext = _lastRecordingContext.value
             ?: throw IllegalStateException("No recording context")
 
+        // Checked before the CDN upload: the pipeline isn't covered by
+        // Firebase rules, so a refused doc write comes AFTER the file shipped.
+        com.stitchsocial.club.services.AccountStanding.requirePosting()
+
         try {
             updateProgress(0.0, "Starting final upload...")
 
@@ -389,6 +396,24 @@ class VideoCoordinator(
                 }
             }
 
+            // The parent's replyCount. iOS bumps it client-side in the same
+            // write as the reply (VideoService.createChildVideo /
+            // ThreadCreationRequest); Android never did, so a stitch or reply
+            // posted from Android left the count — and every surface that
+            // gates on it — where it was. Best-effort: the reply already
+            // exists, a failed counter must not fail the post.
+            incrementParentReplyCount(finalVideo)
+
+            // One-shot refresh signal for every screen showing this thread
+            // (no listeners). Lanes are cached 5 min, so the reply's lane
+            // would otherwise stay stale too.
+            if (finalVideo.conversationDepth > 0) {
+                finalVideo.replyToVideoID?.let {
+                    com.stitchsocial.club.services.ConversationLaneService.invalidateLane(it)
+                }
+                com.stitchsocial.club.services.ThreadRefreshBus.publishOwnReply(finalVideo)
+            }
+
             updateProgress(1.0, "Video creation complete!")
 
             if (BuildConfig.DEBUG) { println("🎉 VIDEO COORDINATOR: Video successfully created!") }
@@ -406,6 +431,23 @@ class VideoCoordinator(
             e.printStackTrace()
             updateProgress(0.0, "Creation failed: ${e.message}")
             throw e
+        }
+    }
+
+    /** +1 on the video this reply answers (replyToVideoID, else the thread head). */
+    private suspend fun incrementParentReplyCount(reply: CoreVideoMetadata) {
+        if (reply.conversationDepth <= 0) return
+        val parentID = reply.replyToVideoID ?: reply.threadID ?: return
+        if (parentID == reply.id) return
+        try {
+            db.collection("videos").document(parentID).update(
+                mapOf(
+                    "replyCount" to com.google.firebase.firestore.FieldValue.increment(1),
+                    "updatedAt" to Timestamp.now()
+                )
+            ).await()
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) { println("⚠️ VIDEO COORDINATOR: replyCount bump on $parentID failed - ${e.message}") }
         }
     }
 
@@ -995,6 +1037,8 @@ class VideoCoordinator(
                 creatorID = creatorID,
                 createdAt = now.toDate(),
                 threadID = finalThreadID,
+                // Matches what was written: hidden until moderation passes.
+                publicVisibility = "pending",
                 taggedUserIDs = taggedUserIDs, // NEW: Include in returned metadata
                 landingID = landingTag?.first?.landingID,
                 landingSpot = landingTag?.first?.spot,

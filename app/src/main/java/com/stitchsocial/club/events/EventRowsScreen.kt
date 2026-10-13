@@ -197,7 +197,7 @@ fun EventRowsScreen(
                                     }
                                 }
                             }
-                            item { HostBigButton { showCreate = true } }
+                            item { HostBigButton { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showCreate = true } }
                         }
                     }
                 }
@@ -207,7 +207,7 @@ fun EventRowsScreen(
         // Host FAB. The app tab bar used to cover this corner; Events is full
         // screen now, so the FAB has to clear the system nav / gesture bar itself.
         Button(
-            onClick = { showCreate = true },
+            onClick = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showCreate = true },
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(18.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color.White)
         ) { Text("+ Host", color = Color.Black, fontWeight = FontWeight.Bold) }

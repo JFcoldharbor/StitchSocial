@@ -245,7 +245,12 @@ fun LandingScreen(
         )
     }
 
-    fun record() = beginCheckIn(recordAfter = true)
+    // "Record a moment": a suspended account gets the shared sheet before the
+    // check-in (location, network) or the recorder starts.
+    fun record() {
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return
+        beginCheckIn(recordAfter = true)
+    }
 
     fun share() {
         val current = l ?: return
@@ -319,6 +324,7 @@ fun LandingScreen(
                         },
                         onRecord = { record() },
                         onAccessNumber = {
+                            if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@Checklist
                             recordAfterCheckIn = true
                             showAccessEntry = true
                         }

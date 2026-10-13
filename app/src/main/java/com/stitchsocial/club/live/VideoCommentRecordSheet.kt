@@ -183,7 +183,8 @@ fun VideoCommentRecordSheet(
                                         onDismiss()
                                     }.onFailure { err ->
                                         state = SubmissionState.Failed(
-                                            err.localizedMessage ?: "Upload failed"
+                                            com.stitchsocial.club.services.AccountStanding.suspensionMessageFor(err)
+                                                ?: err.localizedMessage ?: "Upload failed"
                                         )
                                     }
                                 }

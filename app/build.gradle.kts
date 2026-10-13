@@ -152,9 +152,14 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
     // Play Install Referrer — a Landing QR scan sends Android to the Play Store
-    // with referrer=landing=<slug>&t=<spot>; read once on first launch so the
-    // new account lands on that restaurant (LandingReferrer).
+    // with referrer=landing=<slug>&t=<spot>, and the /invite page with
+    // referrer=invite=<CODE>; read once on first launch (LandingReferrer) so the
+    // new account lands on that restaurant / gets the invite code prefilled.
     implementation("com.android.installreferrer:installreferrer:2.2")
+
+    // ZXing core — the invite QR ("Show my invite QR"). Encoder only; no
+    // scanner/camera parts.
+    implementation("com.google.zxing:core:3.5.3")
 
     // Google Play Billing — HypeCoin in-app purchases
     implementation("com.android.billingclient:billing-ktx:7.0.0")

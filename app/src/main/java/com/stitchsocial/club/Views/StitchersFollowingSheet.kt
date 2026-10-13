@@ -307,7 +307,7 @@ fun StitchersListView(
         ) {
             StitchersTabItem(
                 title = "Followers",
-                count = totalFollowers,
+                count = com.stitchsocial.club.foundation.DisplayFollowerCounts.forUser(profileUserID, totalFollowers),
                 isSelected = selectedTab == StitchersTab.FOLLOWERS,
                 onClick = { selectedTab = StitchersTab.FOLLOWERS },
                 modifier = Modifier.weight(1f)

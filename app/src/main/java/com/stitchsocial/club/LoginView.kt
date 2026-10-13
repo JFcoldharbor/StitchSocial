@@ -182,7 +182,16 @@ fun LoginView(
     // Someone who arrived from a referral link shouldn't have to find the code
     // and type it back in — it was already in the URL they tapped. Never
     // overwrite something they typed themselves.
-    LaunchedEffect(Unit) {
+    //
+    // Sources, in order (INVITE_CONTRACT): an invite link the app was opened
+    // with (MainActivity → PendingReferral.capture), then the Play Install
+    // Referrer's `invite=CODE` (LandingReferrer → captureIfAbsent). The
+    // referrer read is usually still in flight on a first launch, so wait for
+    // it briefly. Keyed on mode because switchMode() clears the field.
+    LaunchedEffect(mode) {
+        if (referralCode.isEmpty() && PendingReferral.code(context) == null) {
+            com.stitchsocial.club.landing.LandingReferrer.awaitRead()
+        }
         if (referralCode.isEmpty()) {
             PendingReferral.code(context)?.let {
                 referralCode = it
@@ -226,6 +235,59 @@ fun LoginView(
     }
 
     /**
+     * The referral step every NEW account goes through, whichever way it signed
+     * up: completeReferral with the code (→ auto-follow, first-post boost, and
+     * the one-time invite Welcome), or the organic record when there is none.
+     * Returning users never reach this.
+     */
+    suspend fun redeemReferral(userId: String, code: String, fromLink: Boolean) {
+        try {
+            val rs = ReferralService()
+            if (code.isNotEmpty()) {
+                val ref = rs.processReferralSignup(
+                    code, userId, "android",
+                    if (fromLink) "link" else "manual"
+                )
+                // Redeemed — don't prefill it into the next signup
+                // on this device.
+                if (ref.success) {
+                    PendingReferral.clear(context)
+                    // The one-time invite Welcome, shown once
+                    // this account is past the age gate.
+                    com.stitchsocial.club.services.InviteWelcomeStore.save(
+                        context,
+                        com.stitchsocial.club.services.InviteWelcomeStore.Pending(
+                            uid = userId, code = code,
+                            referrerID = ref.referrerID,
+                            followed = ref.followed,
+                            boostExpiresAt = ref.boostExpiresAt,
+                            boostHours = ref.boostHours
+                        )
+                    )
+                }
+                if (BuildConfig.DEBUG) { println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}") }
+            } else {
+                rs.processOrganicSignup(newUserID = userId, platform = "android")
+            }
+        } catch (e: Exception) { println("⚠️ REFERRAL: ${e.message}") }
+    }
+
+    /**
+     * Social sign-in that CREATED an account: same referral step as email
+     * signup. The invite code is whatever the form holds, else the pending one
+     * (link / install referrer) — the Welcome-first flow never shows the field.
+     */
+    suspend fun redeemReferralForSocial(userId: String) {
+        val typed = referralCode.trim().uppercase()
+        if (typed.isEmpty() && PendingReferral.code(context) == null) {
+            com.stitchsocial.club.landing.LandingReferrer.awaitRead()
+        }
+        val code = typed.ifEmpty { PendingReferral.code(context).orEmpty() }
+        val fromLink = if (typed.isNotEmpty()) referralCameFromLink else code.isNotEmpty()
+        redeemReferral(userId, code, fromLink)
+    }
+
+    /**
      * Google. The WEB client id comes out of google-services.json (client_type 3)
      * — Firebase rejects an id token minted for the Android client.
      */
@@ -235,7 +297,9 @@ fun LoginView(
         scope.launch {
             try {
                 val social = SocialAuth.signInWithGoogle(context, GOOGLE_WEB_CLIENT_ID)
-                authService.signInWithCredential(social.credential, social.displayName)
+                val result = authService.signInWithCredential(social.credential, social.displayName)
+                // New accounts only — a returning user's referral is long settled.
+                if (result.isNewUser) redeemReferralForSocial(result.userId)
                 onLoginSuccess()
             } catch (e: SocialAuth.SocialAuthCancelled) {
                 // Deliberate back-out. Saying anything here reads as a bug.
@@ -263,7 +327,9 @@ fun LoginView(
         scope.launch {
             try {
                 val social = SocialAuth.signInWithApple(activity)
-                authService.signInWithCredential(social.credential, social.displayName)
+                val result = authService.signInWithCredential(social.credential, social.displayName)
+                // New accounts only — a returning user's referral is long settled.
+                if (result.isNewUser) redeemReferralForSocial(result.userId)
                 onLoginSuccess()
             } catch (e: Exception) {
                 val msg = e.message ?: ""
@@ -336,22 +402,7 @@ fun LoginView(
                         } catch (e: Exception) { println("⚠️ TERMS: ${e.message}") }
 
                         // Process referral — mirrors iOS processReferralSignup / processOrganicSignup
-                        val code = referralCode.trim().uppercase()
-                        try {
-                            val rs = ReferralService()
-                            if (code.isNotEmpty()) {
-                                val ref = rs.processReferralSignup(
-                                    code, r.userId, "android",
-                                    if (referralCameFromLink) "link" else "manual"
-                                )
-                                // Redeemed — don't prefill it into the next signup
-                                // on this device.
-                                if (ref.success) PendingReferral.clear(context)
-                                if (BuildConfig.DEBUG) { println(if (ref.success) "🎉 REFERRAL: Redeemed by ${ref.referrerID}" else "⚠️ REFERRAL: ${ref.error}") }
-                            } else {
-                                rs.processOrganicSignup(newUserID = r.userId, platform = "android")
-                            }
-                        } catch (e: Exception) { println("⚠️ REFERRAL: ${e.message}") }
+                        redeemReferral(r.userId, referralCode.trim().uppercase(), referralCameFromLink)
 
                         showSuccess = true; delay(2000); showSuccess = false; onLoginSuccess()
                     }

@@ -149,8 +149,18 @@ data class CoreVideoMetadata(
     // an uploaded flyer image.
     val promotion: VideoPromotion? = null,
     val wasPromoted: Boolean = false,
-    val isFlyer: Boolean = false
+    val isFlyer: Boolean = false,
+
+    // Invite first-post boost (INVITE_CONTRACT). Server-only: set when the new
+    // user's first video goes public, for `firstPostBoost.hours`. While in the
+    // future the video is mixed into Discover; organic reach, so no label for
+    // viewers — only the creator sees "Boosted until".
+    val reachBoostUntil: java.util.Date? = null
 ) {
+    /** The invite reach boost is running right now. */
+    val isReachBoostedNow: Boolean
+        get() = reachBoostUntil?.after(java.util.Date()) == true
+
     /** Sponsored right now: the label everywhere, the CTA in full-screen views. */
     val isPromotedNow: Boolean get() = promotion?.isLive() == true
 

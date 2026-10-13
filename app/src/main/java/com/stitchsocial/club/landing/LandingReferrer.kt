@@ -50,6 +50,13 @@ object LandingReferrer {
                 override fun onInstallReferrerSetupFinished(responseCode: Int) {
                     if (responseCode == InstallReferrerClient.InstallReferrerResponse.OK) {
                         val raw = runCatching { client.installReferrer.installReferrer }.getOrNull()
+                        // Invite links (INVITE_CONTRACT): the /invite page's Play
+                        // button carries `referrer=invite=CODE`. Same one read —
+                        // Play only hands the referrer back reliably once.
+                        parseInvite(raw)?.let { code ->
+                            if (BuildConfig.DEBUG) { println("🎟️ INVITE: install referrer → $code") }
+                            com.stitchsocial.club.foundation.PendingReferral.captureIfAbsent(context, code)
+                        }
                         parse(raw)?.let { (slug, spot) ->
                             if (BuildConfig.DEBUG) { println("🍽️ LANDING: install referrer → $slug ($spot)") }
                             p.edit().putString(KEY_SLUG, slug).putString(KEY_SPOT, spot).apply()
@@ -82,6 +89,24 @@ object LandingReferrer {
         val uri = Uri.parse("stitch://r?$decoded")
         val slug = uri.getQueryParameter("landing")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return slug to uri.getQueryParameter("t")?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** `invite=CODE` from the same referrer string; null when absent. */
+    internal fun parseInvite(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val decoded = if (!raw.contains('=')) Uri.decode(raw) else raw
+        val uri = Uri.parse("stitch://r?$decoded")
+        return uri.getQueryParameter("invite")?.trim()?.uppercase()
+            ?.filter { it.isLetterOrDigit() }?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Wait (briefly) for this launch's referrer read. The signup screen calls
+     * it before prefilling the invite code, since on a first launch the read
+     * is usually still in flight when the screen appears.
+     */
+    suspend fun awaitRead(timeoutMs: Long = 3_000) {
+        withTimeoutOrNull(timeoutMs) { readDone.await() }
     }
 
     /** The stored referrer, waiting briefly for the read if it is still in flight. */

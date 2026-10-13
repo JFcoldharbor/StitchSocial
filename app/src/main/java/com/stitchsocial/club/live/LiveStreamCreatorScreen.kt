@@ -154,7 +154,9 @@ fun LiveStreamCreatorScreen(
             goLiveMessage = goLiveMessage,
         )
         if (stream == null) {
-            startError = "Failed to start stream. Check your connection and try again."
+            startError = if (com.stitchsocial.club.services.AccountStanding.isSuspendedNow)
+                com.stitchsocial.club.services.AccountStanding.blockedUploadMessage()
+            else "Failed to start stream. Check your connection and try again."
             isStarting = false
             return@LaunchedEffect
         }

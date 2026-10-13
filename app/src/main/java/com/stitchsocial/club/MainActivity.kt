@@ -313,7 +313,12 @@ class MainActivity : ComponentActivity() {
         // /invite/{code}: whoever tapped this has no account yet, so there's
         // nothing to navigate to — the code is held until they reach signup,
         // which may be several screens and a process death away.
-        segmentAfter("invite")?.let { code ->
+        // Also /invite?code={code} (and stitchsocial://invite?code=) — the
+        // query form the invite page accepts too (INVITE_CONTRACT).
+        val isInviteLink = uri.host == "invite" || segments.firstOrNull() == "invite"
+        val inviteCode = segmentAfter("invite")
+            ?: uri.getQueryParameter("code")?.takeIf { isInviteLink && it.isNotBlank() }
+        inviteCode?.let { code ->
             Log.d("STITCH_MAIN", "🎟️ LINK: captured referral ${code.uppercase()}")
             com.stitchsocial.club.foundation.PendingReferral.capture(this, code)
             return
@@ -532,6 +537,7 @@ fun MainScreen() {
     val galleryPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
+        if (uri != null && !AccountStanding.guardPosting()) return@rememberLauncherForActivityResult
         uri?.let {
             // Show parallel-processing briefly while we prepare the file
             // (content:// → local), then route through VIDEO_REVIEW so the
@@ -614,6 +620,14 @@ fun MainScreen() {
     LaunchedEffect(currentUser?.id) {
         com.stitchsocial.club.services.AnalyticsService.setUser(currentUser?.id)
     }
+    // Enforcement state (suspension / ban) from the user's own doc, live, so
+    // the banner and every create gate follow the server without a restart.
+    DisposableEffect(currentUser?.id) {
+        val uid = currentUser?.id
+        if (uid != null) AccountStanding.start(uid) else AccountStanding.stop()
+        onDispose { if (uid != null) AccountStanding.stop() }
+    }
+    val accountSuspendedNow by AccountStanding.suspendedNow.collectAsState()
     LaunchedEffect(currentUser?.id) {
         val uid = currentUser?.id ?: run { ageGateState = "checking"; return@LaunchedEffect }
         try {
@@ -1037,7 +1051,7 @@ fun MainScreen() {
                     // Dash carries its own streak tile, so the banner stands
                     // down there — it is what FRIENDS has instead of that tile,
                     // not as well as it.
-                    if (streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
+                    if (!accountSuspendedNow && streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
                         notificationVideo == null && notificationScreen == null && landingScreen == null &&
                         !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
@@ -1046,6 +1060,7 @@ fun MainScreen() {
                             current = streakCurrent,
                             onKeep = {
                                 streakBannerDismissed = true
+                                if (!AccountStanding.guardPosting()) return@StreakBanner
                                 navigationCoordinator.showModal(ModalState.RECORDING)
                             },
                             onDismiss = { streakBannerDismissed = true },
@@ -1060,8 +1075,26 @@ fun MainScreen() {
                     // First-launch fallback: the nearest Landing, on Home (and
                     // Discovery, which is where the app opens). Same layer and
                     // suppression rules as the streak banner.
+                    // Suspension notice — Home and Profile, persistent (no
+                    // dismiss), same layer as the streak banner, which stands
+                    // down while this is up. Tap → the shared sheet.
+                    if (accountSuspendedNow &&
+                        (selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.PROGRESSION) &&
+                        currentModal == ModalState.NONE && !isShowingThreadView && notificationVideo == null &&
+                        notificationScreen == null && landingScreen == null && !isShowingAnnouncement &&
+                        !isShowingCollectionPlayer && !isShowingCommunity
+                    ) {
+                        AccountSuspensionBanner(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .statusBarsPadding()
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .zIndex(62f)
+                        )
+                    }
+
                     landingBanner?.let { nearest ->
-                        if ((selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.DISCOVERY) &&
+                        if (!accountSuspendedNow && (selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.DISCOVERY) &&
                             currentModal == ModalState.NONE && !isShowingThreadView && notificationVideo == null &&
                             notificationScreen == null && landingScreen == null && !isShowingAnnouncement &&
                             !isShowingCollectionPlayer && !isShowingCommunity
@@ -1287,6 +1320,7 @@ fun MainScreen() {
                             // makes the finished edit come back here instead of
                             // becoming a global thread.
                             onRecordClip = { communityID, postID ->
+                                if (!AccountStanding.guardPosting()) return@CommunityDetailV2View
                                 com.stitchsocial.club.community.CommunityClipRouter
                                     .request(communityID, postID)
                                 navigationCoordinator.showModal(
@@ -1339,7 +1373,7 @@ fun MainScreen() {
                             NotificationDestination.AdOpportunities ->
                                 AdOpportunitiesView(user = user, onDismiss = close)
                             NotificationDestination.Wallet ->
-                                WalletView(userID = user.id, userTier = user.tier, onDismiss = close)
+                                WalletView(userID = user.id, userTier = user.tier, user = user, onDismiss = close)
                             else -> {}
                         }
                     }
@@ -1380,10 +1414,27 @@ fun MainScreen() {
                     }
                 }
 
+                // Invite Welcome (INVITE_CONTRACT §2): once, after a signup
+                // whose referral landed. Below the recorder it can open.
+                currentUser?.id?.let { uid ->
+                    Box(modifier = Modifier.fillMaxSize().zIndex(450f)) {
+                        com.stitchsocial.club.views.InviteWelcomeHost(
+                            currentUserID = uid,
+                            navigationCoordinator = navigationCoordinator,
+                            isModalShowing = currentModal != ModalState.NONE
+                        )
+                    }
+                }
+
                 // ModalOverlay — recording, video review, thread composer, etc.
                 Box(modifier = Modifier.fillMaxSize().zIndex(500f)) {
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
                 }
+
+                // The one suspension sheet: banner taps, blocked create entry
+                // points and refused uploads all land here (own window, so it
+                // draws above every layer).
+                AccountSuspensionSheetHost()
 
                 // The video a tapped notification is about. Above the recorder's
                 // layer (its Stitch button dismisses this first) and below
@@ -1592,6 +1643,14 @@ private fun ModalOverlay(
                         VideoReviewView(
                             initialState = reviewInitialState,
                             onContinueToThread = { editedState ->
+                                // State flipped while editing: stop before any
+                                // processing or upload; the sheet explains.
+                                if (!AccountStanding.guardPosting()) {
+                                    com.stitchsocial.club.community.CommunityClipRouter.cancel()
+                                    com.stitchsocial.club.landing.LandingPostRouter.cancel()
+                                    navigationCoordinator.dismissModal()
+                                    return@VideoReviewView
+                                }
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: Video editing complete, starting processing") }
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: hasEdits=${editedState.hasEdits}, hasTrimEdits=${editedState.hasTrimEdits}") }
                                 if (BuildConfig.DEBUG) { println("✅ MAINACT: processedVideoUri=${editedState.processedVideoUri}") }

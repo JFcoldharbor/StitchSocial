@@ -439,7 +439,7 @@ fun CommunityDetailV2View(
                             isCreator = isCreator,
                             isCreatorLive = isCreatorLiveRealtime,
                             onJoinLive = { scope.launch { openLiveStream() } },
-                            onGoLive = { showingGoLive = true },
+                            onGoLive = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingGoLive = true },
                             onShowLeaderboard = { showingLeaderboard = true },
                             onShowSupporters = { showingSupporters = true },
                             onShowBadges = { showingBadges = true },

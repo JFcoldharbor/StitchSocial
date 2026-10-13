@@ -79,7 +79,7 @@ fun ShowListView(
             ) {
                 TextButton(onClick = onDismiss) { Text("Done", color = Color.Cyan, fontSize = 15.sp) }
                 Text("My Shows", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                IconButton(onClick = { showingNewShow = true }) {
+                IconButton(onClick = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingNewShow = true }) {
                     Icon(Icons.Default.AddCircle, "New Show", tint = Color(0xFFFF2D55))
                 }
             }
@@ -89,7 +89,7 @@ fun ShowListView(
                 isLoading && shows.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Color(0xFFFF2D55))
                 }
-                shows.isEmpty() -> ShowEmptyState { showingNewShow = true }
+                shows.isEmpty() -> ShowEmptyState { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingNewShow = true }
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
@@ -124,10 +124,13 @@ fun ShowListView(
                     // Opens the episode in the composer: a draft gets finished,
                     // a live one gets parts added. Drafts had no way back in.
                     onOpenEpisode = { ep ->
+                        // The composer exists to upload/publish: blocked while suspended.
+                        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@ShowHubView
                         composerEpisode = ep
                         composerFor = Triple(show.id, ep.seasonId ?: "", ep.episodeNumber ?: 1)
                     },
                     onNewEpisode = { seasonId, epNumber ->
+                        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@ShowHubView
                         composerEpisode = null
                         composerFor = Triple(show.id, seasonId, epNumber)
                     },

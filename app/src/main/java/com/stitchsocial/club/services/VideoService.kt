@@ -26,6 +26,7 @@ import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.threadOrdered
 import com.stitchsocial.club.foundation.isPubliclyVisible
+import com.stitchsocial.club.foundation.isVisibleInThreadTo
 import com.stitchsocial.club.foundation.ContentType
 import com.stitchsocial.club.foundation.Temperature
 import com.stitchsocial.club.BuildConfig
@@ -51,6 +52,9 @@ class VideoServiceImpl {
     private val storage = FirebaseStorage.getInstance()
 
     // ===== ENGAGEMENT SYSTEM METHODS =====
+
+    private fun currentViewerID(): String? =
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
 
     suspend fun getVideoById(videoID: String): CoreVideoMetadata? {
         return try {
@@ -298,9 +302,13 @@ class VideoServiceImpl {
                 .get()
                 .await()
 
-            val replies = convertFirebaseToVideoMetadata(snapshot.documents)
-                .filter { !it.isDeleted && it.isPubliclyVisible }
-                .sortedBy { it.createdAt }
+            val viewerID = currentViewerID()
+            val fetched = convertFirebaseToVideoMetadata(snapshot.documents)
+            ThreadRefreshBus.reconcile(fetched)
+            val replies = ThreadRefreshBus.mergeOwnReplies(
+                fetched.filter { !it.isDeleted && it.isVisibleInThreadTo(viewerID) },
+                replyToID = videoID, viewerID = viewerID
+            ).sortedBy { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: Found ${replies.size} timestamped replies") }
             replies
@@ -353,8 +361,14 @@ class VideoServiceImpl {
             // Spine-first ordering: the thread head is in this query (its threadID is
             // its own id), so derive the creator for the legacy-continuation fallback.
             val threadCreatorID = allVideos.firstOrNull { it.conversationDepth == 0 }?.creatorID ?: ""
-            val children = allVideos.filter { it.conversationDepth > 0 && !it.isDeleted && it.isPubliclyVisible }
-                .threadOrdered(threadCreatorID)
+            // The viewer's own still-pending reply is shown to them (and only
+            // them) — see ThreadRefreshBus.
+            val viewerID = currentViewerID()
+            ThreadRefreshBus.reconcile(allVideos)
+            val children = ThreadRefreshBus.mergeOwnReplies(
+                allVideos.filter { it.conversationDepth > 0 && !it.isDeleted && it.isVisibleInThreadTo(viewerID) },
+                threadID = threadID, viewerID = viewerID
+            ).threadOrdered(threadCreatorID)
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children (depth > 0, not deleted) for thread $threadID") }
             children
@@ -381,8 +395,12 @@ class VideoServiceImpl {
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: ðŸ“Š ReplyTo query returned ${snapshot.documents.size} documents") }
 
             val allVideos = convertFirebaseToVideoMetadata(snapshot.documents)
-            val children = allVideos.filter { !it.isDeleted && it.isPubliclyVisible }
-                .sortedBy { it.createdAt }
+            val viewerID = currentViewerID()
+            ThreadRefreshBus.reconcile(allVideos)
+            val children = ThreadRefreshBus.mergeOwnReplies(
+                allVideos.filter { !it.isDeleted && it.isVisibleInThreadTo(viewerID) },
+                replyToID = parentVideoID, viewerID = viewerID
+            ).sortedBy { it.createdAt }
 
             if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âœ… Found ${children.size} children by replyToVideoID") }
             children
@@ -916,7 +934,8 @@ class VideoServiceImpl {
                     // Promoted posts: the Sponsored label + CTA while a run is attached.
                     promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
                     wasPromoted = data["wasPromoted"] as? Boolean ?: false,
-                    isFlyer = data["isFlyer"] as? Boolean ?: false
+                    isFlyer = data["isFlyer"] as? Boolean ?: false,
+                    reachBoostUntil = (data["reachBoostUntil"] as? Timestamp)?.toDate()
                 )
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) { println("VIDEO SERVICE: âŒ Failed to convert document ${doc.id}: ${e.message}") }

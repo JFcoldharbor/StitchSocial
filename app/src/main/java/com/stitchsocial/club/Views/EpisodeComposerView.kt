@@ -175,6 +175,12 @@ fun EpisodeComposerView(
                 error = error,
                 onBack = { step = if (sourceUri == null) ComposerStep.VIDEO else ComposerStep.CUTS },
                 onPublish = { publish ->
+                    // Publishing or saving a draft both write the show: blocked
+                    // while suspended, before any cut or upload.
+                    if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+                        error = com.stitchsocial.club.services.AccountStanding.blockedUploadMessage()
+                        return@DetailsStep
+                    }
                     val free = isFree || show?.isFree == true
                     val uri = sourceUri
                     // Nothing new to upload: release (or keep as a draft) the
@@ -201,7 +207,7 @@ fun EpisodeComposerView(
                                     ), com.google.firebase.firestore.SetOptions.merge())
                                     .await()
                             }.onSuccess { onPublished(existing.id) }
-                             .onFailure { error = it.message ?: "Couldn't save" }
+                             .onFailure { error = com.stitchsocial.club.services.AccountStanding.suspensionMessageFor(it) ?: it.message ?: "Couldn't save" }
                         }
                         return@DetailsStep
                     }
@@ -242,7 +248,7 @@ fun EpisodeComposerView(
                         ) { phase = it }
 
                         result.onSuccess { onPublished(it) }
-                            .onFailure { error = it.message ?: "Publish failed" }
+                            .onFailure { error = com.stitchsocial.club.services.AccountStanding.suspensionMessageFor(it) ?: it.message ?: "Publish failed" }
                     }
                 }
             )

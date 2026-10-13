@@ -241,7 +241,7 @@ fun CommunityDetailView(
                         DiscussionCard(
                             posts = posts,
                             modifier = Modifier.weight(1f),
-                            onStartPost = { showingComposer = true }
+                            onStartPost = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingComposer = true }
                         )
                         UpperFlowCard(
                             topMembers = topMembers,
@@ -347,7 +347,7 @@ fun CommunityDetailView(
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (isCreator) {
                     FloatingActionButton(
-                        onClick = { showingGoLive = true },
+                        onClick = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingGoLive = true },
                         containerColor = accentOrange,
                         shape = CircleShape,
                         modifier = Modifier.size(48.dp)
@@ -356,7 +356,7 @@ fun CommunityDetailView(
                     }
                 }
                 FloatingActionButton(
-                    onClick = { showingComposer = true },
+                    onClick = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingComposer = true },
                     containerColor = accentCyan,
                     shape = CircleShape,
                     modifier = Modifier.size(56.dp)

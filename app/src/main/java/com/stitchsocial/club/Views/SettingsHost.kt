@@ -202,7 +202,7 @@ fun SettingsHost(
 
                     SettingsPage.PRIVACY -> PrivacySettingsView(userID = currentUser.id, onDismiss = close)
                     SettingsPage.WALLET -> WalletView(
-                        userID = currentUser.id, userTier = currentUser.tier, onDismiss = close
+                        userID = currentUser.id, userTier = currentUser.tier, user = currentUser, onDismiss = close
                     )
                     SettingsPage.SUBSCRIPTIONS -> MySubscriptionsView(userID = currentUser.id, onDismiss = close)
                     SettingsPage.SUBSCRIBERS -> MySubscribersView(creatorID = currentUser.id, onDismiss = close)

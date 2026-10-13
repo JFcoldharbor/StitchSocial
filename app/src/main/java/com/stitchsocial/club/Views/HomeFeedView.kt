@@ -136,7 +136,10 @@ fun HomeFeedView(
     var baseThreads by remember { mutableStateOf<List<ThreadData>>(emptyList()) }
     val loadedChildren = remember { mutableStateMapOf<String, List<CoreVideoMetadata>>() }
 
-    val threads by remember(baseThreads, loadedChildren.size) {
+    // Bumped when a thread's replies are re-read in place, which can leave
+    // loadedChildren.size unchanged.
+    var childrenVersion by remember { mutableIntStateOf(0) }
+    val threads by remember(baseThreads, loadedChildren.size, childrenVersion) {
         derivedStateOf {
             // Session de-duplication (PROMOTED_POSTS_CONTRACT): a post already
             // shown in Discovery's ad position isn't shown again organically.
@@ -156,6 +159,33 @@ fun HomeFeedView(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var followingCount by remember { mutableStateOf(0) }
+
+    // ── One-shot thread refresh (no listeners) ─────────────────────
+    // Re-reads ONE thread: its replies (past the children cache) and the
+    // head's counts. Run when the viewer's own reply to it publishes and,
+    // for the thread on screen, when the app returns to the foreground.
+    var currentThreadID by remember { mutableStateOf<String?>(null) }
+    suspend fun refreshHomeThread(threadID: String) {
+        val thread = baseThreads.firstOrNull { it.id == threadID } ?: return
+        feedService.invalidateChildren(threadID)
+        val children = try {
+            feedService.loadThreadChildren(threadID, thread.parentVideo.creatorID)
+        } catch (_: Exception) { null }
+        if (children != null) {
+            loadedChildren[threadID] = children
+            childrenVersion++
+        }
+        val fresh = try { videoService.getVideoById(threadID) } catch (_: Exception) { null }
+        if (fresh != null && !fresh.isDeleted) {
+            baseThreads = baseThreads.map { if (it.id == threadID) it.copy(parentVideo = fresh) else it }
+        }
+    }
+    OnOwnReplyPublished(matches = { e -> baseThreads.any { it.id == e.threadID } }) { e ->
+        refreshHomeThread(e.threadID)
+    }
+    OnAppForeground {
+        currentThreadID?.let { id -> scope.launch { refreshHomeThread(id) } }
+    }
     var isLoadingMore by remember { mutableStateOf(false) }
     var showingCreatorProfileID by remember { mutableStateOf<String?>(null) }
 
@@ -267,6 +297,7 @@ fun HomeFeedView(
 
                     if (item is FeedItem.VideoThread) {
                         val thread = item.thread
+                        currentThreadID = thread.id
                         // Index into baseThreads, which the position save and
                         // preload use; `threads` may skip ad-shown posts.
                         val threadIndex = baseThreads.indexOfFirst { it.id == thread.id }
@@ -460,13 +491,15 @@ private fun ThreadVideoCard(
     // Media fit band: below the surface tabs, above the tab bar.
     val fitBand = MediaFitBand(top = topInset, bottom = TabBarMetrics.clearance)
 
-    val allVideos = remember(thread.childVideos.size) {
+    // Keyed on the lists themselves: a one-shot re-read can change a reply
+    // or the head's counts without changing how many there are.
+    val allVideos = remember(thread.parentVideo, thread.childVideos) {
         listOf(thread.parentVideo) + thread.childVideos
     }
     val videoCount = allVideos.size
 
     var currentIndex by remember { mutableStateOf(0) }
-    val currentVideo = allVideos[currentIndex]
+    val currentVideo = allVideos.getOrElse(currentIndex) { allVideos.last() }
     val isOnParent = currentIndex == 0
 
     val offsetX = remember { Animatable(0f) }

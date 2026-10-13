@@ -311,6 +311,9 @@ fun CustomDippedTabBar(
                     // and we don't want to kick off a parallel new recording.
                     if (isPosting) return@clickable
 
+                    // Suspended: the shared sheet, and nothing paused or opened.
+                    if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@clickable
+
                     if (BuildConfig.DEBUG) { println("🎥 CREATE BUTTON: Pausing all videos for recording") }
                     VideoManager.startRecording()
 

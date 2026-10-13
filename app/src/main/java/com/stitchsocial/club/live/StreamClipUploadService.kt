@@ -57,6 +57,7 @@ object StreamClipUploadService {
         commentID: String,
         onProgress: (Float) -> Unit = {},
     ): UploadResult = withContext(Dispatchers.IO) {
+        com.stitchsocial.club.services.AccountStanding.requirePosting()
         val durationMs = readDurationMillis(context, localUri)
         val durationSec = (durationMs / 1000).toInt().coerceAtLeast(1)
 

@@ -160,7 +160,8 @@ fun CommunityPostDetailView(
             stitchProgress = null
         }.onFailure { err ->
             stitchProgress = null
-            errorText = err.localizedMessage ?: "Couldn't post that stitch"
+            errorText = com.stitchsocial.club.services.AccountStanding.suspensionMessageFor(err)
+                ?: err.localizedMessage ?: "Couldn't post that stitch"
         }
     }
 

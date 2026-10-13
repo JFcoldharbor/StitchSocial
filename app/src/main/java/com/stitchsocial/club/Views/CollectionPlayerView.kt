@@ -294,11 +294,25 @@ fun CollectionPlayerView(
     LaunchedEffect(currentIndex, segmentCount) {
         adBreaks.prefetch(context, currentIndex, segmentCount)
     }
-    LaunchedEffect(currentIndex) {
+    // Keyed on the segment id too: moving to another episode (or the parts
+    // arriving from CollectionService's 10-min cache) can land on the same
+    // index, and those cached counts are exactly the stale ones.
+    LaunchedEffect(currentIndex, currentSegment?.id) {
         // Pull fresh hype/cool/view/reply for the active segment so the overlay
         // doesn't sit on whatever was cached at collection load (iOS parity).
-        viewModel.refreshSegmentCounts(currentIndex)
+        if (currentSegment != null) viewModel.refreshSegmentCounts(currentIndex)
     }
+
+    // One-shot re-read, no listener: the viewer's own reply to a part of this
+    // episode published, or the app came back to the foreground. The overlay
+    // and the thread sheet re-read their own data on the same triggers.
+    val liveSegments by rememberUpdatedState(segments)
+    OnOwnReplyPublished(matches = { event -> liveSegments.any { event.touches(it.id, it.threadID) } }) { event ->
+        liveSegments.forEachIndexed { idx, seg ->
+            if (event.touches(seg.id, seg.threadID)) viewModel.refreshSegmentCounts(idx)
+        }
+    }
+    OnAppForeground { viewModel.refreshSegmentCounts(viewModel.currentIndex.value) }
 
     // ExoPlayer listener — auto-advance on segment end.
     //

@@ -465,7 +465,11 @@ class HomeFeedService(
                 // Promoted posts: the Sponsored label + CTA while a run is attached.
                 promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
                 wasPromoted = data["wasPromoted"] as? Boolean ?: false,
-                isFlyer = data["isFlyer"] as? Boolean ?: false
+                isFlyer = data["isFlyer"] as? Boolean ?: false,
+                // Lets the author's own pending reply carry its "Under review" label.
+                publicVisibility = data["publicVisibility"] as? String,
+                // Invite first-post boost: the creator's "Boosted until" line.
+                reachBoostUntil = (data["reachBoostUntil"] as? Timestamp)?.toDate()
             )
 
             return ThreadData(id = threadID, parentVideo = parentVideo, childVideos = emptyList())
@@ -490,10 +494,15 @@ class HomeFeedService(
                 .await()
 
             val blockedIDs = BlockService.shared.blockedUserIds.value
-            val children = snapshot.documents.mapNotNull { doc ->
-                // Skip moderation-hidden replies on public surfaces.
+            val viewerID = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            val fetched = snapshot.documents.mapNotNull { doc ->
                 val publicVisibility = doc.getString("publicVisibility") ?: "public"
-                if (publicVisibility != "public") return@mapNotNull null
+                ThreadRefreshBus.reconcile(doc.id, publicVisibility, doc.getBoolean("isDeleted") == true)
+                // Skip moderation-hidden replies on public surfaces — except
+                // the viewer's OWN reply while it's pending, which only they see.
+                val isOwnPending = publicVisibility == "pending" && !viewerID.isNullOrEmpty() &&
+                    doc.getString(FirebaseSchema.VideoDocument.CREATOR_ID) == viewerID
+                if (publicVisibility != "public" && !isOwnPending) return@mapNotNull null
 
                 // Skip blocked users' replies (App Store Guideline 1.2 / Play UGC).
                 val creatorID = doc.getString(FirebaseSchema.VideoDocument.CREATOR_ID) ?: ""
@@ -501,7 +510,9 @@ class HomeFeedService(
 
                 val thread = createThreadFromDocument(doc)
                 thread?.parentVideo // Reuse the same parser, extract video
-            }.threadOrdered(threadCreatorID ?: "") // spine (continuations) first, then ranked replies
+            }
+            val children = ThreadRefreshBus.mergeOwnReplies(fetched, threadID = threadID, viewerID = viewerID)
+                .threadOrdered(threadCreatorID ?: "") // spine (continuations) first, then ranked replies
 
             // Cache for preloading
             childrenCache[threadID] = children
@@ -517,6 +528,11 @@ class HomeFeedService(
 
     fun getCachedChildren(threadID: String): List<CoreVideoMetadata>? {
         return childrenCache[threadID]
+    }
+
+    /** Drop one thread's cached replies so the next read goes to Firestore. */
+    fun invalidateChildren(threadID: String) {
+        childrenCache.remove(threadID)
     }
 
     suspend fun preloadChildrenAround(currentIndex: Int, threads: List<ThreadData>) {

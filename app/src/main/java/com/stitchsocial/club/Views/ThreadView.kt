@@ -96,6 +96,7 @@ import com.stitchsocial.club.views.OverlayContext
 import com.stitchsocial.club.views.OverlayAction
 import com.stitchsocial.club.views.VideoPlayerComposable
 import com.stitchsocial.club.views.VideoNavigationPeeks
+import com.stitchsocial.club.views.rememberThreadRefreshTick
 import com.stitchsocial.club.viewmodels.EngagementViewModel
 import com.stitchsocial.club.viewmodels.FloatingIconManager
 import com.stitchsocial.club.coordination.EngagementCoordinator
@@ -315,19 +316,23 @@ fun ThreadView(
         }
     }
 
-    // Load thread data - matches iOS loadThreadData() branching
-    LaunchedEffect(threadID) {
+    // Load thread data - matches iOS loadThreadData() branching.
+    // [showSpinner] = false for the one-shot re-reads (own reply published,
+    // app back in the foreground): the cards stay put and just pick up the
+    // new data, and a failed re-read keeps what's already on screen.
+    suspend fun loadThread(showSpinner: Boolean) {
         try {
-            isLoading = true
-            errorMessage = null
+            if (showSpinner) {
+                isLoading = true
+                errorMessage = null
+            }
 
             // First, fetch the target video to check if it's a reply
             val targetVideo = videoService.getVideoById(threadID)
 
             if (targetVideo == null) {
-                errorMessage = "Thread not found"
-                isLoading = false
-                return@LaunchedEffect
+                if (showSpinner) errorMessage = "Thread not found"
+                return
             }
 
             val isReply = targetVideo.replyToVideoID != null || targetVideo.conversationDepth > 0
@@ -337,31 +342,65 @@ fun ThreadView(
                 val stepchildren = videoService.getTimestampedReplies(threadID)
                 parentVideo = targetVideo
                 childVideos = stepchildren
-                isLoading = false
             } else {
                 // Target is a root thread — load full thread data
                 val (parent, children) = videoService.getThreadData(threadID)
 
                 if (parent == null) {
-                    errorMessage = "Thread not found"
-                    isLoading = false
-                    return@LaunchedEffect
+                    if (showSpinner) errorMessage = "Thread not found"
+                    return
                 }
 
                 parentVideo = parent
                 childVideos = children.filter { it.conversationDepth == 1 }
-                isLoading = false
             }
+            errorMessage = null
         } catch (e: Exception) {
-            errorMessage = "Failed to load thread: ${e.message}"
-            isLoading = false
+            if (showSpinner) errorMessage = "Failed to load thread: ${e.message}"
+        } finally {
+            if (showSpinner) isLoading = false
+        }
+    }
+
+    // Opening the thread is itself a fresh one-shot read (no cache in front).
+    LaunchedEffect(threadID) {
+        loadThread(showSpinner = true)
+    }
+
+    // One-shot re-read, no listener: the viewer's own reply to this thread
+    // finished publishing, or the app came back to the foreground.
+    val threadRefreshTick = rememberThreadRefreshTick { event ->
+        event.touches(threadID, parentVideo?.id, parentVideo?.threadID) ||
+            (currentLaneAnchorID != null && event.parentID == currentLaneAnchorID)
+    }
+    LaunchedEffect(threadRefreshTick) {
+        if (threadRefreshTick == 0) return@LaunchedEffect
+        loadThread(showSpinner = false)
+
+        // An open lane carousel re-reads its messages too.
+        val anchor = carouselVideos.firstOrNull()
+        if (showCarousel && anchor != null && anchor.id == currentLaneAnchorID) {
+            try {
+                val messages = if (laneParticipantIDs.size == 2) {
+                    val (p1, p2) = laneParticipantIDs.toList()
+                    laneService.loadLaneMessages(childVideo = anchor, participant1 = p1, participant2 = p2)
+                } else {
+                    videoService.getTimestampedReplies(anchor.id)
+                }
+                carouselVideos = listOf(anchor) + messages
+            } catch (_: Exception) { /* keep the current lane */ }
         }
     }
 
     // Handle targetVideoID navigation AFTER data is loaded
     // Separate LaunchedEffect to run when allVisibleVideos is populated
+    // Once only: a later re-read (new reply, foreground) must not yank the
+    // viewer back to the target from wherever they've browsed to.
+    var handledTargetID by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(allVisibleVideos, targetVideoID) {
         if (targetVideoID == null || allVisibleVideos.isEmpty()) return@LaunchedEffect
+        if (handledTargetID == targetVideoID) return@LaunchedEffect
+        handledTargetID = targetVideoID
 
         // Case 1: Target is the parent
         if (targetVideoID == parentVideo?.id) {
@@ -434,38 +473,9 @@ fun ThreadView(
                                     message = errorMessage!!,
                                     onRetry = {
                                         // Reset and reload
-                                        errorMessage = null
-                                        isLoading = true
                                         parentVideo = null
                                         childVideos = emptyList()
-                                        scope.launch {
-                                            try {
-                                                val retryVideo = videoService.getVideoById(threadID)
-                                                if (retryVideo == null) {
-                                                    errorMessage = "Thread not found"
-                                                    isLoading = false
-                                                    return@launch
-                                                }
-                                                val isReply = retryVideo.replyToVideoID != null || retryVideo.conversationDepth > 0
-                                                if (isReply) {
-                                                    val stepchildren = videoService.getTimestampedReplies(threadID)
-                                                    parentVideo = retryVideo
-                                                    childVideos = stepchildren
-                                                } else {
-                                                    val (parent, children) = videoService.getThreadData(threadID)
-                                                    if (parent == null) {
-                                                        errorMessage = "Thread not found"
-                                                    } else {
-                                                        parentVideo = parent
-                                                        childVideos = children.filter { it.conversationDepth == 1 }
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                errorMessage = "Failed to load thread: ${e.message}"
-                                            } finally {
-                                                isLoading = false
-                                            }
-                                        }
+                                        scope.launch { loadThread(showSpinner = true) }
                                     },
                                     modifier = Modifier.align(Alignment.Center)
                                 )
@@ -485,6 +495,9 @@ fun ThreadView(
                                         video = video,
                                         isActive = isActive,
                                         isOrigin = video.id == parentVideo?.id,
+                                        // Author's own reply still in moderation.
+                                        isUnderReview = video.publicVisibility == "pending" &&
+                                            currentUserID != null && video.creatorID == currentUserID,
                                         brandCyan = brandCyan,
                                         brandPurple = brandPurple,
                                         onTap = { openVideo(video) },
@@ -1022,6 +1035,7 @@ private fun ThreadCard(
     video: CoreVideoMetadata,
     isActive: Boolean,
     isOrigin: Boolean,
+    isUnderReview: Boolean = false,
     brandCyan: Color,
     brandPurple: Color,
     onTap: () -> Unit,
@@ -1141,6 +1155,10 @@ private fun ThreadCard(
                 depth = video.conversationDepth,
                 modifier = Modifier
             )
+
+            if (isUnderReview) {
+                com.stitchsocial.club.views.UnderReviewChip(fontSize = 11.sp)
+            }
 
             // Challenge entry badge (any video with a status)
             video.challengeStatus?.let { status ->

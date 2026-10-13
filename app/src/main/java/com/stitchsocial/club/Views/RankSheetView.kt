@@ -18,6 +18,8 @@
  *   ad rev share → iOS AdRevenueShare.creatorShare (10/12/15/20/35/45/50/55/65/65)
  *                  NOTE: Android services/AdService.kt AdRevenueShare is stale
  *                  vs iOS — this sheet displays the iOS-canonical numbers.
+ *   subs & tips  → foundation SubscriptionRevenueShare.creatorShare
+ *                  (30/35/40/50/65/75/82/88/95/95), from Dec 1, 2026
  *   brand deals  → ambassador and above (AdOpportunities)
  *   crown        → UserTier.crownBadge
  * Crest art: res/drawable-nodpi/rank_1..rank_10.png (copied from iOS RankBadges).
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Work
@@ -60,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stitchsocial.club.R
 import com.stitchsocial.club.foundation.BasicUserInfo
+import com.stitchsocial.club.foundation.SubscriptionRevenueShare
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.ui.theme.Spacing
 import com.stitchsocial.club.ui.theme.color
@@ -111,6 +115,10 @@ fun RankSheetView(
                 NextTierSection(displayTier, nextTier, currentLevel, user.clout, followerCount)
                 LadderSection(currentLevel)
             }
+            Text(
+                "Subs & tips shares apply to earnings from ${SubscriptionRevenueShare.EFFECTIVE_LABEL}.",
+                fontSize = 11.sp, color = Color.Gray
+            )
         }
     }
 }
@@ -184,6 +192,18 @@ private fun perks(tier: UserTier): List<Perk> {
             if (share >= 65) "The top split — beats YouTube's 55%" else "Your cut of ad revenue on your content"
         )
     )
+
+    val subTip = subTipPercent(tier)
+    if (subTip > 0) {
+        list.add(
+            Perk(
+                Icons.Default.Paid,
+                "$subTip% of subs & tips",
+                if (subTip >= 95) "The top split on subscriptions and tips"
+                else "Your cut of subscriptions and tips — it rises with rank"
+            )
+        )
+    }
 
     if (isAmbassadorOrHigher(tier)) {
         list.add(Perk(Icons.Default.Work, "Brand deal marketplace", "Auto-matched sponsorship opportunities"))
@@ -311,7 +331,8 @@ private fun NextTierSection(
         )
 
         Text(
-            "Unlocks ${durationLabel(next)} clips · ${adRevPercent(next)}% ad revenue" +
+            "Unlocks ${durationLabel(next)} clips · ${adRevPercent(next)}% ad revenue · " +
+                "${subTipPercent(next)}% subs & tips" +
                 if (unlocksBrandDeals) " · brand deals" else "",
             fontSize = 12.sp, color = Color.Gray
         )
@@ -437,6 +458,7 @@ private fun LadderRow(tier: UserTier, level: Int, currentLevel: Int) {
                 color = if (isLocked) Color.Gray else Color.White.copy(alpha = 0.85f)
             )
             Text("${adRevPercent(tier)}% ad rev", fontSize = 11.sp, color = Color.Gray)
+            Text("${subTipPercent(tier)}% subs & tips", fontSize = 11.sp, color = Color.Gray)
         }
 
         if (isCurrent) {
@@ -518,6 +540,10 @@ private fun adRevPercent(tier: UserTier): Int = when (tier) {
 }
 
 /** Brand-deal marketplace gate — ambassador and above (iOS isAmbassadorOrHigher). */
+/** Subs & tips share per tier, as a whole percent — the table payouts use. */
+private fun subTipPercent(tier: UserTier): Int =
+    Math.round(SubscriptionRevenueShare.creatorShare(tier) * 100).toInt()
+
 private fun isAmbassadorOrHigher(tier: UserTier): Boolean {
     val idx = ladder.indexOf(if (tier == UserTier.CO_FOUNDER) UserTier.FOUNDER else tier)
     return idx >= ladder.indexOf(UserTier.AMBASSADOR)

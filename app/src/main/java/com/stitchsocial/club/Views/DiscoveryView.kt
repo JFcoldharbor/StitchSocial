@@ -195,6 +195,13 @@ class DiscoveryViewModel(
     private var sponsoredPool: List<CoreVideoMetadata> = emptyList()
     private val maxSponsoredCards = 4
 
+    // Invite first-post boosts (INVITE_CONTRACT §4): up to 5 videos whose
+    // `reachBoostUntil` is still ahead, mixed in at most 1 per 8 cards near
+    // the start. Organic reach — rendered as ordinary posts, no label.
+    private var boostedPool: List<CoreVideoMetadata> = emptyList()
+    private val maxBoosted = 5
+    private val boostedSpacing = 8
+
     private val _currentCategory = MutableStateFlow(DiscoveryCategory.FOR_YOU)
     val currentCategory: StateFlow<DiscoveryCategory> = _currentCategory.asStateFlow()
 
@@ -344,6 +351,7 @@ class DiscoveryViewModel(
 
                 loadFeaturedCollectionsForSwipeFeed()
                 loadSponsoredSlots()
+                loadBoostedVideos()
 
                 val prefetchUrls = combined.take(3).map { it.videoURL }.filter { it.isNotEmpty() }
                 if (prefetchUrls.isNotEmpty()) {
@@ -374,6 +382,78 @@ class DiscoveryViewModel(
                 _isLoading.value = false
             }
         }
+    }
+
+    /**
+     * The organic feed's own document filters (deleted, segment, unpublished
+     * event moment, audience, moderation, teen lane, playable URL) — minus the
+     * depth rule, since a boosted first post may be a reply.
+     */
+    private fun passesBoostedFilters(data: Map<String, Any>): Boolean {
+        if (data["isDeleted"] as? Boolean == true) return false
+        if (data["isCollectionSegment"] as? Boolean == true) return false
+        val evID = data["eventId"] as? String
+        if (!evID.isNullOrBlank() &&
+            data["isEventRecap"] as? Boolean != true &&
+            data["isEventPromo"] as? Boolean != true &&
+            data["eventMomentPublished"] as? Boolean != true
+        ) return false
+        val vis = data["visibility"] as? String ?: "public"
+        if (vis == "private" || vis == "followersOnly") return false
+        if (!isVideoPubliclyVisible(data)) return false
+        if (!com.stitchsocial.club.services.TeenSafety.allows(data)) return false
+        val url = data["videoURL"] as? String ?: return false
+        return url.isNotBlank()
+    }
+
+    /**
+     * Single-field query (`reachBoostUntil > now` ordered by it) — no composite
+     * index. A failure just means no boosted cards this session.
+     */
+    private fun loadBoostedVideos() {
+        viewModelScope.launch {
+            try {
+                val now = Timestamp(java.util.Date())
+                val snap = db.collection("videos")
+                    .whereGreaterThan("reachBoostUntil", now)
+                    .orderBy("reachBoostUntil")
+                    .limit(maxBoosted.toLong())
+                    .get().await()
+                boostedPool = snap.documents.mapNotNull { doc ->
+                    val data = doc.data ?: return@mapNotNull null
+                    if (!passesBoostedFilters(data)) return@mapNotNull null
+                    decodeVideo(data, doc.id)
+                }
+                if (boostedPool.isNotEmpty() && _currentCategory.value == DiscoveryCategory.FOR_YOU) {
+                    applyFilterAndShuffle()
+                }
+                if (BuildConfig.DEBUG) { println("🚀 DISCOVERY: ${boostedPool.size} invite-boosted video(s) live") }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) { println("⚠️ DISCOVERY: Boosted load failed — ${e.message}") }
+            }
+        }
+    }
+
+    /**
+     * Place boosted videos into an organic feed: the k-th one somewhere in
+     * cards [8k+2, 8k+7], so at most one per 8 and all of them near the start.
+     * Never index 0/1. The same video is removed from the organic part first,
+     * so it can't appear twice.
+     */
+    private fun injectBoosted(feed: List<CoreVideoMetadata>): List<CoreVideoMetadata> {
+        if (boostedPool.isEmpty()) return feed
+        val blocked = DiscoveryEngagementTracker.blockedCreatorIDs() +
+            com.stitchsocial.club.services.BlockService.shared.blockedUserIds.value
+        val boosted = boostedPool.filter { it.isReachBoostedNow && it.creatorID !in blocked }
+        if (boosted.isEmpty()) return feed
+        val boostedIDs = boosted.map { it.id }.toSet()
+        val organic = feed.filterNot { it.id in boostedIDs }.toMutableList()
+        if (organic.isEmpty()) return organic
+        boosted.forEachIndexed { k, video ->
+            val index = boostedSpacing * k + (2..boostedSpacing - 1).random()
+            organic.add(minOf(index, organic.size), video)
+        }
+        return organic
     }
 
     private fun decodeVideo(data: Map<String, Any>, id: String): CoreVideoMetadata {
@@ -440,7 +520,8 @@ class DiscoveryViewModel(
             // Promoted posts: the Sponsored label + CTA while a run is attached.
             promotion = com.stitchsocial.club.foundation.VideoPromotion.from(data["promotion"]),
             wasPromoted = data["wasPromoted"] as? Boolean ?: false,
-            isFlyer = data["isFlyer"] as? Boolean ?: false
+            isFlyer = data["isFlyer"] as? Boolean ?: false,
+            reachBoostUntil = (data["reachBoostUntil"] as? Timestamp)?.toDate()
         )
     }
 
@@ -554,7 +635,10 @@ class DiscoveryViewModel(
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
         }
 
-        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(filtered))
+        val shuffled = diversifyShuffle(filtered)
+        _filteredVideos.value = injectSponsoredCards(
+            if (category == DiscoveryCategory.FOR_YOU) injectBoosted(shuffled) else shuffled
+        )
 
         if (BuildConfig.DEBUG) { println("Ã°Å¸â€œÅ  DISCOVERY: Applied ${category.displayName} filter - ${_filteredVideos.value.size} videos") }
     }
@@ -784,6 +868,22 @@ class DiscoveryViewModel(
         return organic
     }
 
+    /**
+     * One-shot re-read of a single thread head (e.g. after the viewer's own
+     * reply to it published), swapped in place — no reshuffle, no reload of
+     * the feed. Fixes the cached replyCount the cards were built from.
+     */
+    fun refreshThreadRoot(threadID: String) {
+        if (_videos.value.none { it.id == threadID } &&
+            _filteredVideos.value.none { it.id == threadID }) return
+        viewModelScope.launch {
+            val fresh = runCatching { videoService.getVideoById(threadID) }.getOrNull() ?: return@launch
+            if (fresh.isDeleted || !fresh.isPubliclyVisible) return@launch
+            _videos.value = _videos.value.map { if (it.id == threadID) fresh else it }
+            _filteredVideos.value = _filteredVideos.value.map { if (it.id == threadID) fresh else it }
+        }
+    }
+
     private fun applyFilterAndShuffle() {
         // Filter blocked creators — mirrors Swift applyBlockedCreatorFilter.
         // The set was read into a local and then never used: "don't show me this
@@ -792,7 +892,10 @@ class DiscoveryViewModel(
         val blocked = DiscoveryEngagementTracker.blockedCreatorIDs()
         val visible = if (blocked.isEmpty()) _videos.value
             else _videos.value.filter { it.creatorID !in blocked }
-        _filteredVideos.value = injectSponsoredCards(diversifyShuffle(visible))
+        val shuffled = diversifyShuffle(visible)
+        _filteredVideos.value = injectSponsoredCards(
+            if (_currentCategory.value == DiscoveryCategory.FOR_YOU) injectBoosted(shuffled) else shuffled
+        )
     }
 
     /**
@@ -881,6 +984,11 @@ fun DiscoveryView(
     val viewModel: DiscoveryViewModel = viewModel {
         DiscoveryViewModel(videoService, searchService)
     }
+
+    // The viewer's own reply published: re-read that thread's head once so
+    // its cached card (replyCount) is current. The open deck card re-reads
+    // its reply strip itself (DiscoveryFullscreenCard).
+    OnOwnReplyPublished(matches = { true }) { event -> viewModel.refreshThreadRoot(event.threadID) }
 
     // Engagement setup
     val engagementCoordinator = remember { EngagementCoordinator(videoService, userService) }
@@ -2607,7 +2715,11 @@ private fun DiscoveryFullscreenCard(
     // Thread reply strip: parent + children, loaded once the card is composed so
     // the horizontal reply swipe is ready by the time the page is current.
     var allVideos by remember(root.id) { mutableStateOf(listOf(root)) }
-    LaunchedEffect(root.id) {
+    // Re-read once (no listener) when the viewer's own reply to this thread
+    // publishes or the app returns to the foreground — not just on first
+    // composition, which is what left a new reply invisible until relaunch.
+    val threadRefreshTick = rememberThreadRefreshTick { it.touches(root.id, root.threadID) }
+    LaunchedEffect(root.id, threadRefreshTick) {
         val threadID = root.threadID
         // A promoted reply stays itself in the ad position — its thread's
         // strip would open on the thread head, not the post that was paid for.

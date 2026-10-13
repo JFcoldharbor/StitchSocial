@@ -353,6 +353,7 @@ fun ProfileView(
     var showingSettings by remember { mutableStateOf(false) }
     var showingSavedVideos by remember { mutableStateOf(false) }
     var showingAdOpportunities by remember { mutableStateOf(false) }
+    var showingInviteQR by remember { mutableStateOf(false) }
     var showingBadgePage by remember { mutableStateOf(false) }
 
     // Video player state
@@ -639,6 +640,7 @@ fun ProfileView(
                             onSettings = { showingSettings = true },
                             onEdit = { showingEditProfile = true },
                             onAdOpportunities = { showingAdOpportunities = true },
+                            onInviteQR = { showingInviteQR = true },
                             onReportUser = { showingReportUser = true },
                             onBlockUser = { showingBlockConfirm = true }
                         )
@@ -1260,6 +1262,13 @@ fun ProfileView(
         }
     }
 
+    // ===== INVITE QR ===== (overflow menu → "Show my invite QR")
+    if (showingInviteQR && isOwnProfile) {
+        Box(modifier = Modifier.fillMaxSize().zIndex(60f)) {
+            InviteQRScreen(userID = currentAuthUserID ?: userID, onDismiss = { showingInviteQR = false })
+        }
+    }
+
     // ===== AD OPPORTUNITIES ===== (green $ button; Influencer+ personal)
     if (showingAdOpportunities && currentUser != null) {
         Box(modifier = Modifier.fillMaxSize().zIndex(60f)) {
@@ -1690,7 +1699,7 @@ private fun StatsRow(user: BasicUserInfo, videoCount: Int, onFollowersClick: () 
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         StatCard(videoCount, "Videos", Modifier.weight(1f)) { }
-        StatCard(user.followerCount ?: 0, "Stitchers", Modifier.weight(1f), onFollowersClick)
+        StatCard(com.stitchsocial.club.foundation.DisplayFollowerCounts.forUser(user.id, user.followerCount ?: 0), "Stitchers", Modifier.weight(1f), onFollowersClick)
         StatCard(user.clout ?: 0, "Clout", Modifier.weight(1f)) { }
     }
 }
@@ -1724,6 +1733,7 @@ private fun ProfileTopBar(
     onSettings: () -> Unit,
     onEdit: () -> Unit,
     onAdOpportunities: () -> Unit = {},
+    onInviteQR: () -> Unit = {},
     onReportUser: () -> Unit = {},
     onBlockUser: () -> Unit = {},
 ) {
@@ -1791,6 +1801,12 @@ private fun ProfileTopBar(
                         text = { Text("Saved videos") },
                         leadingIcon = { Icon(Icons.Default.BookmarkBorder, null) },
                         onClick = { menuOpen = false; onSaved() }
+                    )
+                    // INVITE_CONTRACT §3: the invite link as a QR, for in person.
+                    DropdownMenuItem(
+                        text = { Text("Show my invite QR") },
+                        leadingIcon = { Icon(Icons.Default.QrCode2, null) },
+                        onClick = { menuOpen = false; onInviteQR() }
                     )
                     DropdownMenuItem(
                         text = { Text("Settings") },

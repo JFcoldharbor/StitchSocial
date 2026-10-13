@@ -240,6 +240,13 @@ class LiveStreamService private constructor() {
         // Guarded here rather than only at the call site because every caller
         // would otherwise need to remember, and the cost of getting it wrong is
         // a broadcast nobody can watch.
+        // Suspended accounts don't go live (the rules refuse the stream doc
+        // too; this stops it before Agora or any write).
+        if (com.stitchsocial.club.services.AccountStanding.isSuspendedNow) {
+            Log.w(TAG, "startStream refused — account suspended")
+            return null
+        }
+
         _activeStream.value?.let { existing ->
             if (existing.creatorID == creatorID && _isStreaming.value) {
                 Log.w(TAG, "startStream called while already live — returning existing ${existing.id}")

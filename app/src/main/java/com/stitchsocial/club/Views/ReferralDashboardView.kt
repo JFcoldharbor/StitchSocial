@@ -62,6 +62,7 @@ fun ReferralDashboardView(
     var codeCopied by remember { mutableStateOf(false) }
     var showingError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var showingInviteQR by remember { mutableStateOf(false) }
 
     // Load once on appear — mirrors iOS .task { guard !hasFetchedOnce }
     LaunchedEffect(Unit) {
@@ -174,9 +175,16 @@ fun ReferralDashboardView(
                     // Share CTA
                     ShareCTAButton(isGenerating = isGeneratingLink, onShare = { handleShare() })
 
+                    // In person: the QR of the same invite link (INVITE_CONTRACT §3).
+                    ShowInviteQRButton(onClick = { showingInviteQR = true })
+
                     Spacer(modifier = Modifier.height(40.dp))
                 }
             }
+        }
+
+        if (showingInviteQR) {
+            InviteQRScreen(userID = userID, onDismiss = { showingInviteQR = false })
         }
     }
 
@@ -571,6 +579,24 @@ private fun ShareCTAButton(isGenerating: Boolean, onShare: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ShowInviteQRButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, AppTheme.colors.textPrimary.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.QrCode2, contentDescription = null, tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text("Show my invite QR", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
     }
 }
 

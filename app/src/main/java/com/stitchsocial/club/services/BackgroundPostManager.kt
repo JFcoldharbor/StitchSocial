@@ -106,6 +106,19 @@ object BackgroundPostManager {
                 _isPosting.value = false
                 _progress.value = 0.0
             } catch (e: Throwable) {
+                val suspendedMessage = AccountStanding.suspensionMessageFor(e)
+                if (suspendedMessage != null) {
+                    // Refused because the account is suspended: say so, and
+                    // don't leave the create button stuck on a failed "!"
+                    // that invites a retry which can only fail again.
+                    _status.value = PostStatus.IDLE
+                    _progress.value = 0.0
+                    _lastError.value = suspendedMessage
+                    _isPosting.value = false
+                    AccountStanding.presentSheet(suspendedMessage)
+                    onFailed(e)
+                    return@launch
+                }
                 _status.value = PostStatus.FAILED
                 _lastError.value = e.message
                 _isPosting.value = false

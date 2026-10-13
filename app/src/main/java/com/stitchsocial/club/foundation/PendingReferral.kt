@@ -48,6 +48,16 @@ object PendingReferral {
             .apply()
     }
 
+    /**
+     * Stash a code only when no link already did. The Play Install Referrer
+     * ranks below an invite link the app was opened with (INVITE_CONTRACT),
+     * and its read lands asynchronously — it must not clobber the link.
+     */
+    fun captureIfAbsent(context: Context, code: String) {
+        if (code(context) != null) return
+        capture(context, code)
+    }
+
     /** The stored code, if there is one and it hasn't gone stale. */
     fun code(context: Context): String? {
         val p = prefs(context)

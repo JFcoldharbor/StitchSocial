@@ -354,7 +354,7 @@ fun LiveStreamViewerScreen(
                         }
                     },
                     onOpenGifts = { showingHypePicker = true },
-                    onOpenReply = { showingRecordSheet = true },
+                    onOpenReply = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingRecordSheet = true },
                     onClose = onDismiss,
                     modifier = Modifier.padding(end = 12.dp, bottom = 8.dp),
                 )

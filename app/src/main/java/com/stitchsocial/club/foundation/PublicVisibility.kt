@@ -22,3 +22,15 @@ fun videoPublicVisibility(data: Map<String, Any>): String =
 /** True only when moderation has passed — use to filter public surfaces. */
 val CoreVideoMetadata.isPubliclyVisible: Boolean
     get() = (publicVisibility ?: "public") == "public"
+
+/** Moderation hasn't finished with this video yet. */
+val CoreVideoMetadata.isPendingReview: Boolean
+    get() = publicVisibility == "pending"
+
+/**
+ * Thread/reply surfaces: everyone sees public replies; the AUTHOR also sees
+ * their own reply while it's still pending, so posting one doesn't look like
+ * it vanished. Hidden-from-public stays hidden here, even from the author.
+ */
+fun CoreVideoMetadata.isVisibleInThreadTo(viewerID: String?): Boolean =
+    isPubliclyVisible || (isPendingReview && !viewerID.isNullOrEmpty() && creatorID == viewerID)

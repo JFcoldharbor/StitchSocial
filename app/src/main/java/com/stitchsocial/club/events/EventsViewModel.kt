@@ -174,6 +174,10 @@ class EventsViewModel : ViewModel() {
     /** Host a new event (+ line up prizes), then refresh. Returns false on failure. */
     suspend fun createEvent(draft: EventCreateDraft, giveaways: List<GiveawayDraft> = emptyList()): Boolean {
         if (currentUserID.isBlank()) { _errorMessage.value = "Sign in to host an event"; return false }
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+            _errorMessage.value = com.stitchsocial.club.services.AccountStanding.blockedUploadMessage()
+            return false
+        }
         return try {
             val event = service.createEvent(draft, currentUserID, currentUsername)
             for (g in giveaways) {
@@ -181,7 +185,10 @@ class EventsViewModel : ViewModel() {
             }
             loadAndAwait()
             true
-        } catch (e: Exception) { _errorMessage.value = e.message; false }
+        } catch (e: Exception) {
+            _errorMessage.value = com.stitchsocial.club.services.AccountStanding.suspensionMessageFor(e) ?: e.message
+            false
+        }
     }
 
     suspend fun updateEvent(draft: EventCreateDraft, eventID: String): Boolean {
@@ -378,6 +385,8 @@ class EventsViewModel : ViewModel() {
      * the recorder (iOS parity with EventHubView.handlePlus(.hostRecord)).
      */
     suspend fun armGoLive(event: StitchEventEntity): Boolean {
+        // Suspended: the shared sheet, and no slot written or bridge armed.
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return false
         if (!isHost(event)) return false
         val slotID = ensureRecordableSlot(event) ?: return false
         EventMomentBridge.armHostMoment(event.id, slotID, currentUserID, currentUsername)
@@ -386,6 +395,8 @@ class EventsViewModel : ViewModel() {
 
     /** Arm the promo bridge — the next recording becomes the pre-event teaser. */
     fun armPromo(event: StitchEventEntity): Boolean {
+        // Suspended: the shared sheet, and no slot written or bridge armed.
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return false
         if (!isHost(event)) return false
         EventMomentBridge.armPromo(event.id, currentUserID, currentUsername)
         return true
@@ -393,6 +404,8 @@ class EventsViewModel : ViewModel() {
 
     /** Arm the recap bridge — the next recording becomes the event's public recap. */
     fun armRecap(event: StitchEventEntity): Boolean {
+        // Suspended: the shared sheet, and no slot written or bridge armed.
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return false
         if (!isHost(event)) return false
         EventMomentBridge.armRecap(event.id, currentUserID, currentUsername)
         return true

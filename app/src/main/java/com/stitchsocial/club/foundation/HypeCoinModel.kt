@@ -253,30 +253,55 @@ enum class PayoutMethod(val rawValue: String) {
 // ─────────────────────────────────────────────
 
 /**
- * Mirrors iOS SubscriptionRevenueShare exactly.
- * Pure computation — zero Firestore reads.
+ * The creator's share of subscriptions and tips, by rank. Mirrors
+ * SUB_TIP_SHARE_BY_TIER in StitchSocialFunctions/index.js (what payouts
+ * actually use, for earnings from the 2026-12 period on) and iOS
+ * SubscriptionRevenueShare. Pure computation — zero Firestore reads.
  */
 object SubscriptionRevenueShare {
 
-    /** Tier-based creator share — matches iOS exactly */
+    /** Earnings from this date on are paid by rank; shown under the table. */
+    const val EFFECTIVE_LABEL = "Dec 1, 2026"
+
+    /** Tier-based creator share — Influencer is 50/50, Ambassador 65%, top 95%. */
     fun creatorShare(tier: UserTier): Double = when (tier) {
         UserTier.ROOKIE      -> 0.30
         UserTier.RISING      -> 0.35
         UserTier.VETERAN     -> 0.40
         UserTier.INFLUENCER  -> 0.50
         UserTier.AMBASSADOR  -> 0.65
-        UserTier.ELITE       -> 0.80
-        UserTier.PARTNER     -> 0.85
-        UserTier.LEGENDARY   -> 0.90
-        UserTier.TOP_CREATOR -> 0.90
+        UserTier.ELITE       -> 0.75
+        UserTier.PARTNER     -> 0.82
+        UserTier.LEGENDARY   -> 0.88
+        UserTier.TOP_CREATOR -> 0.95
         UserTier.FOUNDER,
-        UserTier.CO_FOUNDER  -> 1.00
+        UserTier.CO_FOUNDER  -> 0.95
         UserTier.BUSINESS    -> 0.00
     }
 
     /**
-     * Override-aware share — checks custom deal first, then tier table.
-     * Mirrors iOS SubscriptionRevenueShare.effectiveCreatorShare exactly.
+     * The private deal (customSubShare) in force now, or null. Reaching the
+     * referral goal or being marked permanent keeps it; otherwise it lapses
+     * at customSubShareExpiresAt. Same rules as activeSubShareDeal on the server.
+     */
+    fun activeDeal(
+        customSubShare: Double?,
+        customSubShareExpiresAt: Date? = null,
+        customSubSharePermanent: Boolean = false,
+        referralCount: Int = 0,
+        referralGoal: Int? = null
+    ): Double? {
+        val custom = customSubShare ?: return null
+        if (custom <= 0.0 || custom > 1.0) return null
+        if (referralGoal != null && referralCount >= referralGoal) return custom
+        if (customSubSharePermanent) return custom
+        if (customSubShareExpiresAt != null && Date() >= customSubShareExpiresAt) return null
+        return custom
+    }
+
+    /**
+     * What pays: the higher of the rank share and an active deal. A deal never
+     * lowers a creator's share. Business accounts don't earn.
      */
     fun effectiveCreatorShare(
         tier: UserTier,
@@ -284,25 +309,44 @@ object SubscriptionRevenueShare {
         customSubShareExpiresAt: Date? = null,
         customSubSharePermanent: Boolean = false,
         referralCount: Int = 0,
-        referralGoal: Int? = null
+        referralGoal: Int? = null,
+        isBusiness: Boolean = false
     ): Double {
-        val custom = customSubShare ?: return creatorShare(tier)
-
-        // Referral goal hit → permanent override
-        if (referralGoal != null && referralCount >= referralGoal) return custom
-
-        // Admin-marked permanent
-        if (customSubSharePermanent) return custom
-
-        // Expired → fall back to tier
-        if (customSubShareExpiresAt != null && Date() >= customSubShareExpiresAt) {
-            return creatorShare(tier)
-        }
-
-        return custom
+        if (isBusiness || tier == UserTier.BUSINESS) return 0.0
+        val rank = creatorShare(tier)
+        val deal = activeDeal(customSubShare, customSubShareExpiresAt, customSubSharePermanent, referralCount, referralGoal)
+        return if (deal != null && deal > rank) deal else rank
     }
 
+    /** True when the creator's private deal, not their rank, sets what they're paid. */
+    fun dealPays(
+        tier: UserTier,
+        customSubShare: Double? = null,
+        customSubShareExpiresAt: Date? = null,
+        customSubSharePermanent: Boolean = false,
+        referralCount: Int = 0,
+        referralGoal: Int? = null,
+        isBusiness: Boolean = false
+    ): Boolean {
+        if (isBusiness || tier == UserTier.BUSINESS) return false
+        val deal = activeDeal(customSubShare, customSubShareExpiresAt, customSubSharePermanent, referralCount, referralGoal)
+        return deal != null && deal > creatorShare(tier)
+    }
+
+    fun effectiveCreatorShare(user: BasicUserInfo): Double = effectiveCreatorShare(
+        user.tier, user.customSubShare, user.customSubShareExpiresAt, user.customSubSharePermanent,
+        user.referralCount, user.referralGoal, user.isBusiness
+    )
+
+    fun dealPays(user: BasicUserInfo): Boolean = dealPays(
+        user.tier, user.customSubShare, user.customSubShareExpiresAt, user.customSubSharePermanent,
+        user.referralCount, user.referralGoal, user.isBusiness
+    )
+
     fun platformShare(tier: UserTier): Double = 1.0 - creatorShare(tier)
+
+    /** "65%" — for labels. */
+    fun percentLabel(share: Double): String = "${Math.round(share * 100)}%"
 
 }
 

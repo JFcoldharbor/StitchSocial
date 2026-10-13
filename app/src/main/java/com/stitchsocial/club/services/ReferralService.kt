@@ -40,8 +40,17 @@ data class ReferralLink(val code: String, val universalLink: String, val deepLin
 data class ReferralProcessingResult(
     val success: Boolean, val referralID: String?, val cloutAwarded: Int,
     val hypeBonus: Double, val rewardsMaxed: Boolean, val message: String,
-    val error: String?, val referrerID: String?
-)
+    val error: String?, val referrerID: String?,
+    // INVITE_CONTRACT additions to completeReferral's response. Absent on an
+    // older server deploy, so both default to "nothing happened".
+    /** The server made the new user follow the referrer (or they already did). */
+    val followed: Boolean = false,
+    /** First-post boost granted at signup; null when none was. */
+    val boostExpiresAt: Date? = null,
+    val boostHours: Int? = null
+) {
+    val hasBoost: Boolean get() = boostExpiresAt != null || boostHours != null
+}
 
 class ReferralService {
 
@@ -121,7 +130,10 @@ class ReferralService {
                 rewardsMaxed = data["rewardsMaxed"] as? Boolean ?: false,
                 message = "Referral applied",
                 error = null,
-                referrerID = data["referrerID"] as? String
+                referrerID = data["referrerID"] as? String,
+                followed = data["followed"] as? Boolean ?: false,
+                boostExpiresAt = (data["boost"] as? Map<*, *>)?.let { InviteService.parseDate(it["expiresAt"]) },
+                boostHours = (data["boost"] as? Map<*, *>)?.let { (it["hours"] as? Number)?.toInt() }
             )
         } catch (e: Exception) {
             fail(e.message ?: "Referral failed", "SERVER_ERROR")

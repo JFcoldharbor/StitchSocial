@@ -108,6 +108,16 @@ class NavigationCoordinator(
     private val videoCoordinator: VideoCoordinator
 ) {
 
+    companion object {
+        /** Modals that start making a post. Refused while suspended. */
+        private val POSTING_MODALS = setOf(
+            ModalState.RECORDING,
+            ModalState.REACTION,
+            ModalState.PARALLEL_PROCESSING,
+            ModalState.THREAD_COMPOSER
+        )
+    }
+
     // MARK: - Coroutine Scope
 
     private val coordinatorScope = CoroutineScope(
@@ -198,6 +208,7 @@ class NavigationCoordinator(
      * Request gallery picker launch
      */
     fun requestGalleryPicker() {
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return
         if (BuildConfig.DEBUG) { println("📱 NAV COORDINATOR: Requesting gallery picker") }
         onGalleryPickerRequested?.invoke()
     }
@@ -208,6 +219,18 @@ class NavigationCoordinator(
      * Show modal with optional data
      */
     fun showModal(modal: ModalState, data: Map<String, Any> = emptyMap()) {
+        // Backstop for every create path that lands here (tab +, stitch,
+        // reply, spin-off, community, landing, events, drafts → recorder):
+        // a suspended account never reaches the recorder or processing. The
+        // entry points check first too; this catches any that don't.
+        if (modal in POSTING_MODALS &&
+            !com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+            com.stitchsocial.club.community.CommunityClipRouter.cancel()
+            com.stitchsocial.club.landing.LandingPostRouter.cancel()
+            com.stitchsocial.club.events.EventMomentBridge.disarm()
+            if (_currentModal.value != ModalState.NONE) dismissModal()
+            return
+        }
         _currentModal.value = modal
         _modalData.value = data
         updateNavigationState()
@@ -271,6 +294,10 @@ class NavigationCoordinator(
 
         if (videoPath == null || metadata == null || cameraRecordingContext == null) {
             if (BuildConfig.DEBUG) { println("❌ NAVIGATION: Missing required video data") }
+            return
+        }
+        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+            dismissModal()
             return
         }
 

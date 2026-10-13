@@ -354,6 +354,8 @@ fun ContextualVideoOverlay(
     var realThreadCreatorName by remember { mutableStateOf<String?>(null) }
     var realThreadCreatorProfileImageURL by remember { mutableStateOf<String?>(null) }
     var videoEngagement by remember { mutableStateOf<ContextualVideoEngagement?>(null) }
+    /** publicVisibility as last re-read from Firestore (null = not read yet). */
+    var freshVisibility by remember(video.id) { mutableStateOf<String?>(null) }
     var videoDescription by remember { mutableStateOf<String?>(null) }
     var showViewersSheet by remember { mutableStateOf(false) }
 
@@ -442,8 +444,13 @@ fun ContextualVideoOverlay(
     }
 
     // Computed properties
-    val displayReplyCount: Int = actualReplyCount ?: video.replyCount
     val isUserVideo: Boolean = currentUserID != null && video.creatorID == currentUserID
+    // The re-read count wins over the snapshot the host passed in, which can
+    // be minutes (or a cached feed) old — that's what kept a new reply's
+    // count from ever showing until relaunch.
+    val displayReplyCount: Int = actualReplyCount ?: videoEngagement?.replyCount ?: video.replyCount
+    // Author-only "Under review" label while moderation runs on their post.
+    val isUnderReview: Boolean = isUserVideo && (freshVisibility ?: video.publicVisibility) == "pending"
     val shouldShowMinimalDisplay: Boolean = overlayContext == OverlayContext.DISCOVERY
 
     // Display names with cache fallback
@@ -601,6 +608,7 @@ fun ContextualVideoOverlay(
         try {
             val fresh = videoService.getVideoById(video.id)
             if (fresh != null) {
+                freshVisibility = fresh.publicVisibility ?: "public"
                 videoEngagement = ContextualVideoEngagement(
                     videoID = fresh.id,
                     creatorID = fresh.creatorID,
@@ -642,6 +650,29 @@ fun ContextualVideoOverlay(
                 }
             } catch (_: Exception) { /* swallow — visual feedback already happened */ }
         }
+    }
+
+    // One-shot re-read (no listener) when the viewer's own reply lands on
+    // this video's thread, or the app returns to the foreground: fresh
+    // counts, and the thread panel reloads next time it's showing.
+    val threadRefreshTick = rememberThreadRefreshTick { it.touches(video.id, video.threadID) }
+    LaunchedEffect(video.id, threadRefreshTick) {
+        if (threadRefreshTick == 0) return@LaunchedEffect
+        try {
+            val fresh = videoService.getVideoById(video.id) ?: return@LaunchedEffect
+            freshVisibility = fresh.publicVisibility ?: "public"
+            videoEngagement = ContextualVideoEngagement(
+                videoID = fresh.id,
+                creatorID = fresh.creatorID,
+                hypeCount = fresh.hypeCount,
+                coolCount = fresh.coolCount,
+                shareCount = fresh.shareCount,
+                replyCount = fresh.replyCount,
+                viewCount = fresh.viewCount,
+                lastEngagementAt = Date(),
+                coinTotal = fresh.coinTotal
+            )
+        } catch (_: Exception) { /* keep what's on screen */ }
     }
 
     // Promoted now: the Sponsored chip by the name, and the CTA above the
@@ -734,6 +765,7 @@ fun ContextualVideoOverlay(
                 showShareInTop = showShareInTop,
                 onExit = onExit,
                 isSponsored = isSponsored,
+                isUnderReview = isUnderReview,
                 sponsoredCta = effectiveCta,
                 onBottomBlockHeight = onBottomBlockHeight
             )
@@ -777,12 +809,15 @@ fun ContextualVideoOverlay(
 
     // Lazy-load thread children when the panel opens for the first time.
     // 1 Firestore round-trip per overlay instance; cached after.
-    LaunchedEffect(showThreadPanel) {
-        if (showThreadPanel && threadPanelChildren.isEmpty()) {
+    // Re-read once per refresh trigger (own reply / foreground) as well.
+    var threadPanelLoadedTick by remember(video.id) { mutableStateOf(-1) }
+    LaunchedEffect(showThreadPanel, threadRefreshTick) {
+        if (showThreadPanel && (threadPanelChildren.isEmpty() || threadPanelLoadedTick != threadRefreshTick)) {
             try {
                 val threadID = video.threadID ?: video.id
                 val (_, children) = videoService.getThreadData(threadID)
                 threadPanelChildren = children
+                threadPanelLoadedTick = threadRefreshTick
                 Log.d("THREAD_PANEL", "Loaded ${children.size} children for $threadID")
             } catch (e: Exception) {
                 Log.e("THREAD_PANEL", "Failed to load children: ${e.message}")
@@ -1198,6 +1233,9 @@ private fun CarouselOverlay(
                     ),
                     glowColor = StitchColors.primary,
                     onClick = {
+                        // Stitch / reply / spin-off: suspended accounts get the
+                        // sheet; playback isn't even paused.
+                        if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@Overlay3DActionButton
                         pauseAllVideos(context)
                         onAction?.invoke(OverlayAction.StitchRecording)
                     }
@@ -1252,6 +1290,7 @@ private fun FullContextualOverlay(
     showShareInTop: Boolean = false,
     onExit: (() -> Unit)? = null,
     isSponsored: Boolean = false,
+    isUnderReview: Boolean = false,
     sponsoredCta: SponsoredCta? = null,
     onBottomBlockHeight: ((Dp) -> Unit)? = null
 ) {
@@ -1273,7 +1312,8 @@ private fun FullContextualOverlay(
                 currentUserTier = currentUserTier,
                 showShareInTop = showShareInTop,
                 onExit = onExit,
-                isSponsored = isSponsored
+                isSponsored = isSponsored,
+                isUnderReview = isUnderReview
             )
         }
 
@@ -1346,7 +1386,8 @@ private fun TopSection(
     currentUserTier: UserTier = UserTier.ROOKIE,
     showShareInTop: Boolean = false,
     onExit: (() -> Unit)? = null,
-    isSponsored: Boolean = false
+    isSponsored: Boolean = false,
+    isUnderReview: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -1373,6 +1414,19 @@ private fun TopSection(
                     onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
                 }
             )
+
+            // Only the author ever gets here with a pending video.
+            if (isUnderReview) {
+                UnderReviewChip(fontSize = OverlaySizes.LABEL_TINY.fixedSp())
+            }
+
+            // Invite first-post boost: owner-only, and never a label for
+            // viewers — it's organic reach (INVITE_CONTRACT §4).
+            if (currentUserID != null && currentUserID == video.creatorID && video.isReachBoostedNow) {
+                video.reachBoostUntil?.let { until ->
+                    BoostedUntilChip(until = until, fontSize = OverlaySizes.LABEL_TINY.fixedSp())
+                }
+            }
 
             // Thread creator pill (if different)
             if (threadVideo != null && threadVideo.creatorID != video.creatorID) {
@@ -1650,6 +1704,9 @@ private fun BottomSection(
                         ),
                         glowColor = StitchColors.primary,
                         onClick = {
+                            // Stitch / reply / spin-off: suspended accounts get the
+                            // sheet; playback isn't even paused.
+                            if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@Overlay3DActionButton
                             pauseAllVideos(context)
                             onAction?.invoke(OverlayAction.StitchRecording)
                         }
@@ -2613,4 +2670,36 @@ fun SponsoredTileBadge(modifier: Modifier = Modifier) {
             .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 2.dp)
     )
+}
+
+
+/** "Boosted until 9:40 PM" (or "Oct 14, 9:40 PM" past today), creator only. */
+@Composable
+private fun BoostedUntilChip(until: Date, fontSize: TextUnit) {
+    val context = LocalContext.current
+    val label = remember(until) {
+        val sameDay = android.text.format.DateUtils.isToday(until.time)
+        val flags = android.text.format.DateUtils.FORMAT_SHOW_TIME or
+            (if (sameDay) 0 else android.text.format.DateUtils.FORMAT_SHOW_DATE or
+                android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+        android.text.format.DateUtils.formatDateTime(context, until.time, flags)
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xFF8A7AFF).copy(alpha = 0.75f))
+            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(50))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+        Text(
+            text = "Boosted until $label",
+            fontSize = fontSize,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            maxLines = 1
+        )
+    }
 }

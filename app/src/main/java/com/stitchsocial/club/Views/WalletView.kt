@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stitchsocial.club.foundation.CoinTransaction
 import com.stitchsocial.club.foundation.CoinTransactionType
 import com.stitchsocial.club.foundation.HypeCoinPackage
+import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.SubscriptionRevenueShare
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.BillingState
@@ -61,6 +62,9 @@ import java.util.*
 fun WalletView(
     userID: String,
     userTier: UserTier,
+    // The signed-in user, for their private subs/tips deal. Optional: without
+    // it the rank share is shown.
+    user: BasicUserInfo? = null,
     onDismiss: () -> Unit,
     vm: WalletViewModel = viewModel()
 ) {
@@ -120,6 +124,7 @@ fun WalletView(
                 WalletTab.BALANCE -> BalanceTab(
                     balance = balance,
                     userTier = userTier,
+                    user = user,
                     onBuyTap = { vm.selectTab(WalletTab.BUY) }
                 )
                 WalletTab.BUY -> BuyCoinsTab(
@@ -259,6 +264,7 @@ private fun WalletTabBar(selectedTab: WalletTab, onTabSelected: (WalletTab) -> U
 private fun BalanceTab(
     balance: com.stitchsocial.club.foundation.HypeCoinBalance?,
     userTier: UserTier,
+    user: BasicUserInfo?,
     onBuyTap: () -> Unit
 ) {
     Column(
@@ -287,11 +293,21 @@ private fun BalanceTab(
                     Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
                     StatRow("Your Tier", userTier.displayName, valueColor = Color(0xFF9C27B0))
                     Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
+                    // Subs & tips share: the rank table, and the private deal
+                    // beside it when the deal is what pays.
                     StatRow(
-                        "Cash Out Rate",
-                        "${(SubscriptionRevenueShare.creatorShare(userTier) * 100).toInt()}%",
+                        "Subs & Tips Share",
+                        SubscriptionRevenueShare.percentLabel(SubscriptionRevenueShare.creatorShare(userTier)),
                         valueColor = Color.Green
                     )
+                    if (user != null && SubscriptionRevenueShare.dealPays(user)) {
+                        Divider(color = AppTheme.colors.textSecondary.copy(alpha = 0.2f))
+                        StatRow(
+                            "Your deal",
+                            SubscriptionRevenueShare.percentLabel(SubscriptionRevenueShare.effectiveCreatorShare(user)),
+                            valueColor = Color.Cyan
+                        )
+                    }
                 }
             }
         }

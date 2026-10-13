@@ -112,6 +112,8 @@ class EpisodeFinalizeService(private val context: Context) {
         val temps = mutableListOf<File>()
         try {
             require(input.segments.isNotEmpty()) { "An episode needs at least one segment" }
+            // Suspended: no cut, upload or write starts.
+            AccountStanding.requirePosting()
 
             // Whether the episode doc exists BEFORE this upload. Only then can
             // "deleted while uploading" happen — a brand-new episode has no doc
@@ -310,7 +312,7 @@ class EpisodeFinalizeService(private val context: Context) {
             }
             Result.success(input.episodeID)
         } catch (e: Exception) {
-            onProgress(Phase.Failed(e.message ?: "Publish failed"))
+            onProgress(Phase.Failed(AccountStanding.suspensionMessageFor(e) ?: e.message ?: "Publish failed"))
             if (BuildConfig.DEBUG) { println("❌ FINALIZE: ${e.message}") }
             Result.failure(e)
         } finally {
