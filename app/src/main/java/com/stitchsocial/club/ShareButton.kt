@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.AutoAwesomeMosaic
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +43,8 @@ import com.stitchsocial.club.foundation.ThreadData
 import com.stitchsocial.club.foundation.UserTier
 import com.stitchsocial.club.services.ShareService
 import com.stitchsocial.club.services.ShareableVideo
+import com.stitchsocial.club.services.ShareResult
+import com.stitchsocial.club.services.TeenSafety
 import com.stitchsocial.club.services.VideoServiceImpl
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
@@ -84,6 +87,9 @@ fun ShareButton(
     val isFounder = userTier == UserTier.FOUNDER || userTier == UserTier.CO_FOUNDER
     val isCreator = video.creatorID == FirebaseAuth.getInstance().currentUser?.uid
     val canPromo = (isFounder || isCreator) && (isFounder || video.hypeCount >= 100)
+    // Invite with this video: your own clip only, and never in the teen lane
+    // (same TeenSafety source of truth the tab bar uses to hide Events).
+    val canInviteWithVideo = isCreator && !TeenSafety.viewerIsTeen
 
     // Watermarked file (Save video) or the 30s stats promo.
     fun shareFile(promoMode: Boolean) {
@@ -117,6 +123,32 @@ fun ShareButton(
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Share failed: ${e.message}", e)
                 Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isSharing = false
+            }
+        }
+    }
+
+    // Own video as a file ending on the invite card — plays inline in DMs.
+    fun shareInviteVideo() {
+        isSharing = true
+        scope.launch {
+            try {
+                val shareable = ShareableVideo(
+                    id = video.id,
+                    // Same rule as Save video: a downloadable MP4, never the HLS playlist.
+                    videoURL = video.mp4URL?.takeIf { it.isNotBlank() } ?: video.videoURL,
+                    thumbnailURL = video.thumbnailURL,
+                    title = video.title,
+                    creatorID = video.creatorID,
+                    creatorName = creatorUsername,
+                    threadID = video.threadID,
+                    hypeCount = video.hypeCount
+                )
+                val result = ShareService.shareInviteVideo(context, shareable, creatorUsername)
+                if (result is ShareResult.Error) {
+                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                }
             } finally {
                 isSharing = false
             }
@@ -196,6 +228,18 @@ fun ShareButton(
                     shareFile(promoMode = false)
                 }
             )
+
+            if (canInviteWithVideo) {
+                ShareOptionRow(
+                    icon = Icons.Default.PersonAdd,
+                    title = "Invite with this video",
+                    subtitle = "Plays in DMs · Ends with your invite code",
+                    onClick = {
+                        showOptionsSheet = false
+                        shareInviteVideo()
+                    }
+                )
+            }
 
             ShareOptionRow(
                 icon = Icons.Default.BarChart,

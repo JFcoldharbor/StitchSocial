@@ -95,6 +95,11 @@ fun FullscreenVideoPlayer(
 
     var showControls by remember { mutableStateOf(true) }
 
+    // A tile tapped in the thread rail plays here, in place of the video the
+    // caller passed (iOS onSelectStitch). Reset when the caller moves on.
+    var stitchOverride by remember(video.id) { mutableStateOf<CoreVideoMetadata?>(null) }
+    val shownMeta = stitchOverride ?: convertToMetadata(video)
+
     // CRITICAL: Fullscreen containment Box
     // This Box ensures complete edge-to-edge coverage and blocks all parent content
     // Required to prevent bleed-through from Discovery/Home feed videos
@@ -105,8 +110,9 @@ fun FullscreenVideoPlayer(
             .background(Color.Black)
     ) {
         // ACTUAL VIDEO PLAYER
+        key(shownMeta.id) {
         VideoPlayerComposable(
-            video = convertToMetadata(video),
+            video = shownMeta,
             isActive = true,
             onEngagement = { interactionType ->
                 if (BuildConfig.DEBUG) { println("VIDEO: ${interactionType.name} on ${video.title}") }
@@ -117,10 +123,12 @@ fun FullscreenVideoPlayer(
             modifier = Modifier.fillMaxSize(),
             fitBand = MediaFitBand(bottom = TabBarMetrics.clearance)
         )
+        }
 
         // ContextualVideoOverlay with all required parameters
         ContextualVideoOverlay(
-            video = convertToMetadata(video),
+            video = shownMeta,
+            onSelectStitch = { target -> stitchOverride = target; true },
             overlayContext = overlayContext,
             currentUserID = currentUserID,
             threadVideo = null,
@@ -144,7 +152,7 @@ fun FullscreenVideoPlayer(
                         onDismiss()
                     }
                     is OverlayAction.NavigateToThread -> {
-                        val threadID = video.threadID ?: video.id
+                        val threadID = shownMeta.threadID ?: shownMeta.id
                         // ThreadView lives at the MainActivity level via the
                         // isShowingThreadView boolean (not the ModalState
                         // system), so the only way in is the onShowThreadView
@@ -153,7 +161,7 @@ fun FullscreenVideoPlayer(
                         // recent fix.
                         // Respect the Thread3DInfoPanel's focus target if set.
                         if (onShowThreadView != null) {
-                            onShowThreadView.invoke(threadID, action.targetVideoID ?: video.id)
+                            onShowThreadView.invoke(threadID, action.targetVideoID ?: shownMeta.id)
                         } else {
                             if (BuildConfig.DEBUG) { println("FULLSCREEN: ⚠️ Navigate to thread but no onShowThreadView handler wired — caller forgot to pass it") }
                         }
@@ -282,14 +290,18 @@ fun FullscreenVideoPlayer(
 
     androidx.activity.compose.BackHandler(onBack = onDismiss)
 
+    // A tile tapped in the thread rail plays here in place (iOS onSelectStitch);
+    // every action below acts on what's on screen.
+    var shown by remember(video.id) { mutableStateOf(video) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        key(video.id) {
+        key(shown.id) {
             VideoPlayerComposable(
-                video = video,
+                video = shown,
                 isActive = true,
                 modifier = Modifier.fillMaxSize(),
                 // A cover: no header, and the tab bar is hidden under it.
@@ -299,8 +311,8 @@ fun FullscreenVideoPlayer(
         }
 
         ContextualVideoOverlay(
-            video = video,
-            overlayContext = if (video.creatorID == currentUserID) OverlayContext.PROFILE_OWN else OverlayContext.PROFILE_OTHER,
+            video = shown,
+            overlayContext = if (shown.creatorID == currentUserID) OverlayContext.PROFILE_OWN else OverlayContext.PROFILE_OTHER,
             currentUserID = currentUserID,
             threadVideo = null,
             currentUserTier = currentUserTier,
@@ -308,6 +320,7 @@ fun FullscreenVideoPlayer(
             iconManager = iconManager,
             followManager = followManager,
             navigationCoordinator = navigationCoordinator,
+            onSelectStitch = { target -> shown = target; true },
             onAction = { action ->
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {
@@ -316,19 +329,19 @@ fun FullscreenVideoPlayer(
                     }
                     is OverlayAction.NavigateToThread -> {
                         onDismiss()
-                        onShowThreadView(video.threadID ?: video.id, action.targetVideoID ?: video.id)
+                        onShowThreadView(shown.threadID ?: shown.id, action.targetVideoID ?: shown.id)
                     }
                     is OverlayAction.StitchRecording -> {
-                        val threadID = video.threadID ?: video.id
-                        val ctx = if (video.creatorID == currentUserID) {
-                            RecordingContextFactory.createContinueThread(threadID, video.creatorName, video.title)
+                        val threadID = shown.threadID ?: shown.id
+                        val ctx = if (shown.creatorID == currentUserID) {
+                            RecordingContextFactory.createContinueThread(threadID, shown.creatorName, shown.title)
                         } else {
-                            RecordingContextFactory.createStitchToThread(threadID, video.creatorName, video.title)
+                            RecordingContextFactory.createStitchToThread(threadID, shown.creatorName, shown.title)
                         }
                         onDismiss()
                         navigationCoordinator?.showModal(
                             ModalState.RECORDING,
-                            mapOf("context" to ctx, "parentVideo" to video)
+                            mapOf("context" to ctx, "parentVideo" to shown)
                         )
                     }
                     else -> {

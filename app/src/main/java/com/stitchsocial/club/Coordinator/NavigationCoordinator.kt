@@ -28,7 +28,7 @@ enum class MainAppTab(val title: String, val index: Int) {
     HOME("Home", 0),
     DISCOVERY("Discover", 1),
     PROGRESSION("Profile", 2),
-    NOTIFICATIONS("Notifications", 3)
+    EVENTS("Events", 3)
 }
 
 sealed class NavigationDestination(val route: String) {

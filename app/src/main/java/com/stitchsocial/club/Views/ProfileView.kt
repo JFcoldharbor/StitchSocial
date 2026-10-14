@@ -383,6 +383,8 @@ fun ProfileView(
     var userShows by remember(userID) { mutableStateOf<Map<String, com.stitchsocial.club.foundation.Show>>(emptyMap()) }
     var showCollectionPlayer by remember { mutableStateOf(false) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
+    /** Segment to open the collection player on — set by Resume in a show. */
+    var collectionStartIndex by remember { mutableIntStateOf(0) }
     var showingAllCollections by remember { mutableStateOf(false) }
     /** My Shows — the creator's show management. It existed (ShowListView →
      *  hub, settings, composer) but nothing in the app opened it. */
@@ -704,6 +706,7 @@ fun ProfileView(
                                 val firstEpisode = eps.firstOrNull()
                                 if (firstEpisode != null) {
                                     selectedCollection = firstEpisode
+                                    collectionStartIndex = 0
                                     showCollectionPlayer = true
                                 } else {
                                     selectedShowId = showId
@@ -713,6 +716,7 @@ fun ProfileView(
                             },
                             onCollectionTap = { collection: VideoCollection ->
                                 selectedCollection = collection
+                                collectionStartIndex = 0
                                 showCollectionPlayer = true
                             },
                             onSeeAllTap = { showingAllCollections = true },
@@ -891,6 +895,7 @@ fun ProfileView(
         val coll: VideoCollection = selectedCollection!!
         CollectionPlayerView(
             collection = coll,
+            startingIndex = collectionStartIndex,
             userID = currentAuthUserID ?: userID,
             currentUserTier = currentUser?.tier ?: UserTier.ROOKIE,
             videoService = videoService,
@@ -980,6 +985,14 @@ fun ProfileView(
                 iconManager = iconManager,
                 followManager = followManager,
                 navigationCoordinator = navigationCoordinator,
+                // Thread rail tile: play it here. One of this profile's own
+                // videos keeps the swipe position; anything else plays in place.
+                onSelectStitch = { target ->
+                    val idx = currentVideoList.indexOfFirst { it.id == target.id }
+                    if (idx >= 0) selectedVideoIndex = idx
+                    selectedVideo = target
+                    true
+                },
                 onAction = { action ->
                     if (BuildConfig.DEBUG) { println("PROFILE PLAYER: action received: $action") }
                     when (action) {
@@ -1113,6 +1126,13 @@ fun ProfileView(
             onPlayEpisode = { episode ->
                 showingShowDetail = false
                 selectedCollection = episode
+                collectionStartIndex = 0
+                showCollectionPlayer = true
+            },
+            onResumeEpisode = { episode, index ->
+                showingShowDetail = false
+                selectedCollection = episode
+                collectionStartIndex = index
                 showCollectionPlayer = true
             }
         )
@@ -1194,6 +1214,7 @@ fun ProfileView(
                                     val firstEpisode = eps.firstOrNull()
                                     if (firstEpisode != null) {
                                         selectedCollection = firstEpisode
+                                        collectionStartIndex = 0
                                         showCollectionPlayer = true
                                     } else {
                                         selectedShowId = showId

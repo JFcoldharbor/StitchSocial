@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -119,6 +120,8 @@ fun NotificationViewComplete(
     navigationCoordinator: NavigationCoordinator,
     onShowThreadView: (String, String?) -> Unit = { _, _ -> },
     onNavigateToProfile: (String) -> Unit = { },
+    /** Inbox is a full-screen cover now, not a tab — this is its way out. */
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -203,6 +206,7 @@ fun NotificationViewComplete(
             // Header: title + Filter pill, unread pill + mark-all-read
             item {
                 NotificationHeader(
+                    onClose = onClose,
                     unreadCount = unreadCount,
                     filterActive = selectedFilter != NotificationFilter.ALL,
                     filtersExpanded = filtersExpanded,
@@ -1086,6 +1090,7 @@ private fun NotificationRow(
  */
 @Composable
 private fun NotificationHeader(
+    onClose: (() -> Unit)?,
     unreadCount: Int,
     filterActive: Boolean,
     filtersExpanded: Boolean,
@@ -1102,12 +1107,24 @@ private fun NotificationHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Notifications",
-                color = AppTheme.colors.textPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onClose != null) {
+                    IconButton(onClick = onClose, modifier = Modifier.offset(x = (-12).dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Close",
+                            tint = AppTheme.colors.textPrimary
+                        )
+                    }
+                }
+                Text(
+                    text = "Notifications",
+                    color = AppTheme.colors.textPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = if (onClose != null) Modifier.offset(x = (-12).dp) else Modifier
+                )
+            }
 
             // Compact Filter pill - highlighted when a non-All filter is active
             val pillHighlighted = filterActive || filtersExpanded

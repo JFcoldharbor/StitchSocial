@@ -611,6 +611,15 @@ private fun ThreadVideoCard(
                         }
                         else -> {}
                     }
+                },
+                // A tile in the thread rail: page this strip to it when it's
+                // here; a clip the strip doesn't hold opens in the thread
+                // player, focused on it.
+                onSelectStitch = { target ->
+                    val idx = allVideos.indexOfFirst { it.id == target.id }
+                    if (idx >= 0) currentIndex = idx
+                    else onShowThreadView(target.threadID ?: thread.parentVideo.id, target.id)
+                    true
                 }
             )
         }

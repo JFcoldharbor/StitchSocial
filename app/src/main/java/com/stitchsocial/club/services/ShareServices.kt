@@ -194,6 +194,157 @@ object ShareService {
         }
     }
 
+    // MARK: - Invite With This Video
+
+    /**
+     * "Invite with this video" (iOS parity). Messenger and Instagram DMs only
+     * play an uploaded FILE inline — links never play — so this sends the
+     * creator's own clip, watermarked like Save video, but ending on a 3.5s
+     * invite card (avatar, name, invite code, QR) instead of the end screen.
+     * The text carries the same link and code for anyone who can't scan.
+     *
+     * Only ever offered on the signed-in user's own video, and never to the
+     * teen lane — the callers gate that.
+     */
+    suspend fun shareInviteVideo(
+        context: Context,
+        video: ShareableVideo,
+        creatorUsername: String
+    ): ShareResult = withContext(Dispatchers.IO) {
+        try {
+            withContext(Dispatchers.Main) {
+                _isExporting.value = true
+                _exportProgress.value = "Making your invite video…"
+            }
+
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                ?: throw IllegalStateException("Sign in to invite")
+
+            // Step 1: the invite code (issued now if the user has none yet).
+            val link = ReferralService().generateReferralLink(uid)
+            val inviteURL = InviteService.inviteURL(link.code)
+
+            // Step 2: the card's face — display name + profile photo.
+            val userData = runCatching {
+                com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+                    .collection("users").document(uid).get().await().data
+            }.getOrNull()
+            // The user doc's handle wins for the watermark: the referral screen
+            // only has the video's creatorName to pass.
+            val username = (userData?.get("username") as? String)?.takeIf { it.isNotBlank() } ?: creatorUsername
+            val displayName = (userData?.get("displayName") as? String)?.takeIf { it.isNotBlank() }
+                ?: username.takeIf { it.isNotBlank() }?.let { "@$it" }
+                ?: "Stitch"
+            val avatar = (userData?.get("profileImageURL") as? String)
+                ?.takeIf { it.startsWith("http") }
+                ?.let { downloadBitmap(it) }
+
+            // Step 3: the clip itself (same download + cache as Save video).
+            val localFile = downloadVideo(context, video.videoURL)
+            if (localFile == null || !localFile.exists() || localFile.length() == 0L) {
+                throw IllegalStateException("Couldn't download your video")
+            }
+
+            // Step 4: watermark + invite end card. On failure the raw clip still
+            // goes out — the text below carries the link and code either way.
+            val shareFile = try {
+                withContext(Dispatchers.Main) { _exportProgress.value = "Making your invite video…" }
+                val wmUri = VideoWatermarkService.exportWithWatermark(
+                    context = context,
+                    sourceFile = localFile,
+                    creatorUsername = username,
+                    inviteCard = VideoWatermarkService.InviteCard(
+                        displayName = displayName,
+                        code = link.code,
+                        link = inviteURL,
+                        avatar = avatar
+                    ),
+                    onProgress = { p -> _exportProgress.value = "Making your invite video… ${(p * 100).toInt()}%" }
+                )
+                wmUri.path?.let { File(it) }?.takeIf { it.exists() && it.length() > 0L } ?: run {
+                    Log.w(TAG, "⚠️ Invite export output missing — sharing raw clip")
+                    localFile
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Invite export failed — sharing raw clip: ${e.message}", e)
+                localFile
+            }
+            currentShareFile = shareFile
+
+            // Step 5: share sheet with the file + invite text.
+            withContext(Dispatchers.Main) {
+                _isExporting.value = false
+                _exportProgress.value = ""
+                presentVideoShareSheet(
+                    context = context,
+                    videoFile = shareFile,
+                    shareText = "Join me on Stitch 👇\n$inviteURL\nInvite code: ${link.code}",
+                    chooserTitle = "Invite with this video"
+                )
+            }
+            AnalyticsService.referralShared("invite_video")
+
+            ShareResult.Success
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Invite video error: ${e.message}", e)
+            withContext(Dispatchers.Main) {
+                _isExporting.value = false
+                _exportProgress.value = ""
+            }
+            ShareResult.Error(e.localizedMessage ?: "Couldn't make your invite video")
+        }
+    }
+
+    /**
+     * The referral screen's pick for "Invite with my video": the user's own
+     * most-hyped video among their ~25 newest that's public, not a collection
+     * segment or flyer, and has a downloadable https MP4 (not HLS). Null when
+     * there's none — the caller asks them to post one first.
+     */
+    suspend fun pickInviteVideo(userID: String): ShareableVideo? {
+        val pick = VideoServiceImpl().getUserVideos(userID, limit = 25)
+            .asSequence()
+            .filter { it.creatorID == userID }
+            .filter { it.publicVisibility == "public" && !it.isDeleted }
+            .filter { !it.isCollectionSegment && it.collectionID.isNullOrEmpty() && !it.isFlyer }
+            .mapNotNull { v ->
+                val url = v.mp4URL?.takeIf { it.isNotBlank() } ?: v.videoURL
+                val path = Uri.parse(url).path.orEmpty().lowercase()
+                if (url.startsWith("https://") && !path.endsWith(".m3u8")) v to url else null
+            }
+            .maxByOrNull { it.first.hypeCount }
+            ?: return null
+        val (v, url) = pick
+        return ShareableVideo(
+            id = v.id,
+            videoURL = url,
+            thumbnailURL = v.thumbnailURL,
+            title = v.title,
+            creatorID = v.creatorID,
+            creatorName = v.creatorName,
+            threadID = v.threadID,
+            hypeCount = v.hypeCount
+        )
+    }
+
+    /** Profile photo for the invite card; null on any failure (initial fallback). */
+    private fun downloadBitmap(urlString: String): android.graphics.Bitmap? = try {
+        val connection = URL(urlString).openConnection() as HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 15_000
+        connection.instanceFollowRedirects = true
+        try {
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                connection.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+            } else null
+        } finally {
+            connection.disconnect()
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "⚠️ Avatar download failed: ${e.message}")
+        null
+    }
+
     // MARK: - Share Video File via Intent
 
     private fun shareVideoFile(
@@ -222,37 +373,7 @@ object ShareService {
                 append("\n\nDownload StitchSocial: https://play.google.com/store/apps/details?id=com.stitchsocial.club")
             }
 
-            // Intent with BOTH video file AND text.
-            // CRITICAL: set ClipData with the content URI. Without it, the
-            // FLAG_GRANT_READ_URI_PERMISSION grant for EXTRA_STREAM does not
-            // reliably reach share targets on Android 10+ (esp. Samsung One UI),
-            // so the receiver opens the share with NO accessible video. ClipData
-            // is the documented way to propagate the read grant to whatever the
-            // user picks (chooser + direct-share targets the manual grant loop
-            // below can't enumerate).
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "video/mp4"
-                putExtra(Intent.EXTRA_STREAM, contentUri)
-                putExtra(Intent.EXTRA_TEXT, shareText)
-                clipData = ClipData.newUri(context.contentResolver, "StitchSocial video", contentUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-
-            // Grant URI permission to all potential receivers
-            val chooser = Intent.createChooser(shareIntent, "Share Video")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-            // Grant to all chooser targets
-            val resInfoList = context.packageManager.queryIntentActivities(chooser, 0)
-            for (resolveInfo in resInfoList) {
-                val packageName = resolveInfo.activityInfo.packageName
-                context.grantUriPermission(
-                    packageName, contentUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-
-            context.startActivity(chooser)
+            launchVideoChooser(context, contentUri, shareText, "Share Video")
             Log.d(TAG, "📤 Share sheet presented with video file")
 
         } catch (e: Exception) {
@@ -260,6 +381,64 @@ object ShareService {
             // Final fallback: share text only
             shareLinkFallback(context, null, creatorUsername, threadID)
         }
+    }
+
+    /** Invite video share sheet; falls back to the invite text alone. */
+    private fun presentVideoShareSheet(
+        context: Context,
+        videoFile: File,
+        shareText: String,
+        chooserTitle: String
+    ) {
+        try {
+            val contentUri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                videoFile
+            )
+            launchVideoChooser(context, contentUri, shareText, chooserTitle)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to present invite share sheet: ${e.message}", e)
+            val textIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, shareText)
+            }
+            context.startActivity(Intent.createChooser(textIntent, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    private fun launchVideoChooser(context: Context, contentUri: Uri, shareText: String, chooserTitle: String) {
+        // Intent with BOTH video file AND text.
+        // CRITICAL: set ClipData with the content URI. Without it, the
+        // FLAG_GRANT_READ_URI_PERMISSION grant for EXTRA_STREAM does not
+        // reliably reach share targets on Android 10+ (esp. Samsung One UI),
+        // so the receiver opens the share with NO accessible video. ClipData
+        // is the documented way to propagate the read grant to whatever the
+        // user picks (chooser + direct-share targets the manual grant loop
+        // below can't enumerate).
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            putExtra(Intent.EXTRA_TEXT, shareText)
+            clipData = ClipData.newUri(context.contentResolver, "StitchSocial video", contentUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        // Grant URI permission to all potential receivers
+        val chooser = Intent.createChooser(shareIntent, chooserTitle)
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        // Grant to all chooser targets
+        val resInfoList = context.packageManager.queryIntentActivities(chooser, 0)
+        for (resolveInfo in resInfoList) {
+            val packageName = resolveInfo.activityInfo.packageName
+            context.grantUriPermission(
+                packageName, contentUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+
+        context.startActivity(chooser)
     }
 
     // MARK: - Save to Gallery

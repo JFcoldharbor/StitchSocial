@@ -33,6 +33,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.viewinterop.AndroidView
@@ -130,13 +134,25 @@ enum class DiscoveryCategory(
     val displayName: String,
     val icon: ImageVector
 ) {
-    // Trimmed to the 5 tabs we keep (2026-07-20). For You is the default feed
-    // (renamed from All). Recent/Popular/Following removed.
+    // For You is the default feed (renamed from All). Every case stays for
+    // internal filtering and deep links; only visibleTabs are drawn.
     FOR_YOU("For You", Icons.Default.Apps),
     EVENTS("Events", Icons.Default.CalendarMonth),
     COMMUNITIES("Community", Icons.Default.Groups),
-    COLLECTIONS("Collections", Icons.Default.VideoLibrary),
-    TRENDING("Trending", Icons.Default.LocalFireDepartment)
+    // Shows, not Collections (iOS parity): a viewer is looking for something
+    // to watch, and what they are watching is a show.
+    COLLECTIONS("Shows", Icons.Default.VideoLibrary),
+    TRENDING("Trending", Icons.Default.LocalFireDepartment);
+
+    companion object {
+        /**
+         * The ONLY chips in the Discover rail — iOS DiscoveryCategory.visibleTabs.
+         * Discover is for discovering content, and everything that was not that
+         * has left: Community is Dash's, Events has its own tab, and Trending was
+         * a filter over the videos For You ranks anyway.
+         */
+        val visibleTabs = listOf(FOR_YOU, COLLECTIONS)
+    }
 }
 
 // MARK: - Discovery Mode (matching iOS: swipe, grid)
@@ -957,6 +973,10 @@ fun DiscoveryView(
     onTabBarVisibilityChange: ((Boolean) -> Unit)? = null,
     navigationCoordinator: NavigationCoordinator? = null,
     isAnnouncementShowing: Boolean = false,
+    /** Opens Inbox, which lives in this toolbar now rather than in the tab bar. */
+    onOpenInbox: (() -> Unit)? = null,
+    /** Something drawn over Discovery by the host (Inbox) — the feed pauses. */
+    externallyCovered: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1075,6 +1095,8 @@ fun DiscoveryView(
     // Segment index to resume at when the Collections takeover plays something.
     var collectionStartIndex by remember { mutableStateOf(0) }
     var selectedCollection by remember { mutableStateOf<VideoCollection?>(null) }
+    /** A show's page opened from the Collections takeover's SHOWS rail. */
+    var openShowID by remember { mutableStateOf<String?>(null) }
 
     // (Tab-bar visibility is driven by a single combined effect below, after all
     // fullscreen surfaces are declared — see LaunchedEffect(showVideoPlayer, ...).)
@@ -1103,46 +1125,20 @@ fun DiscoveryView(
     val currentUserID = authService.getCurrentUserId()
     val currentUserTier = UserTier.ROOKIE // TODO: Load from user profile
 
-    // Events — shared VM + a full-screen Hub overlay (hoisted to the Discovery
-    // root so the event page takes over the screen like iOS, above the chrome).
-    val eventsContext = androidx.compose.ui.platform.LocalContext.current
-    val eventsVM = remember { com.stitchsocial.club.events.EventsViewModel() }
-    var eventHub by remember { mutableStateOf<com.stitchsocial.club.events.StitchEventEntity?>(null) }
-    var eventPlayerVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
-    LaunchedEffect(currentUserID) {
-        val uid = currentUserID ?: ""
-        val username = if (uid.isNotBlank())
-            runCatching { com.stitchsocial.club.services.UserService(eventsContext).getBasicUserInfo(uid)?.username }.getOrNull() ?: "" else ""
-        eventsVM.configure(uid, username)
+    // The Inbox bell's dot. Re-read on entry and whenever Inbox closes, which
+    // is when the count can have changed (iOS reads it on the same beats).
+    var unreadNotifications by remember { mutableIntStateOf(0) }
+    LaunchedEffect(currentUserID, externallyCovered) {
+        val uid = currentUserID
+        if (uid.isNullOrEmpty() || externallyCovered) return@LaunchedEffect
+        unreadNotifications = runCatching {
+            com.stitchsocial.club.services.NotificationService().getUnreadCount(uid)
+        }.getOrDefault(unreadNotifications)
     }
-    LaunchedEffect(selectedCategory) {
-        if (selectedCategory == DiscoveryCategory.EVENTS) eventsVM.load()
-    }
-    // Event deep-link (notification tap, in-app or FCM): only an eventID is
-    // parked, so hydrate it before the Hub can open. Gated on isConfigured —
-    // configure() lands asynchronously (it awaits a username lookup) and
-    // EventsViewModel.currentUserID is a plain var, so a Hub composed before it
-    // arrives would read isHost=false and never recompose: the host would get
-    // their own event rendered as a guest.
-    val deepLinkEventID by com.stitchsocial.club.events.EventDeepLink.pending
-    val eventsConfigured by eventsVM.isConfigured.collectAsState()
-    LaunchedEffect(deepLinkEventID, eventsConfigured) {
-        val id = deepLinkEventID ?: return@LaunchedEffect
-        if (!eventsConfigured) return@LaunchedEffect
-        com.stitchsocial.club.events.EventDeepLink.consume()
-        // Land on Events so dismissing the Hub reveals the events list rather
-        // than whatever feed happened to be behind it.
-        selectedCategory = DiscoveryCategory.EVENTS
-        eventsVM.loadEvent(id)
-    }
-    // loadEvent is async; present once the entity arrives, then ack the signal.
-    val deepLinkedEvent by eventsVM.openEvent.collectAsState()
-    LaunchedEffect(deepLinkedEvent) {
-        deepLinkedEvent?.let {
-            eventHub = it
-            eventsVM.clearOpenEvent()
-        }
-    }
+
+    // Events moved to a tab of its own (EventsTabView below, iOS parity): its
+    // view model, Hub, event player and deep-link handling all live there now.
+
     // Hide the custom tab bar whenever ANY fullscreen surface is up — the
     // fullscreen video deck, the collection player, the event hub, or the
     // community list takeover — so those are truly full screen (matches iOS
@@ -1163,8 +1159,7 @@ fun DiscoveryView(
     val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
         selectedCategory == DiscoveryCategory.EVENTS ||
         selectedCategory == DiscoveryCategory.COLLECTIONS
-    val anyFullScreenUp = showVideoPlayer || showCollectionPlayer || eventHub != null ||
-        fullScreenCategoryUp
+    val anyFullScreenUp = showVideoPlayer || showCollectionPlayer || fullScreenCategoryUp
     LaunchedEffect(anyFullScreenUp) {
         onTabBarVisibilityChange?.invoke(!anyFullScreenUp)
         // Backstop for the paths that don't go through the category tap:
@@ -1253,49 +1248,6 @@ fun DiscoveryView(
             )
     ) {
 
-        // Event Hub — full-screen overlay above the Discovery chrome (iOS fullScreenCover parity).
-        // MUST sit ABOVE the EventRowsScreen takeover (also zIndex 200, declared
-        // after this block). Tapping a row sets `eventHub` and the Hub composes,
-        // but at equal z-index the later-declared rows drew on top and hid it —
-        // so events looked "not tappable". Higher z-index puts the Hub on top.
-        eventHub?.let { ev ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(300f)
-            ) {
-                com.stitchsocial.club.events.EventHubScreen(
-                    event = ev,
-                    vm = eventsVM,
-                    onDismiss = { eventHub = null; eventsVM.load() },
-                    // Host Go Live / promo (NewThread) or guest POV (StitchToThread
-                    // + parent video): the Hub arms EventMomentBridge, then we open
-                    // the recorder. ThreadComposer takes the arm at queue time and
-                    // attaches the moment on post.
-                    onRecord = { ctx, parent -> navigationCoordinator?.showRecordingModal(ctx, parent) },
-                    // Play an event video (promo/recap/moment) fullscreen with the
-                    // full engagement overlay — same deck as any other video.
-                    onOpenVideo = { eventPlayerVideo = it }
-                )
-            }
-        }
-
-        // Events — full-screen takeover above the Discovery chrome. Previously
-        // this rendered inline in the content area, so the search bar and
-        // category chips still sat above it and it was never really full screen
-        // the way Community is. Hoisted here it owns the whole surface, which
-        // means it also has to own the way back out (the chips are no longer
-        // reachable) — hence onClose.
-        if (selectedCategory == DiscoveryCategory.EVENTS) {
-            Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
-                com.stitchsocial.club.events.EventRowsScreen(
-                    vm = eventsVM,
-                    onOpenEvent = { eventHub = it },
-                    onClose = { selectedCategory = DiscoveryCategory.FOR_YOU },
-                )
-            }
-        }
-
         // Collections — full-screen takeover above the Discovery chrome, same
         // rule as Community/Events. Rendered BEFORE the collection player block
         // below so a tap on a card puts the player on top of the takeover
@@ -1320,7 +1272,33 @@ fun DiscoveryView(
                         collectionStartIndex = startIndex
                         showCollectionPlayer = true
                     },
+                    onOpenShow = { openShowID = it },
                 )
+            }
+            // The show's page — episodes, this week's schedule, when it airs.
+            // Above the takeover, below the player, so playing an episode from
+            // it lands on top.
+            openShowID?.let { showID ->
+                androidx.activity.compose.BackHandler { openShowID = null }
+                Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                    ShowDetailView(
+                        showId = showID,
+                        currentUserID = currentUserID ?: "",
+                        onDismiss = { openShowID = null },
+                        onPlayEpisode = { ep ->
+                            openShowID = null
+                            selectedCollection = ep
+                            collectionStartIndex = 0
+                            showCollectionPlayer = true
+                        },
+                        onResumeEpisode = { ep, index ->
+                            openShowID = null
+                            selectedCollection = ep
+                            collectionStartIndex = index
+                            showCollectionPlayer = true
+                        },
+                    )
+                }
             }
         }
 
@@ -1339,26 +1317,6 @@ fun DiscoveryView(
                     )
                 }
             }
-        }
-
-        // Event video fullscreen — the engagement deck, above the Hub (zIndex 300).
-        eventPlayerVideo?.let { ev ->
-            DiscoveryFullscreenDeck(
-                rootVideos = listOf(ev),
-                initialVideoID = ev.id,
-                currentUserID = currentUserID,
-                engagementViewModel = engagementViewModel,
-                iconManager = iconManager,
-                followManager = followManager,
-                navigationCoordinator = navigationCoordinator,
-                videoService = videoService,
-                isAnnouncementShowing = isAnnouncementShowing,
-                onSettledIndexChange = {},
-                onDismiss = { eventPlayerVideo = null },
-                onNavigateToProfile = { userID, _ -> eventPlayerVideo = null; onNavigateToProfile(userID) },
-                onShowThreadView = { threadID, targetVideoID -> onShowThreadView(threadID, targetVideoID) },
-                modifier = Modifier.zIndex(300f)
-            )
         }
 
         // Collection player fullscreen overlay
@@ -1423,6 +1381,10 @@ fun DiscoveryView(
                 DiscoveryHeader(
                     isLoading = isLoading,
                     discoveryMode = discoveryMode,
+                    showFeedControls = selectedCategory == DiscoveryCategory.FOR_YOU ||
+                        selectedCategory == DiscoveryCategory.TRENDING,
+                    unreadCount = unreadNotifications,
+                    onInboxTapped = onOpenInbox,
                     onShuffleTapped = {
                         viewModel.randomizeContent()
                         currentSwipeIndex = 0 // Reset to first card
@@ -1514,10 +1476,8 @@ fun DiscoveryView(
                         // CollectionsBrowseView. It stays in the codebase because
                         // the profile/creator surfaces still use that lane.
                     }
-                    // Events tab = the Concept B rows/hub, not the v1 video feed.
-                    // Rendered as a full-screen takeover overlay above the chrome
-                    // (see the Events overlay near the Community/Collections ones)
-                    // so it matches them structurally, not just in tab-bar rules.
+                    // Events has a tab of its own now (EventsTabView); nothing
+                    // selects it here any more.
                     selectedCategory == DiscoveryCategory.EVENTS -> {
                     }
                     // Show the loading view whenever the feed is empty AND
@@ -1562,7 +1522,11 @@ fun DiscoveryView(
                                     // overlay, not a new screen, so the feed cell
                                     // played on under the show — two soundtracks,
                                     // and the feed's audio still going on exit.
-                                    isAnnouncementShowing = isAnnouncementShowing || showCollectionPlayer,
+                                    // Search and Inbox are covers too (iOS
+                                    // feedIsCovered): each one opened over a
+                                    // feed that kept playing underneath.
+                                    isAnnouncementShowing = isAnnouncementShowing || showCollectionPlayer ||
+                                        showSearchSheet || externallyCovered,
                                     collectionCardMap = viewModel.collectionCardMap,
                                     sponsoredSlotMap = viewModel.sponsoredSlotMap,
                                     sponsoredPostMap = viewModel.sponsoredPostMap,
@@ -1754,6 +1718,10 @@ fun DiscoveryView(
 private fun DiscoveryHeader(
     isLoading: Boolean,
     discoveryMode: DiscoveryMode,
+    /** Refresh and the swipe/grid toggle only mean something on a video feed. */
+    showFeedControls: Boolean,
+    unreadCount: Int,
+    onInboxTapped: (() -> Unit)?,
     onShuffleTapped: () -> Unit,
     onModeToggle: () -> Unit,
     onSearchTapped: () -> Unit
@@ -1761,6 +1729,9 @@ private fun DiscoveryHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // A soft fade behind the wordmark and glyphs, so they read over a
+            // bright video without boxing the whole bar.
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))
             .padding(horizontal = Spacing.lg)
             // Top tightened to 2dp against 16 — iOS parity. This sits straight
             // under the status-bar inset, which is already generous, so the
@@ -1802,36 +1773,74 @@ private fun DiscoveryHeader(
             }
         }
 
+        // iOS discoveryToolbar: refresh, mode, search, Inbox — cyan glyphs.
+        // Packed tight on a dark capsule: spread across the bar over a playing
+        // video, the glyphs were both far apart and hard to make out.
         Row(
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50))
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Shuffle button
-            IconButton(onClick = onShuffleTapped) {
-                Icon(
-                    imageVector = Icons.Default.Shuffle,
-                    contentDescription = "Shuffle",
-                    tint = StitchColors.primary
+            if (showFeedControls) {
+                // Refresh, not shuffle. Same action — it reshuffles and restarts —
+                // but "shuffle" named the mechanism, and the only thing a viewer
+                // wants from it is different videos.
+                HeaderGlyph(Icons.Default.Refresh, "Refresh", Color.Cyan, onShuffleTapped)
+                HeaderGlyph(
+                    discoveryMode.icon, "Toggle ${discoveryMode.displayName}",
+                    if (discoveryMode == DiscoveryMode.SWIPE) Color.Cyan else Color.White.copy(alpha = 0.6f),
+                    onModeToggle
                 )
             }
-
-            // Mode toggle
-            IconButton(onClick = onModeToggle) {
-                Icon(
-                    imageVector = discoveryMode.icon,
-                    contentDescription = "Toggle ${discoveryMode.displayName}",
-                    tint = if (discoveryMode == DiscoveryMode.SWIPE) StitchColors.primary else Color.White.copy(alpha = 0.7f)
-                )
-            }
-
-            // Search button
-            IconButton(onClick = onSearchTapped) {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = Color.White.copy(alpha = 0.7f)
-                )
+            HeaderGlyph(Icons.Default.Search, "Search", Color.Cyan, onSearchTapped)
+            // Inbox. It was a fifth of the tab bar; it is a bell beside search,
+            // with a dot when something is waiting — which is the only part of a
+            // tab a notification list was really using.
+            if (onInboxTapped != null) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onInboxTapped
+                        )
+                        .semantics {
+                            contentDescription = if (unreadCount > 0) "Inbox, $unreadCount unread" else "Inbox"
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Notifications, contentDescription = null, tint = Color.Cyan, modifier = Modifier.size(22.dp))
+                    if (unreadCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = (-2).dp, y = 3.dp)
+                                .size(7.dp)
+                                .background(StitchColors.primary, CircleShape)
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun HeaderGlyph(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -1842,65 +1851,75 @@ private fun DiscoveryCategorySelector(
     selectedCategory: DiscoveryCategory,
     onCategorySelected: (DiscoveryCategory) -> Unit
 ) {
-    // Underlined tabs, not pills. All five of these navigate, and a pill reads as
-    // a filter you toggle — an underline reads as a place you are. Type carries the
-    // hierarchy, so the row costs one line of height instead of a band of chrome,
-    // and the icons go: five glyphs next to five words is the same information
-    // twice. (iOS parity — 5bd9770.)
-    Row(
+    // Underlined tabs, not pills. A pill reads as a filter you toggle — an
+    // underline reads as a place you are. (iOS parity — 5bd9770.)
+    //
+    // Two labels fit on every phone, so the rail is centred (iOS parity). The
+    // scroll and the right-edge fade stay for when they don't — a large font
+    // scale can still overflow it, and a rail that can only be centred breaks
+    // when it does.
+    val scroll = rememberScrollState()
+    val overflows = scroll.maxValue > 0
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            // The rail sits on video now, so the right edge fades instead of
-            // cutting the last tab flat against nothing — a hard-clipped
-            // "Trending" reads as the row simply ending.
             .graphicsLayer { alpha = 0.99f }
             .drawWithContent {
                 drawContent()
-                drawRect(
-                    brush = Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Black,
-                            0.82f to Color.Black,
-                            1f to Color.Transparent
-                        )
-                    ),
-                    blendMode = BlendMode.DstIn
-                )
-            }
-            .padding(horizontal = Spacing.lg)
-            .padding(top = 4.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(19.dp)
-    ) {
-        DiscoveryCategory.values().forEach { category ->
-            val selected = selectedCategory == category
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                // Intrinsic width so the rule below matches the label it underlines.
-                modifier = Modifier
-                    .width(IntrinsicSize.Max)
-                    .clickable { onCategorySelected(category) }
-            ) {
-                Text(
-                    text = category.displayName.uppercase(),
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.4.sp,
-                    maxLines = 1,
-                    color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
-                    // Every label carries its own contrast floor rather than
-                    // borrowing one from a chip background that no longer exists.
-                    style = LocalTextStyle.current.copy(
-                        shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)
+                if (overflows) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0f to Color.Black,
+                                0.82f to Color.Black,
+                                1f to Color.Transparent
+                            )
+                        ),
+                        blendMode = BlendMode.DstIn
                     )
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.5.dp)
-                        .background(if (selected) DashPalette.railAccent else Color.Transparent)
-                )
+                }
+            }
+    ) {
+        val railWidth = maxWidth
+        Row(modifier = Modifier.horizontalScroll(scroll)) {
+            Row(
+                modifier = Modifier
+                    .widthIn(min = railWidth)
+                    .padding(horizontal = Spacing.lg)
+                    .padding(top = 4.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(19.dp, Alignment.CenterHorizontally)
+            ) {
+                DiscoveryCategory.visibleTabs.forEach { category ->
+                    val selected = selectedCategory == category
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        // Intrinsic width so the rule below matches the label it underlines.
+                        modifier = Modifier
+                            .width(IntrinsicSize.Max)
+                            .clickable { onCategorySelected(category) }
+                    ) {
+                        Text(
+                            text = category.displayName.uppercase(),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.4.sp,
+                            maxLines = 1,
+                            color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+                            // Every label carries its own contrast floor rather than
+                            // borrowing one from a chip background that no longer exists.
+                            style = LocalTextStyle.current.copy(
+                                shadow = Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 1f), 4f)
+                            )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.5.dp)
+                                .background(if (selected) DashPalette.railAccent else Color.Transparent)
+                        )
+                    }
+                }
             }
         }
     }
@@ -2929,7 +2948,7 @@ private fun DiscoveryFullscreenCard(
                 // A cover hides the tab bar: drop the metadata + actions lower and
                 // let the overlay's scrim sit flush to the screen edge. Hosted, the
                 // tab bar is there and the default clearance is the right one.
-                bottomPaddingOverride = if (hosted) null else 42.dp,
+                bottomPaddingOverride = if (hosted) null else 28.dp,
                 // No close button on the browsing feed — there is nothing to close.
                 showShareInTop = !hosted,
                 onExit = if (hosted) null else onExit,
@@ -2950,7 +2969,16 @@ private fun DiscoveryFullscreenCard(
                 viewSource = if (isAdOnScreen) "sponsored" else null,
                 onBottomBlockHeight = if (isAdOnScreen) ({ h ->
                     if (h != adBottomBlockHeight) adBottomBlockHeight = h
-                }) else null
+                }) else null,
+                // A tile in the thread rail (iOS onSelectStitch): slide this
+                // deck's strip to it; a clip the strip doesn't hold opens in
+                // the thread player, focused on it.
+                onSelectStitch = { target ->
+                    val idx = allVideos.indexOfFirst { it.id == target.id }
+                    if (idx >= 0) currentIndex = idx
+                    else onShowThreadView(target.threadID ?: currentVideo.threadID ?: currentVideo.id, target.id)
+                    true
+                }
             )
             }
 
@@ -2975,6 +3003,125 @@ private fun DiscoveryFullscreenCard(
                         .alpha(if (isDragging) 0f else 1f)
                 )
             }
+        }
+    }
+}
+
+// MARK: - Events tab (iOS parity: Events is a tab of its own)
+
+/**
+ * The Events tab root. This was the EVENTS category inside Discover — a
+ * takeover over the feed with its own close button. It is a tab now, like iOS
+ * (EventRowsView in ContentView), so the rows have nowhere to close to and the
+ * tab bar stays up under them. The Hub and an event video are still full
+ * screen over the tab, and this is where event deep links land.
+ *
+ * Lives in this file because an event video plays in DiscoveryFullscreenDeck,
+ * the same deck as every other video.
+ */
+@Composable
+fun EventsTabView(
+    navigationCoordinator: NavigationCoordinator?,
+    isAnnouncementShowing: Boolean,
+    onNavigateToProfile: (String) -> Unit,
+    onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val authService = remember { AuthService() }
+    val videoService = remember { VideoServiceImpl() }
+    val userService = remember { UserService(context) }
+    val engagementViewModel = remember {
+        EngagementViewModel(authService = authService, videoService = videoService, userService = userService)
+    }
+    val iconManager = remember { FloatingIconManager() }
+    val followManager = remember { FollowManager(context) }
+    val currentUserID = authService.getCurrentUserId()
+
+    val eventsVM = remember { com.stitchsocial.club.events.EventsViewModel() }
+    var eventHub by remember { mutableStateOf<com.stitchsocial.club.events.StitchEventEntity?>(null) }
+    var eventPlayerVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+
+    LaunchedEffect(currentUserID) {
+        val uid = currentUserID ?: ""
+        if (uid.isNotBlank()) engagementViewModel.setCurrentUser(uid)
+        val username = if (uid.isNotBlank())
+            runCatching { userService.getBasicUserInfo(uid)?.username }.getOrNull() ?: "" else ""
+        eventsVM.configure(uid, username)
+        eventsVM.load()
+    }
+
+    // Event deep-link (notification tap, in-app or FCM): only an eventID is
+    // parked, so hydrate it before the Hub can open. Gated on isConfigured —
+    // configure() lands asynchronously (it awaits a username lookup) and
+    // EventsViewModel.currentUserID is a plain var, so a Hub composed before it
+    // arrives would read isHost=false and never recompose: the host would get
+    // their own event rendered as a guest.
+    val deepLinkEventID by com.stitchsocial.club.events.EventDeepLink.pending
+    val eventsConfigured by eventsVM.isConfigured.collectAsState()
+    LaunchedEffect(deepLinkEventID, eventsConfigured) {
+        val id = deepLinkEventID ?: return@LaunchedEffect
+        if (!eventsConfigured) return@LaunchedEffect
+        com.stitchsocial.club.events.EventDeepLink.consume()
+        eventsVM.loadEvent(id)
+    }
+    // loadEvent is async; present once the entity arrives, then ack the signal.
+    val deepLinkedEvent by eventsVM.openEvent.collectAsState()
+    LaunchedEffect(deepLinkedEvent) {
+        deepLinkedEvent?.let {
+            eventHub = it
+            eventsVM.clearOpenEvent()
+        }
+    }
+
+    // The Hub and an event video are full screen: the tab bar steps aside.
+    val coverUp = eventHub != null || eventPlayerVideo != null
+    LaunchedEffect(coverUp) { com.stitchsocial.club.foundation.FullScreenSurfaceState.set(coverUp) }
+    DisposableEffect(Unit) {
+        onDispose { com.stitchsocial.club.foundation.FullScreenSurfaceState.clear() }
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+        // No onClose: this is a tab root, not a takeover.
+        com.stitchsocial.club.events.EventRowsScreen(
+            vm = eventsVM,
+            onOpenEvent = { eventHub = it },
+        )
+
+        eventHub?.let { ev ->
+            Box(modifier = Modifier.fillMaxSize().zIndex(300f)) {
+                com.stitchsocial.club.events.EventHubScreen(
+                    event = ev,
+                    vm = eventsVM,
+                    onDismiss = { eventHub = null; eventsVM.load() },
+                    // Host Go Live / promo (NewThread) or guest POV (StitchToThread
+                    // + parent video): the Hub arms EventMomentBridge, then we open
+                    // the recorder. ThreadComposer takes the arm at queue time and
+                    // attaches the moment on post.
+                    onRecord = { ctx, parent -> navigationCoordinator?.showRecordingModal(ctx, parent) },
+                    onOpenVideo = { eventPlayerVideo = it }
+                )
+            }
+        }
+
+        // Event video fullscreen — the engagement deck, above the Hub.
+        eventPlayerVideo?.let { ev ->
+            DiscoveryFullscreenDeck(
+                rootVideos = listOf(ev),
+                initialVideoID = ev.id,
+                currentUserID = currentUserID,
+                engagementViewModel = engagementViewModel,
+                iconManager = iconManager,
+                followManager = followManager,
+                navigationCoordinator = navigationCoordinator,
+                videoService = videoService,
+                isAnnouncementShowing = isAnnouncementShowing,
+                onSettledIndexChange = {},
+                onDismiss = { eventPlayerVideo = null },
+                onNavigateToProfile = { userID, _ -> eventPlayerVideo = null; onNavigateToProfile(userID) },
+                onShowThreadView = { threadID, targetVideoID -> onShowThreadView(threadID, targetVideoID) },
+                modifier = Modifier.zIndex(310f)
+            )
         }
     }
 }

@@ -106,6 +106,9 @@ fun CollectionsBrowseView(
      *  — the player draws over this screen, which stays composed underneath and
      *  otherwise keeps the progress it read on open. */
     progressRefreshKey: Int = 0,
+    /** Open a show's page (episodes, schedule). When null, a show card plays
+     *  its first episode instead. */
+    onOpenShow: ((String) -> Unit)? = null,
 ) {
     var mode by remember { mutableStateOf(BrowseMode.BROWSE) }
     var selectedType by remember { mutableStateOf<CollectionContentType?>(null) }
@@ -157,6 +160,20 @@ fun CollectionsBrowseView(
             ) to ep
         }
         heroItems = built
+    }
+
+    // The shows behind these episodes — their own title, cover, type and
+    // release schedule. ShowService caches each for 30 min, and a failed read
+    // only means the card falls back to its episodes' cover and plays.
+    var showsByID by remember { mutableStateOf<Map<String, com.stitchsocial.club.foundation.Show>>(emptyMap()) }
+    LaunchedEffect(collections.mapNotNull { it.showId }.distinct()) {
+        val ids = collections.mapNotNull { it.showId?.takeIf { id -> id.isNotBlank() } }.distinct()
+        val fetched = mutableMapOf<String, com.stitchsocial.club.foundation.Show>()
+        for (id in ids) {
+            runCatching { com.stitchsocial.club.services.ShowService.shared.getShow(id) }
+                .getOrNull()?.let { fetched[id] = it }
+        }
+        showsByID = fetched
     }
 
     val inProgress = remember(collections, progressByID) {
@@ -266,6 +283,37 @@ fun CollectionsBrowseView(
                                     ep = pair.ep,
                                     progress = pair.progress,
                                     onTap = { onPlay(pair.ep, pair.progress.currentSegmentIndex) },
+                                )
+                            }
+                        }
+                    }
+
+                    // SHOWS: episodes grouped by their show, newest show first —
+                    // above the per-type rails, because a show is the thing
+                    // someone follows; an episode is one night of it (iOS).
+                    val showGroups = remember(searched, selectedType) {
+                        searched.filter { selectedType == null || it.contentType == selectedType }
+                            .groupBy { it.showId?.takeIf { id -> id.isNotBlank() } ?: it.id }
+                            .map { (id, eps) -> id to eps.sortedBy { it.episodeNumber ?: 0 } }
+                            .sortedByDescending { (_, eps) -> eps.mapNotNull { it.publishedAt }.maxOrNull()?.time ?: 0L }
+                    }
+                    if (showGroups.size > 1) {
+                        RailHeader("SHOWS")
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(top = 10.dp),
+                        ) {
+                            items(showGroups, key = { it.first }) { (id, eps) ->
+                                ShowRailCard(
+                                    show = showsByID[id],
+                                    episodes = eps,
+                                    onTap = {
+                                        // A show card opens the show when a real Show
+                                        // document is behind it; otherwise it plays.
+                                        if (showsByID[id] != null && onOpenShow != null) onOpenShow(id)
+                                        else eps.firstOrNull()?.let { onPlay(it, 0) }
+                                    },
                                 )
                             }
                         }
@@ -460,6 +508,59 @@ private fun CollectionCard(ep: VideoCollection, onTap: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun ShowRailCard(
+    show: com.stitchsocial.club.foundation.Show?,
+    episodes: List<VideoCollection>,
+    onTap: () -> Unit,
+) {
+    val type = show?.contentType ?: episodes.firstOrNull()?.contentType ?: CollectionContentType.GENERAL
+    val tint = collectionTypeColor(type)
+    val segTotal = episodes.sumOf { it.segmentCount }
+    val seasonCount = episodes.mapNotNull { it.seasonId }.distinct().size
+    val title = show?.title?.trim()?.takeIf { it.isNotEmpty() } ?: episodes.firstOrNull()?.title.orEmpty()
+    val cover = show?.coverImageURL?.takeIf { it.isNotBlank() } ?: episodes.firstOrNull()?.coverImageURL
+    Column(
+        modifier = Modifier.width(COL.cardW).clickable { onTap() },
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = COL.cardW, height = COL.coverH)
+                .clip(RoundedCornerShape(14.dp)),
+        ) {
+            CoverBackground(cover, tint, Modifier.fillMaxSize())
+            Box(modifier = Modifier.fillMaxSize().padding(6.dp)) {
+                ContentTypeBadge(type, tint, Modifier.align(Alignment.TopStart))
+                CountBadge("${episodes.size} ep${if (episodes.size == 1) "" else "s"}", Modifier.align(Alignment.BottomEnd))
+            }
+        }
+        Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            "${if (seasonCount <= 1) "Season 1" else "$seasonCount Seasons"} · $segTotal segments",
+            color = Color.White.copy(alpha = 0.42f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        // When it airs, from the show's release schedule.
+        show?.scheduleConfig?.takeIf { it.cadence.isRepeating }?.let { c ->
+            Text(
+                if (c.cadence == com.stitchsocial.club.foundation.ReleaseCadence.DAILY) "Daily · ${c.releaseTimeDisplay}"
+                else "${c.cadence.displayName} · ${c.weekdayName} ${c.releaseTimeDisplay}",
+                color = COL.cyan.copy(alpha = 0.8f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 8-slot episode strip
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            repeat(8) { i ->
+                Box(
+                    Modifier.weight(1f).height(2.dp).clip(RoundedCornerShape(1.dp))
+                        .background(if (i < minOf(episodes.size, 8)) tint else Color.White.copy(alpha = 0.12f))
+                )
+            }
+        }
     }
 }
 

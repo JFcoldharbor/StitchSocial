@@ -234,6 +234,12 @@ fun VideoPlayer(
                         followManager = followManager,
                         engagementViewModel = engagementViewModel,
                         iconManager = iconMgr,
+                        // Thread rail tile: page to it when the pager holds it.
+                        onSelectStitch = { target ->
+                            val idx = allVideos.indexOfFirst { it.id == target.id }
+                            if (idx >= 0) scope.launch { horizontalPagerState.animateScrollToPage(idx) }
+                            idx >= 0
+                        },
                         onAction = { action ->
                             when (action) {
                                 is OverlayAction.NavigateToProfile -> {

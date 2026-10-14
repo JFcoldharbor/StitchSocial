@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -165,8 +166,8 @@ object OverlaySizes {
     val PROFILE_IMAGE_THREAD = 28.dp
 
     // Spacing
-    val BOTTOM_PADDING_MIN = 60.dp  // Higher from tab bar for HomeFeed
-    val BOTTOM_PADDING_MAX = 80.dp  // Higher from tab bar for large screens
+    val BOTTOM_PADDING_MIN = 42.dp  // Higher from tab bar for HomeFeed
+    val BOTTOM_PADDING_MAX = 58.dp  // Higher from tab bar for large screens
 }
 
 // MARK: - Enums
@@ -315,7 +316,12 @@ fun ContextualVideoOverlay(
     // Height from the bottom edge to the top of the bottom block (caption +
     // CTA + actions). The ad position uses it as the media-fit clear area's
     // bottom edge.
-    onBottomBlockHeight: ((Dp) -> Unit)? = null
+    onBottomBlockHeight: ((Dp) -> Unit)? = null,
+    // A tile in the thread rail was tapped (iOS onSelectStitch): the host
+    // switches playback to that clip — pages its pager to it, or loads it in
+    // place. Return false when the host can't play it here; the overlay then
+    // falls back to the thread preview panel. Null = always the panel.
+    onSelectStitch: ((CoreVideoMetadata) -> Boolean)? = null
 ) {
     // Early return if not visible
     if (!isVisible) return
@@ -343,7 +349,7 @@ fun ContextualVideoOverlay(
         when {
             screenHeight < 600.dp -> OverlaySizes.BOTTOM_PADDING_MIN
             screenHeight > 800.dp -> OverlaySizes.BOTTOM_PADDING_MAX
-            else -> 70.dp // Medium screens - higher from tab bar for HomeFeed
+            else -> 50.dp // Medium screens
         }
     }
 
@@ -675,6 +681,32 @@ fun ContextualVideoOverlay(
         } catch (_: Exception) { /* keep what's on screen */ }
     }
 
+    // Thread lineage for the right-edge chain rail (iOS StitchChainRail). Read
+    // once per thread and shared through ThreadChainCache, so paging through a
+    // thread doesn't re-read it; re-read on an own-reply / foreground tick.
+    val chainThreadID = video.threadID ?: video.id
+    var chainData by remember(chainThreadID) { mutableStateOf(ThreadChainCache.get(chainThreadID)) }
+    LaunchedEffect(chainThreadID, threadRefreshTick) {
+        if (overlayContext == OverlayContext.DISCOVERY || overlayContext == OverlayContext.CAROUSEL) return@LaunchedEffect
+        if (chainData != null && threadRefreshTick == 0) return@LaunchedEffect
+        try {
+            val (parent, children) = videoService.getThreadData(chainThreadID)
+            if (parent != null) {
+                ThreadChainCache.put(chainThreadID, parent, children)
+                chainData = parent to children
+            }
+        } catch (e: Exception) {
+            Log.w("CHAIN_RAIL", "Thread load failed for $chainThreadID: ${e.message}")
+        }
+    }
+    val stitchChain: List<StitchChainRailLink> = remember(chainData) {
+        chainData?.let { (parent, children) -> buildStitchChain(parent, children) } ?: emptyList()
+    }
+
+    // One line and a "more"; views and the thread credit on request. A new
+    // clip starts collapsed, whichever way you arrived at it.
+    var detailExpanded by remember(video.id) { mutableStateOf(false) }
+
     // Promoted now: the Sponsored chip by the name, and the CTA above the
     // caption. The ad position's slot CTA wins over the post's own.
     val isSponsored: Boolean = sponsoredCta != null || video.isPromotedNow
@@ -767,7 +799,35 @@ fun ContextualVideoOverlay(
                 isSponsored = isSponsored,
                 isUnderReview = isUnderReview,
                 sponsoredCta = effectiveCta,
-                onBottomBlockHeight = onBottomBlockHeight
+                onBottomBlockHeight = onBottomBlockHeight,
+                stitchChain = stitchChain,
+                detailExpanded = detailExpanded,
+                onDetailExpandedChange = { detailExpanded = it },
+                onChainLinkTap = { link ->
+                    if (link.id != video.id) {
+                        // The clip itself is already in hand — the rail was
+                        // built from it — so the host never has to fetch.
+                        val target = chainData?.let { (parent, children) ->
+                            if (parent?.id == link.id) parent else children.firstOrNull { it.id == link.id }
+                        }
+                        val handled = target != null && onSelectStitch?.invoke(target) == true
+                        if (!handled) {
+                            // The host can't play it in place: the thread
+                            // preview, the same fallback iOS takes.
+                            chainData?.second?.let { threadPanelChildren = it }
+                            threadPanelExpanded = true
+                            showThreadPanel = true
+                        }
+                    }
+                },
+                onOpenSlotTap = {
+                    // The open slot IS the stitch action — the same branch as
+                    // the rail's Stitch button, so they can't drift apart.
+                    if (com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+                        pauseAllVideos(context)
+                        onAction?.invoke(OverlayAction.StitchRecording)
+                    }
+                }
             )
         }
 
@@ -1076,7 +1136,8 @@ private fun MinimalDiscoveryOverlay(
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(top = 12.dp, start = 12.dp)
+                // 24 rather than 12: at 12 the pill sat up against the top bar.
+                .padding(top = 24.dp, start = 12.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color.Black.copy(alpha = 0.4f))
                 .clickable {
@@ -1101,13 +1162,21 @@ private fun MinimalDiscoveryOverlay(
             )
         }
 
-        // Bottom: Video title
-        if (video.title.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(bottom = 16.dp, start = 12.dp, end = 60.dp)
-            ) {
+        // Bottom: chips, then the title. iOS minimalDiscoveryOverlay — the
+        // right edge is empty on a discovery card now; share and the 3-dots
+        // live on the creator row of the full player.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(bottom = 16.dp, start = 12.dp, end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            com.stitchsocial.club.landing.VideoLandingChips(
+                video = video,
+                fontSize = OverlaySizes.LABEL_TINY.fixedSp(),
+                beforeOpen = { pauseAllVideos(context) }
+            )
+            if (video.title.isNotEmpty()) {
                 Text(
                     text = video.title,
                     color = Color.White,
@@ -1117,39 +1186,6 @@ private fun MinimalDiscoveryOverlay(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-        }
-
-        // Right Side: Swipe banner + Share button
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Swipe for replies banner (parent videos only)
-            if (video.conversationDepth == 0 && displayReplyCount > 0) {
-                SwipeForRepliesBanner(replyCount = displayReplyCount)
-            }
-
-            // Share button
-            ShareButton(
-                video = video,
-                creatorUsername = displayCreatorName,
-                size = ShareButtonSize.MEDIUM,
-                userTier = currentUserTier
-            )
-
-            // More options (Report / Block)
-            MoreOptionsMenu(
-                video = video,
-                displayCreatorName = displayCreatorName,
-                currentUserID = currentUserID
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -1292,29 +1328,41 @@ private fun FullContextualOverlay(
     isSponsored: Boolean = false,
     isUnderReview: Boolean = false,
     sponsoredCta: SponsoredCta? = null,
-    onBottomBlockHeight: ((Dp) -> Unit)? = null
+    onBottomBlockHeight: ((Dp) -> Unit)? = null,
+    stitchChain: List<StitchChainRailLink> = emptyList(),
+    detailExpanded: Boolean = false,
+    onDetailExpandedChange: (Boolean) -> Unit = {},
+    onChainLinkTap: (StitchChainRailLink) -> Unit = {},
+    onOpenSlotTap: () -> Unit = {}
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Top Section - hide for CAROUSEL to keep view clean
-        if (overlayContext != OverlayContext.CAROUSEL) {
-            TopSection(
-                video = video,
-                threadVideo = threadVideo,
-                displayCreatorName = displayCreatorName,
-                displayCreatorProfileImageURL = displayCreatorProfileImageURL,
-                displayThreadCreatorName = displayThreadCreatorName,
-                displayThreadCreatorProfileImageURL = displayThreadCreatorProfileImageURL,
-                temperatureColor = temperatureColor,
-                overlayContext = overlayContext,
-                context = context,
-                onAction = onAction,
-                currentUserID = currentUserID,
-                currentUserTier = currentUserTier,
-                showShareInTop = showShareInTop,
-                onExit = onExit,
-                isSponsored = isSponsored,
-                isUnderReview = isUnderReview
-            )
+    // The rail earns its space only when there's an actual chain to draw — a
+    // thread of one would be a single tile over an open slot.
+    val showsChainRail = stitchChain.size > 1
+    // Height from the screen's bottom edge to the top of the action rail,
+    // measured, so the chain rail centres in what's above it.
+    var actionRailClearance by remember { mutableStateOf(0.dp) }
+    var overlayCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val density = LocalDensity.current
+
+    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { overlayCoords = it }) {
+        // The creator pills that used to sit top-left (and the purple thread
+        // creator pill beside them) live in the creator block at the bottom
+        // now, beside everything else about the post. Share and the 3-dots
+        // moved there too. Only a fullscreen host's exit stays up here.
+        if (onExit != null && overlayContext != OverlayContext.CAROUSEL) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, end = 16.dp)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable(onClick = onExit),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
+            }
         }
 
         // Readability scrim — a soft gradient behind the bottom metadata + action
@@ -1331,19 +1379,40 @@ private fun FullContextualOverlay(
                 )
         )
 
-        // Bottom Section
+        // The chain as a right-edge thread, centred in the height above the
+        // action rail rather than pinned under the notch, so it reads as part
+        // of the video and can never sit on the buttons. The creator row and
+        // caption reserve its column (railReserve), so nothing runs under it.
+        if (showsChainRail) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = actionRailClearance),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                StitchChainRail(
+                    chain = stitchChain,
+                    currentID = video.id,
+                    onTapLink = onChainLinkTap,
+                    onTapOpenSlot = onOpenSlotTap,
+                    modifier = Modifier.padding(end = 16.dp)
+                )
+            }
+        }
+
         BottomSection(
             video = video,
+            threadVideo = threadVideo,
+            displayCreatorName = displayCreatorName,
+            displayCreatorProfileImageURL = displayCreatorProfileImageURL,
+            displayThreadCreatorName = displayThreadCreatorName,
             videoEngagement = videoEngagement,
-            videoDescription = videoDescription,
             isUserVideo = isUserVideo,
             isFollowing = isFollowing,
             isFollowLoading = isFollowLoading,
             canReply = canReply,
-            isStitchBlocked = isStitchBlocked,
             stitchButtonIcon = stitchButtonIcon,
             stitchButtonLabel = stitchButtonLabel,
-            stitchButtonRingColor = stitchButtonRingColor,
             stitchUseLogo = stitchUseLogo,
             currentUserTier = currentUserTier,
             currentUserID = currentUserID,
@@ -1355,146 +1424,60 @@ private fun FullContextualOverlay(
             bottomPadding = bottomPadding,
             context = context,
             hapticFeedback = hapticFeedback,
-            scope = scope,
             onFollowToggle = onFollowToggle,
             onViewersTap = onViewersTap,
             onAction = onAction,
             onThreadTap = onThreadTap,
+            isSponsored = isSponsored,
+            isUnderReview = isUnderReview,
             sponsoredCta = sponsoredCta,
             onBottomBlockHeight = onBottomBlockHeight,
+            // The rail's column (58) + its 16 edge margin + a gap, less the
+            // block's own 12 side padding: everything above the action rail
+            // stops short of the rail, on every host.
+            railReserve = if (showsChainRail) 70.dp else 0.dp,
+            detailExpanded = detailExpanded,
+            onDetailExpandedChange = onDetailExpandedChange,
+            onActionRailPositioned = { rail ->
+                // Overlay's bottom edge to the action rail's top edge, in the
+                // overlay's own coordinates (hosts pad the overlay's top).
+                val outer = overlayCoords
+                if (outer != null && outer.isAttached && rail.isAttached) {
+                    val top = outer.localPositionOf(rail, Offset.Zero).y
+                    val clearance = with(density) { (outer.size.height - top).toDp() }
+                    if (clearance != actionRailClearance) actionRailClearance = clearance
+                }
+            },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-
     }
 }
 
-// MARK: - Top Section
+// MARK: - Bottom Section
+//
+// iOS bottomSection: who, then what, then what you can do about it.
+//   1. Creator row — CreatorBlock (avatar + follow badge, name, detail) with
+//      share and the 3-dots at the end of the row.
+//   2. Landing / under-review / reach-boost chips, then the sponsor's CTA.
+//   3. The caption on one line with "more"; expanded it shows up to 4 lines
+//      plus the description, and tapping it collapses.
+//   4. The action rail: four equal columns — Thread, Cooldown, Hype/Tip,
+//      Stitch (when the viewer can stitch, reply or spin off here).
 
 @Composable
-private fun TopSection(
+private fun BottomSection(
     video: CoreVideoMetadata,
     threadVideo: CoreVideoMetadata?,
     displayCreatorName: String,
     displayCreatorProfileImageURL: String?,
     displayThreadCreatorName: String,
-    displayThreadCreatorProfileImageURL: String?,
-    temperatureColor: Color,
-    overlayContext: OverlayContext,
-    context: Context,
-    onAction: ((OverlayAction) -> Unit)?,
-    currentUserID: String? = null,
-    currentUserTier: UserTier = UserTier.ROOKIE,
-    showShareInTop: Boolean = false,
-    onExit: (() -> Unit)? = null,
-    isSponsored: Boolean = false,
-    isUnderReview: Boolean = false
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 50.dp, start = 16.dp, end = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
-        // Left: Creator Pills
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Video creator pill
-            CreatorPill(
-                displayName = displayCreatorName,
-                profileImageURL = displayCreatorProfileImageURL,
-                temperatureColor = temperatureColor,
-                isThread = false,
-                collaborators = video.collaborators,
-                landingVideo = video,
-                isSponsored = isSponsored,
-                onClick = {
-                    pauseAllVideos(context)
-                    onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
-                }
-            )
-
-            // Only the author ever gets here with a pending video.
-            if (isUnderReview) {
-                UnderReviewChip(fontSize = OverlaySizes.LABEL_TINY.fixedSp())
-            }
-
-            // Invite first-post boost: owner-only, and never a label for
-            // viewers — it's organic reach (INVITE_CONTRACT §4).
-            if (currentUserID != null && currentUserID == video.creatorID && video.isReachBoostedNow) {
-                video.reachBoostUntil?.let { until ->
-                    BoostedUntilChip(until = until, fontSize = OverlaySizes.LABEL_TINY.fixedSp())
-                }
-            }
-
-            // Thread creator pill (if different)
-            if (threadVideo != null && threadVideo.creatorID != video.creatorID) {
-                CreatorPill(
-                    displayName = displayThreadCreatorName,
-                    profileImageURL = displayThreadCreatorProfileImageURL,
-                    temperatureColor = Color(0xFF9C27B0), // Purple for thread creator
-                    isThread = true,
-                    onClick = {
-                        pauseAllVideos(context)
-                        onAction?.invoke(OverlayAction.NavigateToProfile(threadVideo.creatorID))
-                    }
-                )
-            }
-        }
-
-        // Right: share (fullscreen) + exit (fullscreen) + Report/Block menu — a
-        // VERTICAL stack of uniform 32dp circular buttons on an 8pt (Spacing.xs)
-        // gap so they read in sync (App Store Guideline 1.2 / Play UGC).
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
-        ) {
-            if (showShareInTop) {
-                // TINY = 32dp, no dangling "Share" label — matches the icon-only exit/3-dots.
-                ShareButton(
-                    video = video,
-                    creatorUsername = displayCreatorName,
-                    size = ShareButtonSize.TINY,
-                    userTier = currentUserTier
-                )
-            }
-            if (onExit != null) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.4f))
-                        .clickable(onClick = onExit),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
-                }
-            }
-            MoreOptionsMenu(
-                video = video,
-                displayCreatorName = displayCreatorName,
-                currentUserID = currentUserID
-            )
-        }
-    }
-}
-
-// MARK: - Bottom Section
-
-@Composable
-private fun BottomSection(
-    video: CoreVideoMetadata,
     videoEngagement: ContextualVideoEngagement?,
-    videoDescription: String?,
     isUserVideo: Boolean,
     isFollowing: Boolean,
     isFollowLoading: Boolean,
     canReply: Boolean,
-    isStitchBlocked: Boolean,
     stitchButtonIcon: androidx.compose.ui.graphics.vector.ImageVector,
     stitchButtonLabel: String,
-    stitchButtonRingColor: Color,
     stitchUseLogo: Boolean,
     currentUserTier: UserTier,
     currentUserID: String?,
@@ -1506,20 +1489,23 @@ private fun BottomSection(
     bottomPadding: Dp,
     context: Context,
     hapticFeedback: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    scope: kotlinx.coroutines.CoroutineScope,
     onFollowToggle: () -> Unit,
     onViewersTap: () -> Unit,
     onAction: ((OverlayAction) -> Unit)?,
     onThreadTap: () -> Unit,
+    isSponsored: Boolean,
+    isUnderReview: Boolean,
     sponsoredCta: SponsoredCta? = null,
     onBottomBlockHeight: ((Dp) -> Unit)? = null,
+    railReserve: Dp = 0.dp,
+    detailExpanded: Boolean = false,
+    onDetailExpandedChange: (Boolean) -> Unit = {},
+    onActionRailPositioned: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    // Fixed text sizes
-    val titleFontSize = OverlaySizes.TITLE.fixedSp()
-    val descFontSize = OverlaySizes.LABEL_REGULAR.fixedSp()
-    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
     val density = LocalDensity.current
+    val captionShadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.8f), Offset(0f, 2f), 4f)
+    val showsThreadOwner = threadVideo != null && threadVideo.creatorID != video.creatorID
 
     Column(
         modifier = modifier
@@ -1531,120 +1517,172 @@ private fun BottomSection(
                     onBottomBlockHeight(with(density) { size.height.toDp() })
                 } else Modifier
             )
-            .padding(bottom = bottomPadding),  // Use responsive padding
-        verticalArrangement = Arrangement.spacedBy(8.dp)  // tightened (was 12)
+            .padding(bottom = bottomPadding),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Promoted post CTA, above the caption (PROMOTED_POSTS_CONTRACT).
+        // 1. Creator row. The block takes all the width that's left and
+        // ellipsizes inside it, so share and the 3-dots sit at one fixed spot
+        // at the row's right end — a long name, the Sponsored chip or the
+        // expanded detail lines can't push them. Bottom-aligned: share and the
+        // 3-dots stack taller than the avatar, and top-aligned the avatar rode
+        // up to their top, leaving a gap above the caption. Against the bottom
+        // it sits on the caption, and expanded detail lines grow upward.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp + railReserve),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            CreatorBlock(
+                displayName = displayCreatorName,
+                handle = video.creatorName.ifEmpty { null },
+                profileImageURL = displayCreatorProfileImageURL,
+                identityKey = video.creatorID,
+                viewCount = videoEngagement?.viewCount ?: video.viewCount,
+                showsDetail = detailExpanded,
+                onViewsTap = if (isUserVideo) onViewersTap else null,
+                threadOwnerName = if (showsThreadOwner) displayThreadCreatorName else null,
+                onThreadOwnerTap = threadVideo?.let { tv ->
+                    {
+                        pauseAllVideos(context)
+                        onAction?.invoke(OverlayAction.NavigateToProfile(tv.creatorID))
+                    }
+                },
+                collaborators = video.collaborators,
+                isSponsored = isSponsored,
+                isFollowing = isUserVideo || isFollowing,
+                onFollowTap = if (isUserVideo) null else ({ if (!isFollowLoading) onFollowToggle() }),
+                modifier = Modifier.weight(1f),
+                onTap = {
+                    pauseAllVideos(context)
+                    onAction?.invoke(OverlayAction.NavigateToProfile(video.creatorID))
+                }
+            )
+            // Share and the 3-dots at the end of the row that names the
+            // creator — small, because they aren't what this block is for.
+            Column(
+                modifier = Modifier.width(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ShareButton(
+                    video = video,
+                    creatorUsername = displayCreatorName,
+                    threadID = video.threadID ?: video.id,
+                    size = ShareButtonSize.TINY,
+                    userTier = currentUserTier
+                )
+                MoreOptionsMenu(
+                    video = video,
+                    displayCreatorName = displayCreatorName,
+                    currentUserID = currentUserID
+                )
+            }
+        }
+
+        // 2. Chips said before the caption: a paid-for post says so first.
+        val chipModifier = Modifier.padding(start = 12.dp, end = 12.dp + railReserve)
+        com.stitchsocial.club.landing.VideoLandingChips(
+            video = video,
+            modifier = chipModifier,
+            fontSize = OverlaySizes.LABEL_TINY.fixedSp(),
+            beforeOpen = { pauseAllVideos(context) }
+        )
+        if (isUnderReview) {
+            UnderReviewChip(fontSize = OverlaySizes.LABEL_TINY.fixedSp(), modifier = chipModifier)
+        }
+        // Invite first-post boost: owner-only, never a label for viewers.
+        if (isUserVideo && video.isReachBoostedNow) {
+            video.reachBoostUntil?.let { until ->
+                Box(chipModifier) { BoostedUntilChip(until = until, fontSize = OverlaySizes.LABEL_TINY.fixedSp()) }
+            }
+        }
+
+        // The sponsor's button, above the caption.
         if (sponsoredCta != null) {
             SponsoredCtaButton(
                 cta = sponsoredCta,
                 onTap = { pauseAllVideos(context) },
-                modifier = Modifier.padding(start = 16.dp, end = 70.dp)
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp + railReserve)
             )
         }
 
-        // Video Title - with side padding to avoid right column
+        // 3. Caption: one line and a "more"; expanded, the caption itself is
+        // the way back.
         if (video.title.isNotEmpty()) {
-            Text(
-                text = video.title,
-                color = Color.White,
-                fontSize = titleFontSize,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 16.dp, end = 70.dp)
-            )
-        }
-
-        // Video Description - with side padding
-        if (!videoDescription.isNullOrEmpty()) {
-            Text(
-                text = videoDescription,
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = descFontSize,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 16.dp, end = 70.dp)
-            )
-        }
-
-        // Metadata Row + Follow Button - with side padding
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 70.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            VideoMetadataRow(
-                engagement = videoEngagement,
-                isUserVideo = isUserVideo,
-                onViewersTap = onViewersTap
-            )
-
-            if (!isUserVideo) {
-                // Small inline follow button
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isFollowing) Color.Gray.copy(alpha = 0.3f) else Color.Cyan)
-                        .clickable(enabled = !isFollowLoading) { onFollowToggle() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isFollowLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(10.dp),
-                            color = if (isFollowing) Color.White else Color.Black,
-                            strokeWidth = 1.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = if (isFollowing) Icons.Default.Check else Icons.Default.PersonAdd,
-                            contentDescription = null,
-                            tint = if (isFollowing) Color.White else Color.Black,
-                            modifier = Modifier.size(10.dp)
-                        )
-                    }
-                    Text(
-                        text = if (isFollowing) "Following" else "Follow",
-                        fontSize = labelFontSize,
+            Row(
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp + railReserve),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = video.title,
+                    style = androidx.compose.ui.text.TextStyle(
+                        color = Color.White,
+                        fontSize = OverlaySizes.TITLE.fixedSp(),
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isFollowing) Color.White else Color.Black
+                        shadow = captionShadow
+                    ),
+                    maxLines = if (detailExpanded) 4 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .clickable(enabled = detailExpanded) { onDetailExpandedChange(false) }
+                )
+                if (!detailExpanded) {
+                    Text(
+                        text = "more",
+                        style = androidx.compose.ui.text.TextStyle(
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = OverlaySizes.TITLE.fixedSp(),
+                            fontWeight = FontWeight.SemiBold,
+                            shadow = captionShadow
+                        ),
+                        maxLines = 1,
+                        modifier = Modifier.clickable { onDetailExpandedChange(true) }
                     )
                 }
             }
+        } else if (!detailExpanded) {
+            // No caption: "more" alone still opens the detail lines.
+            Text(
+                text = "more",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = OverlaySizes.TITLE.fixedSp(),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .clickable { onDetailExpandedChange(true) }
+            )
         }
 
-        // Engagement Buttons Row - 2 groups, centered
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // 4. The action rail — four equal columns, full width.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.Center,
+                .padding(horizontal = 12.dp)
+                .onGloballyPositioned { coords -> onActionRailPositioned(coords) },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left group: Thread + Cool
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Thread Button — 3D base + conversation glyph (beta feedback:
-                // the flat circle read washed-out next to its 3D row-mates)
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Overlay3DActionButton(
                     label = "Thread",
                     rimColors = listOf(Color.Cyan.copy(alpha = 0.8f), Color(0xFF2196F3).copy(alpha = 0.5f)),
                     glowColor = Color.Cyan,
                     onClick = {
-                        // Option 1 entry: parent video keeps playing — no
-                        // pauseAllVideos broadcast, no navigation. onThreadTap
-                        // is now the panel-open callback (see line ~661).
+                        // Parent video keeps playing — the thread preview
+                        // panel slides in over the bottom of the feed.
                         onThreadTap()
                     }
                 ) {
                     Icon(Icons.Default.Forum, "Thread", tint = Color.White, modifier = Modifier.size(OverlaySizes.ICON_SIZE))
                 }
+            }
 
-                // Cool Button - Progressive 3D
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 if (engagementViewModel != null && iconManager != null) {
                     ProgressiveCoolButton3D(
                         videoID = video.id,
@@ -1668,15 +1706,8 @@ private fun BottomSection(
                 }
             }
 
-            // Gap between groups
-            Spacer(modifier = Modifier.width(32.dp))
-
-            // Right group: Swappable (Hype/Tip) + Stitch
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Swappable Hype / Tip slot — swipe UP = tip, DOWN = hype
+            // Swappable Hype / Tip slot — swipe UP = tip, DOWN = hype
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 SwappableEngagementSlot(
                     video = video,
                     videoEngagement = videoEngagement,
@@ -1690,12 +1721,13 @@ private fun BottomSection(
                     hapticFeedback = hapticFeedback,
                     onAction = onAction
                 )
+            }
 
-                // Stitch Button (conditional). For COLLECTION context the button
-                // *looks* like Reply (cyan, reply-arrow icon) but still emits
-                // StitchRecording — the caller turns that into the recording flow
-                // with the segment as parent.
-                if (canReply) {
+            // Stitch (conditional). For COLLECTION context it looks like
+            // Reply but still emits StitchRecording — the caller turns that
+            // into the recording flow with the segment as parent.
+            if (canReply) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Overlay3DActionButton(
                         label = stitchButtonLabel,
                         rimColors = listOf(
@@ -1704,8 +1736,7 @@ private fun BottomSection(
                         ),
                         glowColor = StitchColors.primary,
                         onClick = {
-                            // Stitch / reply / spin-off: suspended accounts get the
-                            // sheet; playback isn't even paused.
+                            // Suspended accounts get the sheet; playback isn't even paused.
                             if (!com.stitchsocial.club.services.AccountStanding.guardPosting()) return@Overlay3DActionButton
                             pauseAllVideos(context)
                             onAction?.invoke(OverlayAction.StitchRecording)
@@ -1722,160 +1753,6 @@ private fun BottomSection(
 // ============================================================================
 // MARK: - INLINE COMPONENTS
 // ============================================================================
-
-// MARK: - Creator Pill
-
-/**
- * "with @a", "with @a and @b", "with @a and 2 others" — the last because four
- * handles do not fit on a phone next to a name.
- */
-private fun collaboratorCredit(
-    collaborators: List<com.stitchsocial.club.services.Collaborator>
-): String {
-    val handles = collaborators.map { it.handle }
-    return when (handles.size) {
-        0 -> ""
-        1 -> "with ${handles[0]}"
-        2 -> "with ${handles[0]} and ${handles[1]}"
-        else -> "with ${handles[0]} and ${handles.size - 1} others"
-    }
-}
-
-@Composable
-private fun CreatorPill(
-    displayName: String,
-    profileImageURL: String?,
-    temperatureColor: Color,
-    isThread: Boolean,
-    /// Accepted collaborators, for the "with @x" credit. Empty on nearly every
-    /// post, so the line simply does not render rather than reserving space.
-    collaborators: List<com.stitchsocial.club.services.Collaborator> = emptyList(),
-    /// Posted from a Landing's post step (`incentivized`). The label is how a
-    /// paid-for post stays honest, so it sits with the name, on every surface
-    /// this overlay renders (feed, thread, fullscreen).
-    /// The video whose Landing chips ("At {name}", "Posted for a perk") sit
-    /// under the name. Only the video's own creator pill passes it.
-    landingVideo: com.stitchsocial.club.foundation.CoreVideoMetadata? = null,
-    /// Promoted now (or shown in the ad position): the "Sponsored" chip beside
-    /// the name. Disclosure, so it shows on every surface the post renders.
-    isSponsored: Boolean = false,
-    onClick: () -> Unit
-) {
-    val imageSize: Dp = if (isThread) OverlaySizes.PROFILE_IMAGE_THREAD else OverlaySizes.PROFILE_IMAGE
-    val cornerRadius: Dp = if (isThread) 16.dp else 12.dp
-    val fontSize = if (isThread) OverlaySizes.LABEL_LARGE.fixedSp() else OverlaySizes.LABEL_MEDIUM.fixedSp()
-    val threadLabelSize = OverlaySizes.LABEL_TINY.fixedSp()
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(Color.Black.copy(alpha = 0.4f))
-            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(cornerRadius))
-            .clickable(onClick = onClick)
-            .padding(horizontal = if (isThread) 12.dp else 8.dp, vertical = if (isThread) 8.dp else 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Profile image with gradient border
-        Box(
-            modifier = Modifier.size(imageSize),
-            contentAlignment = Alignment.Center
-        ) {
-            // Gradient border
-            val gradientColors: List<Color> = if (isThread) {
-                listOf(Color(0xFF9C27B0), Color(0xFFE91E63))
-            } else {
-                when {
-                    temperatureColor == Color.Red -> listOf(Color.Red, Color(0xFFFF8C00))
-                    temperatureColor == Color.Blue -> listOf(Color.Blue, Color.Cyan)
-                    temperatureColor == Color(0xFFFF8C00) -> listOf(Color(0xFFFF8C00), Color.Yellow)
-                    temperatureColor == Color.Cyan -> listOf(Color.Cyan, Color.Blue)
-                    else -> listOf(Color.Gray, Color.White)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(imageSize)
-                    .clip(CircleShape)
-                    .background(brush = Brush.linearGradient(gradientColors))
-            )
-
-            // Profile image
-            Box(
-                modifier = Modifier
-                    .size(imageSize - 4.dp)
-                    .clip(CircleShape)
-                    .background(Color.Gray.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (!profileImageURL.isNullOrEmpty()) {
-                    AsyncImage(
-                        model = profileImageURL,
-                        contentDescription = "Profile",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().clip(CircleShape)
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.6f),
-                        modifier = Modifier.size(imageSize * 0.5f)
-                    )
-                }
-            }
-        }
-
-        // Name + thread indicator
-        Column {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = displayName,
-                    fontSize = fontSize,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    maxLines = 1
-                )
-                if (isThread) {
-                    Text(
-                        text = "thread creator",
-                        fontSize = threadLabelSize,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                }
-                if (isSponsored) {
-                    SponsoredChip(fontSize = threadLabelSize)
-                }
-            }
-            // Credit, once somebody has accepted. Under the creator rather
-            // than beside them, because a collaborator shares the clout and
-            // the reach, not the authorship.
-            if (collaborators.isNotEmpty()) {
-                Text(
-                    text = collaboratorCredit(collaborators),
-                    fontSize = threadLabelSize,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.6f),
-                    maxLines = 1
-                )
-            }
-            if (landingVideo != null) {
-                val pillContext = LocalContext.current
-                com.stitchsocial.club.landing.VideoLandingChips(
-                    video = landingVideo,
-                    modifier = Modifier.padding(top = 3.dp),
-                    fontSize = threadLabelSize,
-                    beforeOpen = { pauseAllVideos(pillContext) }
-                )
-            }
-        }
-    }
-}
 
 // MARK: - Tagged Users Row
 
@@ -1942,56 +1819,6 @@ private fun TaggedUsersRow(
                     .background(Color(0xFF9C27B0).copy(alpha = 0.9f), RoundedCornerShape(50))
                     .padding(horizontal = 5.dp, vertical = 2.dp)
             )
-        }
-    }
-}
-
-// MARK: - Video Metadata Row
-
-@Composable
-private fun VideoMetadataRow(
-    engagement: ContextualVideoEngagement?,
-    isUserVideo: Boolean,
-    onViewersTap: () -> Unit
-) {
-    val labelFontSize = OverlaySizes.LABEL_SMALL.fixedSp()
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (engagement != null) {
-            // Views (tappable for creator)
-            if (isUserVideo) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF9C27B0).copy(alpha = 0.2f))
-                        .clickable(onClick = onViewersTap)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
-                    Text("${formatCount(engagement.viewCount)} views", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
-                    Text("${formatCount(engagement.viewCount)} views", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.9f))
-                }
-            }
-
-            Text("Ã¢â‚¬Â¢", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.5f))
-
-            // Stitches
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.ContentCut, null, tint = Color.Cyan.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
-                Text("${formatCount(engagement.replyCount)} stitches", fontSize = labelFontSize, fontWeight = FontWeight.Medium, color = Color.Cyan.copy(alpha = 0.9f))
-            }
-        } else {
-            Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(OverlaySizes.ICON_SIZE_TINY))
-            Text("Loading...", fontSize = labelFontSize, color = Color.White.copy(alpha = 0.9f))
         }
     }
 }

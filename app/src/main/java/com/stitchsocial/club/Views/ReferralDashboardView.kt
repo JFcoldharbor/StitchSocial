@@ -40,6 +40,9 @@ import com.stitchsocial.club.services.ReferralInfo
 import com.stitchsocial.club.services.ReferralService
 import com.stitchsocial.club.services.ReferralStats
 import com.stitchsocial.club.services.ReferralStatus
+import com.stitchsocial.club.services.ShareResult
+import com.stitchsocial.club.services.ShareService
+import com.stitchsocial.club.services.TeenSafety
 import com.stitchsocial.club.ui.theme.StitchColors
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -63,6 +66,8 @@ fun ReferralDashboardView(
     var showingError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var showingInviteQR by remember { mutableStateOf(false) }
+    var isMakingInviteVideo by remember { mutableStateOf(false) }
+    val inviteVideoProgress by ShareService.exportProgress.collectAsState()
 
     // Load once on appear — mirrors iOS .task { guard !hasFetchedOnce }
     LaunchedEffect(Unit) {
@@ -100,6 +105,28 @@ fun ReferralDashboardView(
                 showingError = true
             } finally {
                 isGeneratingLink = false
+            }
+        }
+    }
+
+    // Invite with my video: the user's most-hyped eligible post, sent as a file
+    // that ends on their invite card (plays inline in Messenger / IG DMs).
+    fun handleInviteWithVideo() {
+        scope.launch {
+            isMakingInviteVideo = true
+            try {
+                val video = ShareService.pickInviteVideo(userID)
+                if (video == null) {
+                    android.widget.Toast.makeText(context, "Post a video first, then you can invite with it.", android.widget.Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                val result = ShareService.shareInviteVideo(context, video, video.creatorName)
+                if (result is ShareResult.Error) {
+                    errorMessage = result.message
+                    showingError = true
+                }
+            } finally {
+                isMakingInviteVideo = false
             }
         }
     }
@@ -177,6 +204,15 @@ fun ReferralDashboardView(
 
                     // In person: the QR of the same invite link (INVITE_CONTRACT §3).
                     ShowInviteQRButton(onClick = { showingInviteQR = true })
+
+                    // In DMs: their own video as a file, ending on the invite card.
+                    if (!TeenSafety.viewerIsTeen) {
+                        InviteWithVideoButton(
+                            isWorking = isMakingInviteVideo,
+                            progressText = inviteVideoProgress,
+                            onClick = { handleInviteWithVideo() }
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(40.dp))
                 }
@@ -597,6 +633,31 @@ private fun ShowInviteQRButton(onClick: () -> Unit) {
         Icon(Icons.Default.QrCode2, contentDescription = null, tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Text("Show my invite QR", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary)
+    }
+}
+
+@Composable
+private fun InviteWithVideoButton(isWorking: Boolean, progressText: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, AppTheme.colors.textPrimary.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .clickable(enabled = !isWorking, onClick = onClick),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isWorking) {
+            CircularProgressIndicator(color = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = AppTheme.colors.textPrimary, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (isWorking) progressText.ifBlank { "Making your invite video…" } else "Invite with my video",
+            fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppTheme.colors.textPrimary
+        )
     }
 }
 

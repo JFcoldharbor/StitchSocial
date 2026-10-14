@@ -427,6 +427,10 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(MainAppTab.DISCOVERY) }  // ✅ Launch to Discovery
 
+    // Inbox — no longer a tab (iOS parity). Discover's bell, a notification
+    // tap or a deep link opens it full screen over whatever tab is up.
+    var isShowingInbox by remember { mutableStateOf(false) }
+
     // ✅ NEW: Track when ThreadView is active (renders on top of tab bar)
     var isShowingThreadView by remember { mutableStateOf(false) }
     var threadViewThreadID by remember { mutableStateOf<String?>(null) }
@@ -502,15 +506,25 @@ fun MainScreen() {
         ShareService.initialize(context)
     }
 
-    // Event deep-link: the Hub is presented by DiscoveryView (it owns the root
-    // overlay and the shared EventsViewModel), so all this layer does is make
-    // sure that tab is on screen. Serves both sources — the in-app Notifications
-    // tap and the FCM intent above. DiscoveryView consumes the id as it opens.
+    // Event deep-link: the Hub is presented by the Events tab (EventsTabView
+    // owns the overlay and the EventsViewModel), so all this layer does is make
+    // sure that tab is on screen. Serves both sources — the in-app Inbox tap and
+    // the FCM intent above. EventsTabView consumes the id as it opens.
+    //
+    // A teen has no Events tab (MainAppTab.teenLaneTabs), so a link to an event
+    // is dropped rather than opening a room the lane keeps them out of.
     val pendingEventID by com.stitchsocial.club.events.EventDeepLink.pending
     LaunchedEffect(pendingEventID) {
-        if (pendingEventID != null && selectedTab != MainAppTab.DISCOVERY) {
-            Log.d("STITCH_MAIN", "📅 Event deep-link pending -> switching to Discovery")
-            selectedTab = MainAppTab.DISCOVERY
+        if (pendingEventID == null) return@LaunchedEffect
+        if (com.stitchsocial.club.services.TeenSafety.viewerIsTeen) {
+            Log.d("STITCH_MAIN", "📅 Event deep-link dropped — teen lane has no Events")
+            com.stitchsocial.club.events.EventDeepLink.consume()
+            return@LaunchedEffect
+        }
+        isShowingInbox = false
+        if (selectedTab != MainAppTab.EVENTS) {
+            Log.d("STITCH_MAIN", "📅 Event deep-link pending -> switching to Events")
+            selectedTab = MainAppTab.EVENTS
         }
     }
 
@@ -529,7 +543,7 @@ fun MainScreen() {
                 isShowingCommunity = true
             } else {
                 // Gone or unreadable — the inbox beats a tap that does nothing.
-                selectedTab = MainAppTab.NOTIFICATIONS
+                isShowingInbox = true
             }
         }
     }
@@ -807,14 +821,15 @@ fun MainScreen() {
         notificationVideo = null
         notificationScreen = null
         notificationCampaign = null
+        isShowingInbox = false
         com.stitchsocial.club.landing.LandingPresenter.dismissAll()
         com.stitchsocial.club.landing.LandingPostRouter.cancel()
         interruptGeneration++
 
         when (destination) {
             is NotificationDestination.Event -> {
+                // The pendingEventID effect switches to the Events tab.
                 com.stitchsocial.club.events.EventDeepLink.request(destination.eventID)
-                selectedTab = MainAppTab.DISCOVERY
             }
             is NotificationDestination.Live ->
                 com.stitchsocial.club.live.LiveDeepLink.request(destination.communityID, destination.streamID)
@@ -825,7 +840,7 @@ fun MainScreen() {
                     // A dead shared link has no inbox row to land on; stay put.
                     if (request.type != NotificationRouter.TYPE_SHARED_LINK) {
                         Log.d("STITCH_MAIN", "📱 Notification video ${destination.videoID} missing -> inbox")
-                        selectedTab = MainAppTab.NOTIFICATIONS
+                        isShowingInbox = true
                     } else {
                         Log.d("STITCH_MAIN", "🔗 Linked video ${destination.videoID} missing")
                     }
@@ -845,7 +860,7 @@ fun MainScreen() {
                     selectedCommunityItem = communityListItem(community, isLive = false)
                     isShowingCommunity = true
                 } else {
-                    selectedTab = MainAppTab.NOTIFICATIONS
+                    isShowingInbox = true
                 }
             }
             is NotificationDestination.Campaign -> scope.launch {
@@ -870,7 +885,7 @@ fun MainScreen() {
                 )
             )
             NotificationDestination.Home -> selectedTab = MainAppTab.HOME
-            NotificationDestination.Inbox -> selectedTab = MainAppTab.NOTIFICATIONS
+            NotificationDestination.Inbox -> isShowingInbox = true
         }
     }
 
@@ -1030,6 +1045,8 @@ fun MainScreen() {
                                 isShowingCommunity = true
                             },
                             onDashActiveChange = { isDashActive = it },
+                            onOpenInbox = { isShowingInbox = true },
+                            isInboxShowing = isShowingInbox,
                             onTabBarVisibilityChange = { visible ->
                                 isShowingCollectionPlayer = !visible
                             }
@@ -1056,7 +1073,7 @@ fun MainScreen() {
                     // not as well as it.
                     if (!accountSuspendedNow && streakCurrent >= 1 && !isDashActive && currentModal == ModalState.NONE && !isShowingThreadView &&
                         notificationVideo == null && notificationScreen == null && landingScreen == null &&
-                        !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity &&
+                        !isShowingAnnouncement && !isShowingCollectionPlayer && !isShowingCommunity && !isShowingInbox &&
                         !streakBannerDismissed && StreakService.shared.isAtRisk) {
                         StreakBanner(
                             hoursLeft = StreakService.shared.hoursUntilBreak,
@@ -1085,7 +1102,7 @@ fun MainScreen() {
                         (selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.PROGRESSION) &&
                         currentModal == ModalState.NONE && !isShowingThreadView && notificationVideo == null &&
                         notificationScreen == null && landingScreen == null && !isShowingAnnouncement &&
-                        !isShowingCollectionPlayer && !isShowingCommunity
+                        !isShowingCollectionPlayer && !isShowingCommunity && !isShowingInbox
                     ) {
                         AccountSuspensionBanner(
                             modifier = Modifier
@@ -1100,7 +1117,7 @@ fun MainScreen() {
                         if (!accountSuspendedNow && (selectedTab == MainAppTab.HOME || selectedTab == MainAppTab.DISCOVERY) &&
                             currentModal == ModalState.NONE && !isShowingThreadView && notificationVideo == null &&
                             notificationScreen == null && landingScreen == null && !isShowingAnnouncement &&
-                            !isShowingCollectionPlayer && !isShowingCommunity
+                            !isShowingCollectionPlayer && !isShowingCommunity && !isShowingInbox
                         ) {
                             com.stitchsocial.club.landing.LandingHomeBanner(
                                 landing = nearest,
@@ -1141,7 +1158,7 @@ fun MainScreen() {
                     val fullScreenSurfaceUp by com.stitchsocial.club.foundation
                         .FullScreenSurfaceState.isUp.collectAsState()
                     val shouldShowTabBar = currentModal == ModalState.NONE && !isShowingAnnouncement &&
-                        !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity &&
+                        !isShowingThreadView && !isShowingCollectionPlayer && !isShowingCommunity && !isShowingInbox &&
                         !fullScreenSurfaceUp && notificationVideo == null && notificationScreen == null &&
                         landingScreen == null && activePerk == null
                     LaunchedEffect(shouldShowTabBar, fullScreenSurfaceUp, isShowingCommunity) {
@@ -1259,6 +1276,35 @@ fun MainScreen() {
                                 }
                             )
                         }
+                    }
+                }
+
+                // Inbox — full screen over any tab (iOS fullScreenCover). Below
+                // ProfileView (50) and ThreadView, so a notification that opens a
+                // profile or a thread lands on top of it, and closing that comes
+                // back to the inbox.
+                if (isShowingInbox) {
+                    androidx.activity.compose.BackHandler { isShowingInbox = false }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(45f)
+                            .background(StitchColors.background)
+                    ) {
+                        NotificationViewComplete(
+                            navigationCoordinator = navigationCoordinator,
+                            onShowThreadView = { threadID, targetVideoID ->
+                                threadViewThreadID = threadID
+                                threadViewTargetVideoID = targetVideoID
+                                isShowingThreadView = true
+                            },
+                            onNavigateToProfile = { userId ->
+                                profileViewUserID = userId
+                                isShowingProfileView = true
+                            },
+                            onClose = { isShowingInbox = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
 
@@ -1846,7 +1892,11 @@ private fun TabContent(
     onShowCommunity: (CommunityListItem) -> Unit = {},
     onTabBarVisibilityChange: (Boolean) -> Unit = {},
     /** Home reports which of its two surfaces is up. */
-    onDashActiveChange: (Boolean) -> Unit = {}
+    onDashActiveChange: (Boolean) -> Unit = {},
+    /** Discover's bell. */
+    onOpenInbox: () -> Unit = {},
+    /** Inbox is drawn over the tab — Discover pauses its feed under it. */
+    isInboxShowing: Boolean = false
 ) {
     when (selectedTab) {
         MainAppTab.HOME -> {
@@ -1878,6 +1928,8 @@ private fun TabContent(
                 onTabBarVisibilityChange = onTabBarVisibilityChange,
                 isAnnouncementShowing = isAnnouncementShowing,
                 navigationCoordinator = navigationCoordinator,
+                onOpenInbox = onOpenInbox,
+                externallyCovered = isInboxShowing,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -1889,11 +1941,12 @@ private fun TabContent(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        MainAppTab.NOTIFICATIONS -> {
-            NotificationViewComplete(
+        MainAppTab.EVENTS -> {
+            com.stitchsocial.club.views.EventsTabView(
                 navigationCoordinator = navigationCoordinator,
-                onShowThreadView = onShowThreadView,
+                isAnnouncementShowing = isAnnouncementShowing,
                 onNavigateToProfile = onShowProfileView,
+                onShowThreadView = onShowThreadView,
                 modifier = Modifier.fillMaxSize()
             )
         }

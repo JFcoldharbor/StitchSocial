@@ -1,10 +1,15 @@
 package com.stitchsocial.club.services
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.google.firebase.Timestamp
 import com.google.firebase.functions.FirebaseFunctions
 import com.stitchsocial.club.AppConfig
 import com.stitchsocial.club.BuildConfig
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 
@@ -105,6 +110,27 @@ object InviteService {
             boost = boost
         )
     }
+
+    /**
+     * The raw QR module matrix for an invite link (1 px per module, no quiet
+     * zone — callers draw it on white, which is the quiet zone). Error
+     * correction H so a mark over the middle doesn't matter. Shared by the
+     * invite QR screen and the invite-video end card.
+     */
+    fun qrBitmap(content: String): Bitmap? = runCatching {
+        val hints = mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
+            EncodeHintType.MARGIN to 0,
+            EncodeHintType.CHARACTER_SET to "UTF-8"
+        )
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, 0, 0, hints)
+        val w = matrix.width
+        val h = matrix.height
+        val pixels = IntArray(w * h) { i ->
+            if (matrix.get(i % w, i / w)) 0xFF111111.toInt() else 0xFFFFFFFF.toInt()
+        }
+        Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }.getOrNull()
 
     /**
      * A callable hands a Firestore Timestamp back as `{_seconds, _nanoseconds}`

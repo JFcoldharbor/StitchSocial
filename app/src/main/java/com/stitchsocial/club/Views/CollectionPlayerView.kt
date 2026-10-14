@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.input.pointer.pointerInput
@@ -256,9 +257,37 @@ fun CollectionPlayerView(
                                     tick = (seekFeedback?.tick ?: 0) + 1)
     }
 
+    // ── Fading controls (iOS showOverlayBriefly) ──────────────────
+    // The top bar and the engagement overlay fade out 5s after the last tap
+    // (0.4s ease-out) and come back on a tap or a new part — "Part 6 of 12",
+    // then the video alone. A bumped tick restarts the countdown.
+    var showOverlay by remember { mutableStateOf(true) }
+    var overlayTick by remember { mutableIntStateOf(0) }
+    fun showOverlayBriefly() { showOverlay = true; overlayTick++ }
+    LaunchedEffect(overlayTick) {
+        delay(5_000)
+        showOverlay = false
+    }
+    val overlayAlpha by animateFloatAsState(
+        targetValue = if (showOverlay) 1f else 0f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "collectionOverlayAlpha"
+    )
+    val overlayDrawn = showOverlay || overlayAlpha > 0.01f
+    // Show where you landed on every part change.
+    LaunchedEffect(currentIndex) { showOverlayBriefly() }
+
+    // The show's top bar (close, part bars, title) sits over the overlay's
+    // top row, so the overlay's top content starts below it rather than
+    // under it. Measured, because the bar's height follows the status bar.
+    var topBarHeightPx by remember { mutableIntStateOf(0) }
+    val overlayTopInset = with(density) { (topBarHeightPx.toDp() - 42.dp).coerceAtLeast(0.dp) }
+
     // Overlay state
     var showThreadView by remember { mutableStateOf(false) }
     var threadTargetVideo by remember { mutableStateOf<CoreVideoMetadata?>(null) }
+    /** The clip the thread player should open on, when it isn't the part itself. */
+    var threadFocusID by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(collection.id) {
         viewModel.loadCollection(collection, userID, startingIndex.takeIf { it > 0 })
@@ -440,14 +469,26 @@ fun CollectionPlayerView(
                         // Double-tap an edge to skip 10s: left 30% back, right 30%
                         // forward. Taps the overlay's buttons consume never get
                         // here, so hype/cool/reply are unaffected.
+                        //
+                        // A single tap pauses/plays and brings the controls back.
+                        // detectTapGestures waits for a double tap to fail before
+                        // calling onTap, so a skip never also pauses (iOS
+                        // exclusively(before:)).
                         .pointerInput(segmentCount, currentIndex) {
-                            detectTapGestures(onDoubleTap = { offset ->
-                                if (adBreak != null) return@detectTapGestures
-                                when {
-                                    offset.x < size.width * 0.30f -> skip(back = true)
-                                    offset.x > size.width * 0.70f -> skip(back = false)
+                            detectTapGestures(
+                                onDoubleTap = { offset ->
+                                    if (adBreak != null) return@detectTapGestures
+                                    when {
+                                        offset.x < size.width * 0.30f -> skip(back = true)
+                                        offset.x > size.width * 0.70f -> skip(back = false)
+                                    }
+                                },
+                                onTap = {
+                                    if (adBreak != null) return@detectTapGestures
+                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    showOverlayBriefly()
                                 }
-                            })
+                            )
                         }
                 ) {
                     // ── Video + overlay — same Box, overlay on top (HomeFeed pattern)
@@ -477,10 +518,19 @@ fun CollectionPlayerView(
                         )
 
                         // Overlay sits as a sibling above the player — same shape
-                        // HomeFeedView uses. No AnimatedVisibility / no auto-hide; the
-                        // earlier wrapper was breaking pointer routing so taps on the
-                        // hype/cool/reply buttons never landed.
-                        currentSegment?.let { seg ->
+                        // HomeFeedView uses. Not AnimatedVisibility: that wrapper
+                        // broke pointer routing, so hype/cool/reply taps never
+                        // landed. A plain Box with a graphicsLayer alpha does the
+                        // fade and leaves touches alone. Fades with the top bar;
+                        // while hidden it isn't drawn, so a tap anywhere reaches
+                        // the tap zone and brings it back.
+                        currentSegment?.takeIf { overlayDrawn }?.let { seg ->
+                          Box(
+                              Modifier
+                                  .fillMaxSize()
+                                  .graphicsLayer { alpha = overlayAlpha }
+                                  .padding(top = overlayTopInset)
+                          ) {
                             ContextualVideoOverlay(
                                 video = seg,
                                 overlayContext = OverlayContext.COLLECTION,
@@ -490,6 +540,20 @@ fun CollectionPlayerView(
                                 iconManager = iconManager,
                                 followManager = followManager,
                                 isVisible = !isDragging,
+                                // Thread rail tile. Another part of this show
+                                // plays here; a reply to a part opens in the
+                                // thread player, focused on it.
+                                onSelectStitch = { target ->
+                                    val idx = segments.indexOfFirst { it.id == target.id }
+                                    if (idx >= 0) {
+                                        viewModel.seekToSegment(idx)
+                                    } else {
+                                        threadTargetVideo = seg
+                                        threadFocusID = target.id
+                                        showThreadView = true
+                                    }
+                                    true
+                                },
                                 onAction = { action ->
                                     when (action) {
                                         // Reply button on collection overlay is wired
@@ -503,12 +567,14 @@ fun CollectionPlayerView(
                                         // replies without opening the camera.
                                         is OverlayAction.NavigateToThread -> {
                                             threadTargetVideo = seg
+                                            threadFocusID = null
                                             showThreadView = true
                                         }
                                         else -> {}
                                     }
                                 }
                             )
+                          }
                         }
                     }
                 }
@@ -520,17 +586,23 @@ fun CollectionPlayerView(
                 )
 
                 // ── Top bar ───────────────────────────────────────────
-                CollectionTopBar(
-                    collection = collection,
-                    segmentCount = segmentCount,
-                    currentIndex = currentIndex,
-                    partProgress = partProgress,
-                    onClose = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .zIndex(10f)
-                )
+                // Fades with the overlay; it sat over the top of the video for
+                // the whole episode otherwise.
+                if (overlayDrawn) {
+                    CollectionTopBar(
+                        collection = collection,
+                        segmentCount = segmentCount,
+                        currentIndex = currentIndex,
+                        partProgress = partProgress,
+                        onClose = onDismiss,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .zIndex(10f)
+                            .onSizeChanged { topBarHeightPx = it.height }
+                            .graphicsLayer { alpha = overlayAlpha }
+                    )
+                }
 
                 // ── Ad break — over everything but the thread sheet ───
                 adBreak?.let { (ad, next) ->
@@ -577,12 +649,13 @@ fun CollectionPlayerView(
                                 ThreadView(
                                     threadID = seg.threadID ?: seg.id,
                                     videoService = vs,
-                                    targetVideoID = seg.id,
+                                    targetVideoID = threadFocusID ?: seg.id,
                                     currentUserID = userID.takeIf { it.isNotEmpty() },
                                     onTabBarVisibilityChange = {},
                                     onDismiss = {
                                         showThreadView = false
                                         threadTargetVideo = null
+                                        threadFocusID = null
                                     }
                                 )
                             }

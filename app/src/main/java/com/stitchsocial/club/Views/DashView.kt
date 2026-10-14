@@ -112,6 +112,12 @@ fun DashView(
     var showingRank by remember { mutableStateOf(false) }
     var showingBadges by remember { mutableStateOf(false) }
 
+    // "See all" communities. Community left Discover's rail (iOS parity), so
+    // Dash is where the full list lives — presented here, as iOS DashView does,
+    // unless the caller routes it somewhere else.
+    var showingCommunities by remember { mutableStateOf(false) }
+    val openCommunities: () -> Unit = onOpenCommunities ?: { showingCommunities = true }
+
     // The service keeps a live listener, so a badge awarded while Dash is open
     // appears without a refresh.
     val badgeService = remember { BadgeService.shared }
@@ -249,13 +255,13 @@ fun DashView(
             if (communities.isNotEmpty()) {
                 DashCommunities(
                     communities = communities,
-                    onOpenCommunities = onOpenCommunities,
+                    onOpenCommunities = openCommunities,
                     onTap = { openCommunity = CommunityRoute(it, joinLive = false) }
                 )
             } else if (suggested.isNotEmpty()) {
                 DashSuggested(
                     suggested = suggested,
-                    onOpenCommunities = onOpenCommunities,
+                    onOpenCommunities = openCommunities,
                     onTap = { openCommunity = CommunityRoute(it, joinLive = false) }
                 )
             }
@@ -275,6 +281,22 @@ fun DashView(
             // section that can only ever be empty is worse than no section.
 
             Spacer(Modifier.height(90.dp))   // clear the dipped tab bar
+        }
+    }
+
+    if (showingCommunities) {
+        // Full screen: the tab bar steps aside while the list is up.
+        DisposableEffect(Unit) {
+            com.stitchsocial.club.foundation.FullScreenSurfaceState.set(true)
+            onDispose { com.stitchsocial.club.foundation.FullScreenSurfaceState.clear() }
+        }
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            CommunityListView(
+                userID = userID,
+                onShowCommunity = { openCommunity = CommunityRoute(it, joinLive = false) },
+                onClose = { showingCommunities = false },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 

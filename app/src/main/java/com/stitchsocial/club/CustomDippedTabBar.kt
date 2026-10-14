@@ -81,24 +81,26 @@ enum class MainAppTab(
     HOME("home", "Home", Icons.Outlined.Home, Icons.Filled.Home),
     DISCOVERY("discovery", "Discover", Icons.Outlined.Search, Icons.Filled.Search),
     PROGRESSION("progression", "Profile", Icons.Outlined.Person, Icons.Filled.Person),
-    NOTIFICATIONS("notifications", "Inbox", Icons.Outlined.Notifications, Icons.Filled.Notifications);
+    // Inbox left the bar (iOS parity): it is a bell beside search in
+    // Discover's toolbar, and Events took its place as a tab of its own.
+    EVENTS("events", "Events", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth);
 
     companion object {
         val leftSideTabs = listOf(HOME, DISCOVERY)
-        val rightSideTabs = listOf(PROGRESSION, NOTIFICATIONS)
+        val rightSideTabs = listOf(PROGRESSION, EVENTS)
 
         /**
          * What a 13-17 viewer gets — iOS parity (MainAppTab.teenLaneTabs).
          *
-         * Home, Discovery and Search filter every video through TeenSafety,
-         * Profile is their own and Inbox is their own activity. Nothing is
-         * removed today; the set exists so the next tab has to be added to it
-         * deliberately rather than appearing in a teen's bar by default. On
-         * iOS that already matters — Events is excluded there, because an
-         * event is a live room with guest POVs that nothing scans before they
-         * appear, which is a supervision problem rather than a filtering one.
+         * Home and Discovery filter every video through TeenSafety, and Profile
+         * is their own. Events is left out: an event is a live room with guest
+         * POVs that nothing scans before they appear, which is a supervision
+         * problem rather than a filtering one. Inbox is no longer a tab — the
+         * bell in Discover's toolbar is open to teens. The set exists so the
+         * next tab has to be added to it deliberately rather than appearing in
+         * a teen's bar by default.
          */
-        val teenLaneTabs = setOf(HOME, DISCOVERY, PROGRESSION, NOTIFICATIONS)
+        val teenLaneTabs = setOf(HOME, DISCOVERY, PROGRESSION)
     }
 }
 

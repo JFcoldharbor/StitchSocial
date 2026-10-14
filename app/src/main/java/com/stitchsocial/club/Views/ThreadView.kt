@@ -792,6 +792,13 @@ private fun FullscreenThreadPlayer(
                     engagementViewModel = engagementViewModel,
                     iconManager = iconMgr,
                     followManager = followManager,
+                    // Thread rail tile: page to it. This pager is the thread,
+                    // so a clip it doesn't hold is deeper than the rail draws.
+                    onSelectStitch = { target ->
+                        val idx = videos.indexOfFirst { it.id == target.id }
+                        if (idx >= 0) scope.launch { pagerState.animateScrollToPage(idx) }
+                        idx >= 0
+                    },
                     onAction = { action ->
                         when (action) {
                             is OverlayAction.NavigateToThread -> {

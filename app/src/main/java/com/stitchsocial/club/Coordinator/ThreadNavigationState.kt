@@ -161,6 +161,12 @@ fun ThreadNavigationContainer(
                 currentUserID = currentUserID,
                 engagementCoordinator = engagementCoordinator,
                 navigationState = navigationState,
+                // Thread rail tile: page to it when the pager holds it.
+                onSelectStitch = { target ->
+                    val idx = allVideosInThread.indexOfFirst { it.id == target.id }
+                    if (idx >= 0) coroutineScope.launch { pagerState.animateScrollToPage(idx) }
+                    idx >= 0
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -192,6 +198,7 @@ fun ThreadVideoView(
     currentUserID: String,
     engagementCoordinator: EngagementCoordinator,
     navigationState: ThreadNavigationState,
+    onSelectStitch: ((CoreVideoMetadata) -> Boolean)? = null,
     modifier: Modifier = Modifier
 ) {
     // ✅ ADD: Initialize view models
@@ -220,6 +227,7 @@ fun ThreadVideoView(
             currentUserTier = UserTier.ROOKIE,
             engagementViewModel = engagementViewModel,  // ✅ ADDED
             iconManager = iconManager,                  // ✅ ADDED
+            onSelectStitch = onSelectStitch,
             onAction = { action: OverlayAction ->
                 when (action) {
                     is OverlayAction.NavigateToProfile -> {

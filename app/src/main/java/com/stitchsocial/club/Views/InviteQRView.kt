@@ -72,10 +72,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.stitchsocial.club.BuildConfig
 import com.stitchsocial.club.R
 import com.stitchsocial.club.services.InviteService
@@ -138,20 +134,7 @@ internal fun InviteAvatar(
  * The raw module matrix (1 px per module, no quiet zone; the white card is the
  * quiet zone). Drawn scaled with FilterQuality.None so modules stay crisp.
  */
-internal fun inviteQRBitmap(content: String): Bitmap? = runCatching {
-    val hints = mapOf(
-        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
-        EncodeHintType.MARGIN to 0,
-        EncodeHintType.CHARACTER_SET to "UTF-8"
-    )
-    val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, 0, 0, hints)
-    val w = matrix.width
-    val h = matrix.height
-    val pixels = IntArray(w * h) { i ->
-        if (matrix.get(i % w, i / w)) 0xFF111111.toInt() else 0xFFFFFFFF.toInt()
-    }
-    Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
-}.getOrNull()
+internal fun inviteQRBitmap(content: String): Bitmap? = InviteService.qrBitmap(content)
 
 private data class InviteQRProfile(
     val username: String,
