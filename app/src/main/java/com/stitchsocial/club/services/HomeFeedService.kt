@@ -91,27 +91,23 @@ class HomeFeedService(
             val recentlySeenIDs = viewHistory?.getRecentlySeenVideoIDs() ?: emptySet()
             if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Excluding ${recentlySeenIDs.size} recently seen videos") }
 
-            val allThreads = mutableListOf<ThreadData>()
-
-            // 40% recent (last 7 days)
-            val recentThreads = getRecentContent(followingIDs, (limit * 0.4).toInt(), recentlySeenIDs)
-            allThreads.addAll(recentThreads)
-            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${recentThreads.size} recent threads") }
-
-            // 30% medium-old (7-30 days)
-            val mediumOldThreads = getMediumOldContent(followingIDs, (limit * 0.3).toInt(), recentlySeenIDs)
-            allThreads.addAll(mediumOldThreads)
-            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${mediumOldThreads.size} medium-old threads") }
-
-            // 20% older (30-90 days)
-            val olderThreads = getOlderContent(followingIDs, (limit * 0.2).toInt(), recentlySeenIDs)
-            allThreads.addAll(olderThreads)
-            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${olderThreads.size} older threads") }
-
-            // 10% deep cuts (90-365 days)
-            val deepCutThreads = getDeepCutContent(followingIDs, (limit * 0.1).toInt(), recentlySeenIDs)
-            allThreads.addAll(deepCutThreads)
-            if (BuildConfig.DEBUG) { println("🔍 DEEP DISCOVERY: Loaded ${deepCutThreads.size} deep cut threads") }
+            // The four time ranges at once. They were read one after another,
+            // ~4s each on a phone, so Home sat on "Loading feed..." for ~18s
+            // after launch. None depends on another — duplicates are removed
+            // below — so the wait is now the slowest one.
+            // 40% recent (7 days) · 30% 7–30 days · 20% 30–90 days · 10% 90–365 days
+            val (recentThreads, mediumOldThreads, olderThreads, deepCutThreads) = coroutineScope {
+                listOf(
+                    async { getRecentContent(followingIDs, (limit * 0.4).toInt(), recentlySeenIDs) },
+                    async { getMediumOldContent(followingIDs, (limit * 0.3).toInt(), recentlySeenIDs) },
+                    async { getOlderContent(followingIDs, (limit * 0.2).toInt(), recentlySeenIDs) },
+                    async { getDeepCutContent(followingIDs, (limit * 0.1).toInt(), recentlySeenIDs) }
+                ).awaitAll()
+            }
+            if (BuildConfig.DEBUG) {
+                println("🔍 DEEP DISCOVERY: Loaded ${recentThreads.size} recent, ${mediumOldThreads.size} medium-old, ${olderThreads.size} older, ${deepCutThreads.size} deep cut threads")
+            }
+            val allThreads = recentThreads + mediumOldThreads + olderThreads + deepCutThreads
 
             val dedupedThreads = deduplicateThreads(allThreads)
             val shuffledThreads = dedupedThreads.shuffled()
@@ -170,7 +166,11 @@ class HomeFeedService(
     ): List<ThreadData> {
         if (followingIDs.isEmpty()) return emptyList()
 
-        val fetchLimit = maxOf(limit * 3, 30).toLong()
+        // Each chunk can contribute at most `limit` threads, plus a few the
+        // filters below drop. It asked every chunk for 3× (min 30) — with 226
+        // follows that's ~400 full video docs to keep 16, and processing them
+        // was most of an 18s Home load on a budget phone.
+        val fetchLimit = (limit + 6).toLong()
 
         return try {
             // EVERY followed creator, chunked and run in parallel — not a sample.

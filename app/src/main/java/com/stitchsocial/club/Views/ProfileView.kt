@@ -928,9 +928,6 @@ fun ProfileView(
 
     // ===== VIDEO PLAYER FULLSCREEN =====
     if (showingVideoPlayer && selectedVideo != null) {
-        // Swipe tracking state
-        var swipeOffset by remember { mutableFloatStateOf(0f) }
-
         // No more VideoInfo conversion — the direct mount uses
         // CoreVideoMetadata throughout, like HomeFeedView does.
         val currentVid = selectedVideo!!
@@ -939,40 +936,41 @@ fun ProfileView(
         val prevVideo = if (selectedVideoIndex > 0) currentVideoList.getOrNull(selectedVideoIndex - 1) else null
         val nextVideo = if (selectedVideoIndex < currentVideoList.size - 1) currentVideoList.getOrNull(selectedVideoIndex + 1) else null
 
+        // No header; the tab bar's measured clearance is 0 when it's hidden.
+        val profileBand = MediaFitBand(bottom = TabBarMetrics.clearance)
+        val inList = currentVideoList.getOrNull(selectedVideoIndex)?.id == currentVid.id
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(AppTheme.colors.bg)
-                .pointerInput(selectedVideoIndex, currentVideoList.size) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (swipeOffset < -120f && selectedVideoIndex < currentVideoList.size - 1) {
-                                selectedVideoIndex++
-                                selectedVideo = currentVideoList.getOrNull(selectedVideoIndex)
-                            } else if (swipeOffset > 120f && selectedVideoIndex > 0) {
-                                selectedVideoIndex--
-                                selectedVideo = currentVideoList.getOrNull(selectedVideoIndex)
-                            }
-                            swipeOffset = 0f
-                        },
-                        onDragCancel = { swipeOffset = 0f },
-                        onHorizontalDrag = { _, dragAmount -> swipeOffset += dragAmount }
+        ) {
+            if (inList) {
+                // Swipes between this profile's videos the way the feeds page:
+                // the next one is live and slides in while this one plays
+                // (StitchPager). It switched only on release, with no slide.
+                StitchPager(
+                    videos = currentVideoList,
+                    index = selectedVideoIndex,
+                    onIndexChange = { idx ->
+                        selectedVideoIndex = idx
+                        currentVideoList.getOrNull(idx)?.let { selectedVideo = it }
+                    },
+                    isOnScreen = true,
+                    fitBandFor = { profileBand }
+                )
+            } else {
+                // A clip from the thread rail that isn't one of this profile's
+                // videos plays in place, on its own.
+                key(currentVid.id) {
+                    VideoPlayerComposable(
+                        video = currentVid,
+                        isActive = true,
+                        modifier = Modifier.fillMaxSize(),
+                        fitBand = profileBand,
+                        tapToPause = true
                     )
                 }
-        ) {
-            // Mount the player + overlay directly, mirroring HomeFeedView:447-475
-            // 1:1. The previous FullscreenVideoPlayer wrapper added an extra
-            // layer that wasn't propagating taps cleanly; this puts the same
-            // structure home feed uses, so behavior matches by construction.
-            key(currentVid.id) {
-                VideoPlayerComposable(
-                    video = currentVid,
-                    isActive = true,
-                    modifier = Modifier.fillMaxSize(),
-                    // No header; the tab bar's measured clearance is 0 when it's hidden.
-                    fitBand = MediaFitBand(bottom = TabBarMetrics.clearance),
-                    tapToPause = true
-                )
             }
 
             ContextualVideoOverlay(

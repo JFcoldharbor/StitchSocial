@@ -2818,23 +2818,9 @@ private fun DiscoveryFullscreenCard(
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
 
-    // Sideways is a pager, exactly like vertical: the stitch either side is a
-    // live player paused on its first frame, it slides in under your finger,
-    // and the one you're watching keeps playing until the swipe settles. It
-    // was a hand-built drag over still images, so every swipe showed a cover
-    // and a ▶︎ while the next player was built.
-    val stitchPager = rememberPagerState(initialPage = 0, pageCount = { videoCount })
-    val isDragging = stitchPager.isScrollInProgress
-    LaunchedEffect(stitchPager.settledPage) {
-        if (currentIndex != stitchPager.settledPage) currentIndex = stitchPager.settledPage
-    }
-    // The rail and the edge peeks move currentIndex; the pager follows.
-    LaunchedEffect(currentIndex) {
-        if (stitchPager.settledPage != currentIndex && !stitchPager.isScrollInProgress) {
-            stitchPager.animateScrollToPage(currentIndex)
-        }
-    }
-    LaunchedEffect(isDragging) { onHorizontalDragChange(isDragging) }
+    // Sideways is a pager, exactly like vertical — see StitchPager.
+    var isDragging by remember { mutableStateOf(false) }
+    val isActive = isCurrentPage && !isAnnouncementShowing
 
     // Media fit band: below Discovery's floating chrome and above the tab bar
     // when hosted; a cover has neither, so it is the whole screen.
@@ -2861,52 +2847,16 @@ private fun DiscoveryFullscreenCard(
     )
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        HorizontalPager(
-            state = stitchPager,
-            // Neighbours only on the post on screen: each is a decoder.
-            beyondViewportPageCount = if (isCurrentPage) 1 else 0,
-            key = { allVideos[it].id },
-            modifier = Modifier.fillMaxSize()
-        ) { page ->
-            val video = allVideos[page]
-            val isAdPage = page == 0 && isAdOnScreen
-            // Plays when it is the settled stitch of the post on screen; the
-            // one being swiped in waits on its first frame until it lands.
-            val pageActive = isCurrentPage && !isAnnouncementShowing && page == stitchPager.settledPage
-            var showPoster by remember(video.id) { mutableStateOf(true) }
-            // Clipped to its own page: a 9:16 video filling a taller screen is
-            // wider than the page, and unclipped the NEXT stitch's overflow drew
-            // over the right edge of this one (only the last stitch, with nothing
-            // after it, looked right). Clipping works because the surface here is
-            // a TextureView — a SurfaceView ignores it.
-            Box(Modifier.fillMaxSize().clipToBounds()) {
-                // A tap pauses (tapToPause); the override clears when the page
-                // goes inactive, so the next stitch autoplays.
-                VideoPlayerComposable(
-                    video = video,
-                    isActive = pageActive,
-                    modifier = Modifier.fillMaxSize(),
-                    tapToPause = true,
-                    onPlaybackStarted = { showPoster = false },
-                    onFirstFrameRendered = { showPoster = false },
-                    // A SurfaceView doesn't clip to a sideways-scrolling page:
-                    // the next stitch showed through a strip at the edge.
-                    textureSurface = true,
-                    fitBand = if (isAdPage) fitBand else plainBand,
-                    fitOverride = if (isAdPage) fitOverride else null
-                )
-                // Only until the first frame is drawn — then the player itself
-                // is the picture, paused or playing.
-                if (showPoster) {
-                    VideoThumbnailPeek(video = video, modifier = Modifier.fillMaxSize(),
-                        fitBand = if (isAdPage) fitBand else plainBand, fitOverride = if (isAdPage) fitOverride else null)
-                }
-                LaunchedEffect(video.id) {
-                    kotlinx.coroutines.delay(2000)
-                    showPoster = false
-                }
-            }
-        }
+        StitchPager(
+            videos = allVideos,
+            index = currentIndex,
+            onIndexChange = { currentIndex = it },
+            isOnScreen = isCurrentPage,
+            isPaused = isAnnouncementShowing,
+            fitBandFor = { page -> if (page == 0 && isAdOnScreen) fitBand else plainBand },
+            fitOverrideFor = { page -> if (page == 0 && isAdOnScreen) fitOverride else null },
+            onScrollingChange = { isDragging = it; onHorizontalDragChange(it) }
+        )
 
         // The overlay and the edge peeks stand still while the video slides under
         // them, the way iOS draws one overlay over the strip — share, the three

@@ -109,6 +109,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Firestore's cache in memory, not on disk — set before anything uses
+        // the database. Every result was also written into an on-device SQLite
+        // copy on Firestore's one worker thread; when Discover read the whole
+        // catalogue (~1,700 docs) that write held the worker for ~25s on a
+        // budget phone, and every other query — all of Home's — waited behind
+        // it: 32 queries the server answers in 0.3s all came back at once,
+        // 27s in. The cost is no feed when the app opens offline.
+        runCatching {
+            com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin").firestoreSettings =
+                com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                    .setLocalCacheSettings(com.google.firebase.firestore.MemoryCacheSettings.newBuilder().build())
+                    .build()
+        }.onFailure { Log.w("STITCH_MAIN", "Firestore cache settings not applied: ${it.message}") }
+
+        // First, before anything touches the window. It ran after the consent
+        // and permission start-up below, and roughly one launch in three then
+        // crashed inside it: "Window couldn't find content container view".
+        enableEdgeToEdge()
+
         suppressCameraLogging()
 
         // Firebase Analytics auto-collection was already on; this arms the
@@ -141,14 +160,13 @@ class MainActivity : ComponentActivity() {
         // static `shared` accessor when seeding linked accounts on signIn.
         com.stitchsocial.club.services.LinkedAccountManager.getInstance(this)
 
+
         // ✅ NEW: Request notification permission (Android 13+)
         requestNotificationPermission()
 
         // Consent first, THEN the Ads SDK — see AdMobBootstrap. Started from the
         // Activity because a consent form is a dialog and needs one.
         com.stitchsocial.club.ads.AdMobBootstrap.start(this)
-
-        enableEdgeToEdge()
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
 

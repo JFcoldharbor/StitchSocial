@@ -505,137 +505,20 @@ private fun ThreadVideoCard(
     val videoCount = allVideos.size
 
     var currentIndex by remember { mutableStateOf(0) }
-    // The stitch either side, loaded and paused, so a sideways swipe lands on a
-    // video that is already playing (PlayerWarmPool). Only the card on screen.
-    val warmContext = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(allVideos, currentIndex, isCurrentPage) {
-        if (!isCurrentPage) return@LaunchedEffect
-        val idx = currentIndex.coerceIn(0, (allVideos.size - 1).coerceAtLeast(0))
-        val neighbours = listOfNotNull(allVideos.getOrNull(idx + 1), allVideos.getOrNull(idx - 1))
-            .filter { it.videoURL.isNotBlank() }
-        com.stitchsocial.club.services.PlayerWarmPool.keepOnly(neighbours.map { it.id }.toSet())
-        neighbours.forEach { com.stitchsocial.club.services.PlayerWarmPool.warm(warmContext, it) }
-    }
     val currentVideo = allVideos.getOrElse(currentIndex) { allVideos.last() }
     val isOnParent = currentIndex == 0
 
-    val offsetX = remember { Animatable(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-
-    // Keeps playing while a sideways swipe drags it off — pausing at the first
-    // touch flashed the ▶︎ button on every swipe.
-    val isActive = isCurrentPage
-
-    val screenWidthPx = with(density) { screenWidth.toPx() }
-    val velocityTracker = remember { VelocityTracker() }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .pointerInput(videoCount) {
-                if (videoCount <= 1) return@pointerInput
-
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                        // Each swipe measures its own speed. The tracker was never
-                        // reset, so a flick was judged partly on earlier swipes'
-                        // finger positions and often didn't count.
-                        velocityTracker.resetTracking()
-                        onHorizontalDragChange(true)
-                    },
-                    onDragEnd = {
-                        scope.launch {
-                            val velocity = velocityTracker.calculateVelocity().x
-                            // A flick decides by its direction; a slow drag by how
-                            // far it went. A fifth of the screen, not a third.
-                            val flung = kotlin.math.abs(velocity) > SWIPE_FLING_VELOCITY
-                            val goingNext = if (flung) velocity < 0 else offsetX.value < 0
-                            val shouldSnap = flung || kotlin.math.abs(offsetX.value) > screenWidthPx * SWIPE_DISTANCE_FRACTION
-                            val targetIndex = if (!shouldSnap) currentIndex
-                                else if (goingNext) (currentIndex + 1).coerceIn(0, videoCount - 1)
-                                else (currentIndex - 1).coerceIn(0, videoCount - 1)
-                            // No bounce, and it carries the finger's speed: the
-                            // medium-bouncy spring overshot and wobbled before the
-                            // next stitch counted as arrived.
-                            offsetX.animateTo(
-                                targetValue = if (targetIndex > currentIndex) -screenWidthPx
-                                    else if (targetIndex < currentIndex) screenWidthPx
-                                    else 0f,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS),
-                                initialVelocity = velocity
-                            )
-                            if (targetIndex != currentIndex) currentIndex = targetIndex
-                            offsetX.snapTo(0f)
-                            isDragging = false
-                            onHorizontalDragChange(false)
-                        }
-                    },
-                    onDragCancel = {
-                        scope.launch {
-                            offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS))
-                            isDragging = false
-                            onHorizontalDragChange(false)
-                        }
-                    }
-                ) { change, dragAmount ->
-                    change.consume()
-                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    scope.launch {
-                        val newOffset = (offsetX.value + dragAmount).coerceIn(
-                            if (currentIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
-                            if (currentIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
-                        )
-                        offsetX.snapTo(newOffset)
-                    }
-                }
-            }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { translationX = offsetX.value }
-        ) {
-            key(currentVideo.id) {
-                VideoPlayerComposable(
-                    video = currentVideo,
-                    isActive = isActive,
-                    modifier = Modifier.fillMaxSize(),
-                    fitBand = fitBand,
-                    tapToPause = true
-                )
-            }
-
-        }
-
-        if (isDragging && videoCount > 1) {
-            val dragOffset = offsetX.value
-
-            if (dragOffset < 0 && currentIndex < videoCount - 1) {
-                val nextVideo = allVideos[currentIndex + 1]
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { translationX = screenWidthPx + dragOffset }
-                        .background(Color.Black)
-                ) {
-                    VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
-                }
-            }
-
-            if (dragOffset > 0 && currentIndex > 0) {
-                val prevVideo = allVideos[currentIndex - 1]
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { translationX = -screenWidthPx + dragOffset }
-                        .background(Color.Black)
-                ) {
-                    VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand)
-                }
-            }
-        }
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // Sideways pages like the vertical feed: live neighbours, the next one
+        // slides in while this one plays (StitchPager).
+        StitchPager(
+            videos = allVideos,
+            index = currentIndex,
+            onIndexChange = { currentIndex = it },
+            isOnScreen = isCurrentPage,
+            fitBandFor = { fitBand },
+            onScrollingChange = onHorizontalDragChange
+        )
 
         // The overlay stands still while the video slides under it (iOS draws
         // one overlay over the strip): share, the three dots, the creator and
