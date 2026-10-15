@@ -607,8 +607,11 @@ class AuthService {
     private fun validateUsername(username: String) {
         if (username.length < 3 || username.length > 20)
             throw StitchError.ValidationError("Username must be 3-20 characters")
-        if (!username.all { it.isLetterOrDigit() || it == '_' })
-            throw StitchError.ValidationError("Username can only contain letters, numbers, and underscores")
+        // Dots too: the signup field allows them and says so ("Letters,
+        // numbers, dots and underscores only"), as iOS does. Refusing one here
+        // failed the signup after the form had already said yes.
+        if (!username.all { it.isLetterOrDigit() || it == '_' || it == '.' })
+            throw StitchError.ValidationError("Username can only contain letters, numbers, dots, and underscores")
     }
 
     private fun validateDisplayName(displayName: String) {

@@ -642,8 +642,12 @@ fun MainScreen() {
         onDispose { if (uid != null) AccountStanding.stop() }
     }
     val accountSuspendedNow by AccountStanding.suspendedNow.collectAsState()
-    LaunchedEffect(currentUser?.id) {
+    // An email signup's pre-signup birthdate is still being written — hold
+    // the gate rather than prompt for it again. See SignupBirthdate.
+    val signupBirthdateWriting by com.stitchsocial.club.services.SignupBirthdate.writing.collectAsState()
+    LaunchedEffect(currentUser?.id, signupBirthdateWriting) {
         val uid = currentUser?.id ?: run { ageGateState = "checking"; return@LaunchedEffect }
+        if (signupBirthdateWriting) { ageGateState = "checking"; return@LaunchedEffect }
         try {
             val db = com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
             val snap = db.collection("users").document(uid).get().await()
@@ -891,8 +895,13 @@ fun MainScreen() {
 
     Surface(modifier = Modifier.fillMaxSize(), color = StitchColors.background) {
         when {
-            authLoading || isLoadingUser -> LoadingScreen()
+            // Signed out comes FIRST. AuthService raises isLoading for the whole
+            // of a sign-in attempt, and with the loading branch ahead of this
+            // one LoginView left composition the moment the button was tapped —
+            // a failed attempt came back as a fresh welcome screen with its
+            // error discarded. iOS keeps the form up and says what went wrong.
             !isAuthenticated || firebaseUser == null -> LoginView(authService = authService, onLoginSuccess = {})
+            authLoading || isLoadingUser -> LoadingScreen()
             userError != null -> ErrorScreen(message = userError ?: "Unknown error", onRetry = {
                 scope.launch {
                     isLoadingUser = true
@@ -971,6 +980,19 @@ fun MainScreen() {
                 // location → Home banner). Here for the same reason as the
                 // router above: this branch is "signed up, past the age gate".
                 com.stitchsocial.club.landing.LandingArrival(accountCreatedAt = currentUser?.createdAt)
+
+                // A brand-new email account lands on Profile, once (iOS
+                // parity). LoginView sets the flag at the one moment an account
+                // is genuinely created — a reinstall or an account switch would
+                // both look like a first launch from here, and neither is a
+                // signup. Consumed on read so it can only ever fire once.
+                LaunchedEffect(Unit) {
+                    val prefs = context.getSharedPreferences("stitch_prefs", android.content.Context.MODE_PRIVATE)
+                    if (prefs.getBoolean(LAND_ON_PROFILE_AFTER_SIGNUP, false)) {
+                        prefs.edit().remove(LAND_ON_PROFILE_AFTER_SIGNUP).apply()
+                        selectedTab = MainAppTab.PROGRESSION
+                    }
+                }
 
                 routeAwaitingConfirm?.let { (request, loses) ->
                     AlertDialog(

@@ -21,7 +21,10 @@ import kotlinx.coroutines.tasks.await
 object UsernameService {
 
     enum class Availability {
-        IDLE, CHECKING, AVAILABLE, TAKEN, TOO_SHORT, INVALID_CHARACTERS, ERROR
+        IDLE, CHECKING, AVAILABLE, TAKEN,
+        /** On the blocklist (ReservedUsernames) — iOS `.reserved`. */
+        RESERVED,
+        TOO_SHORT, INVALID_CHARACTERS, ERROR
     }
 
     private val db by lazy { FirebaseFirestore.getInstance("stitchfin") }
@@ -37,6 +40,7 @@ object UsernameService {
         return when {
             handle.length < 3 -> Availability.TOO_SHORT
             !ALLOWED.matches(handle) -> Availability.INVALID_CHARACTERS
+            com.stitchsocial.club.foundation.ReservedUsernames.isReserved(handle) -> Availability.RESERVED
             else -> null
         }
     }

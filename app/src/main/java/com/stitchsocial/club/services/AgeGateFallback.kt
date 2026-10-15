@@ -2,6 +2,9 @@ package com.stitchsocial.club.services
 
 import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -51,4 +54,23 @@ object AgeGateFallback {
 
     /** The TeenSafety lane for a gate state. */
     fun laneFor(state: String): String = if (state == "ok") "adult" else "teen"
+}
+
+/**
+ * Email signup asks for the birthdate BEFORE the account exists (LoginView's
+ * pre-signup gate, iOS parity) and writes it the moment signUp returns. The
+ * launch gate in MainScreen reads users/{uid} as soon as the profile loads,
+ * which can land inside that window: it would find no birthdate and ask a
+ * second time for something the person answered seconds ago.
+ *
+ * So while that write is in flight the gate holds at "checking", and reads
+ * again when it ends. In memory on purpose — if the process dies in between,
+ * the gate falls back to asking, which is the safe direction.
+ */
+object SignupBirthdate {
+    private val _writing = MutableStateFlow(false)
+    val writing: StateFlow<Boolean> = _writing.asStateFlow()
+
+    fun begin() { _writing.value = true }
+    fun end() { _writing.value = false }
 }
