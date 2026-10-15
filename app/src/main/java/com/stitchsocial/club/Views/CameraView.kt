@@ -102,6 +102,13 @@ fun CameraView(
     var isRecording by remember { mutableStateOf(false) }
     var recordingDuration by remember { mutableStateOf(0) }
     var hasPermission by remember { mutableStateOf(false) }
+    // The camera opens with camera permission alone; without the microphone
+    // it records silent video, so it says so first (iOS parity). Before this
+    // a refused mic kept the whole camera shut, and once Android stopped
+    // asking, its "Grant Permissions" button did nothing.
+    var micGranted by remember { mutableStateOf(false) }
+    var showMicWarning by remember { mutableStateOf(false) }
+    var silentRecordingApproved by remember { mutableStateOf(false) }
     var cameraProvider: ProcessCameraProvider? by remember { mutableStateOf(null) }
     var preview by remember { mutableStateOf<Preview?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
@@ -140,9 +147,9 @@ fun CameraView(
     // Camera permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasPermission = permissions[Manifest.permission.CAMERA] == true &&
-                permissions[Manifest.permission.RECORD_AUDIO] == true
+    ) { _ ->
+        hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
     // Check permissions on launch
@@ -150,15 +157,28 @@ fun CameraView(
         val cameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
         val audioPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
 
-        hasPermission = cameraPermission == PackageManager.PERMISSION_GRANTED &&
-                audioPermission == PackageManager.PERMISSION_GRANTED
+        hasPermission = cameraPermission == PackageManager.PERMISSION_GRANTED
+        micGranted = audioPermission == PackageManager.PERMISSION_GRANTED
 
-        if (!hasPermission) {
+        if (!hasPermission || !micGranted) {
             permissionLauncher.launch(arrayOf(
                 Manifest.permission.CAMERA,
                 Manifest.permission.RECORD_AUDIO
             ))
         }
+    }
+
+    // Back from Settings: the camera or mic may have just been allowed.
+    val micLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(micLifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        micLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { micLifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Recording duration timer with tier-based auto-stop
@@ -224,8 +244,12 @@ fun CameraView(
     // ===== RECORDING PIPELINE =====
 
     // Start recording function with proper file management
-    val startRecording: () -> Unit = {
+    val startRecording: () -> Unit = startRecording@{
         if (BuildConfig.DEBUG) { println("🎬 CAMERA: Start recording pressed!") }
+        if (!micGranted && !silentRecordingApproved) {
+            showMicWarning = true
+            return@startRecording
+        }
         videoCapture?.let { capture ->
             val timestamp = System.currentTimeMillis()
             val videoFile = File(context.cacheDir, "STITCH_${timestamp}.mp4")
@@ -234,9 +258,10 @@ fun CameraView(
 
             val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
-            recording = capture.output
-                .prepareRecording(context, outputOptions)
-                .withAudioEnabled()
+            val pending = capture.output.prepareRecording(context, outputOptions)
+            // Audio only with the mic allowed — withAudioEnabled() without it
+            // throws. "Record without sound" records video only.
+            recording = (if (micGranted) pending.withAudioEnabled() else pending)
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
@@ -408,6 +433,35 @@ fun CameraView(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
             )
+
+            if (!micGranted && !isRecording) {
+                MicOffBanner(
+                    onFix = { openAppSettings(context) },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 110.dp)
+                )
+            }
+            if (showMicWarning) {
+                AlertDialog(
+                    onDismissRequest = { showMicWarning = false },
+                    title = { Text("Your microphone is off") },
+                    text = { Text("Stitch can't hear you, so this video would have no sound. Turn on Microphone for Stitch in Settings.") },
+                    confirmButton = {
+                        TextButton(onClick = { showMicWarning = false; openAppSettings(context) }) { Text("Open Settings") }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(onClick = { showMicWarning = false }) { Text("Cancel") }
+                            TextButton(onClick = {
+                                showMicWarning = false
+                                silentRecordingApproved = true
+                                startRecording()
+                            }) { Text("Record without sound") }
+                        }
+                    }
+                )
+            }
 
             // Drafts entry — badge pill at top-center, shown when saved drafts
             // exist and we're not mid-take (mirrors iOS RecordingView badge).
@@ -991,6 +1045,42 @@ private fun PermissionRequestScreen(
             ) {
                 Text("Grant Permissions")
             }
+            // Once Android stops asking (refused twice), the button above does
+            // nothing; the switch is in Settings.
+            val ctx = LocalContext.current
+            TextButton(onClick = { openAppSettings(ctx) }) {
+                Text("Open Settings", color = Color.White.copy(alpha = 0.8f))
+            }
         }
+    }
+}
+
+/** This app's page in system Settings, where the camera and mic switches are. */
+private fun openAppSettings(context: android.content.Context) {
+    context.startActivity(
+        android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
+/**
+ * Shown on the camera while the microphone is off for Stitch. A video
+ * recorded like that is silent with no hint why — a birthday wish went up
+ * that way — so the camera says it before anyone records.
+ */
+@Composable
+private fun MicOffBanner(onFix: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Red.copy(alpha = 0.85f))
+            .clickable(onClick = onFix)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(Icons.Filled.MicOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Text("Mic is off · videos will have no sound", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text("Fix", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
     }
 }

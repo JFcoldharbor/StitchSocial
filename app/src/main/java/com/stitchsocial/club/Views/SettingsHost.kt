@@ -114,6 +114,7 @@ fun SettingsHost(
             },
             onOpenSubscriptions = { page = SettingsPage.SUBSCRIPTIONS },
             onOpenPrivacy = { page = SettingsPage.PRIVACY },
+            onOpenWatchHistory = { page = SettingsPage.WATCH_HISTORY },
             onOpenWallet = { page = SettingsPage.WALLET },
             onOpenNotificationSettings = { page = SettingsPage.NOTIFICATIONS },
             onOpenCreatorStudio = { page = SettingsPage.CREATOR_STUDIO },
@@ -201,6 +202,7 @@ fun SettingsHost(
                     )
 
                     SettingsPage.PRIVACY -> PrivacySettingsView(userID = currentUser.id, onDismiss = close)
+                    SettingsPage.WATCH_HISTORY -> com.stitchsocial.club.watchhistory.WatchHistoryScreen(onDismiss = close)
                     SettingsPage.WALLET -> WalletView(
                         userID = currentUser.id, userTier = currentUser.tier, user = currentUser, onDismiss = close
                     )
@@ -287,7 +289,7 @@ enum class SettingsPage {
     ACCOUNTS_CENTER, CREATOR_STUDIO, EARNINGS, NOTIFICATIONS, PLAYBACK, TERMS,
     PRIVACY, WALLET, SUBSCRIPTIONS, SUBSCRIBERS, SUBSCRIPTION_SETTINGS,
     COMMUNITY, AD_OPPORTUNITIES, BRAND_MARKETPLACE, REFERRAL, ACCOUNT_SWITCHER,
-    EDIT_PROFILE, PAYOUTS,
+    EDIT_PROFILE, PAYOUTS, WATCH_HISTORY,
 }
 
 /**

@@ -286,7 +286,10 @@ data class BasicUserInfo(
     val birthdayUntil: Date? = null,
     // users/{id}.birthdayVideoID — the posted card, set beside birthdayUntil.
     // The profile header's ring opens it.
-    val birthdayVideoID: String? = null
+    val birthdayVideoID: String? = null,
+    // users/{id}.occasionBadge — the holiday profile button ("In costume 🎃")
+    // after they stitched onto a holiday card, until the holiday ends.
+    val occasionBadge: com.stitchsocial.club.occasion.OccasionBadge? = null
 ) {
     val isBusiness: Boolean get() = accountType == AccountType.BUSINESS
 
@@ -443,7 +446,8 @@ data class BasicUserInfo(
                     brandRatingAverage = (brandRating?.get("average") as? Number)?.toDouble() ?: 0.0,
                     brandRatingCount = (brandRating?.get("count") as? Number)?.toInt() ?: 0,
                     birthdayUntil = (data["birthdayUntil"] as? Timestamp)?.toDate(),
-                    birthdayVideoID = (data["birthdayVideoID"] as? String)?.takeIf { it.isNotBlank() }
+                    birthdayVideoID = (data["birthdayVideoID"] as? String)?.takeIf { it.isNotBlank() },
+                    occasionBadge = com.stitchsocial.club.occasion.OccasionBadge.parse(data["occasionBadge"])
                 )
             } catch (e: Exception) {
                 null

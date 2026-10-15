@@ -636,7 +636,11 @@ fun MainScreen() {
     LaunchedEffect(currentUser?.id) {
         com.stitchsocial.club.services.AnalyticsService.setUser(currentUser?.id)
         // Signed out: nothing of the last account's birthday carries over.
-        if (currentUser == null) BirthdayCenter.reset()
+        if (currentUser == null) {
+            BirthdayCenter.reset()
+            com.stitchsocial.club.occasion.OccasionCenter.reset()
+            com.stitchsocial.club.watchhistory.WatchHistory.reset()
+        }
     }
     // Enforcement state (suspension / ban) from the user's own doc, live, so
     // the banner and every create gate follow the server without a restart.

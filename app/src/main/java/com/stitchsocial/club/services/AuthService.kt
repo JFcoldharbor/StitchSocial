@@ -329,6 +329,8 @@ class AuthService {
             TeenSafety.reset()
             // Same for the last account's birthday status and sheet.
             com.stitchsocial.club.birthday.BirthdayCenter.reset()
+            com.stitchsocial.club.occasion.OccasionCenter.reset()
+            com.stitchsocial.club.watchhistory.WatchHistory.reset()
             ThreadRefreshBus.clear()
             auth.signOut()
             if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User signed out successfully") }

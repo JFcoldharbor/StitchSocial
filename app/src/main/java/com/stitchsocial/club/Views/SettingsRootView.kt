@@ -60,6 +60,7 @@ fun SettingsRootView(
     onSignOut: () -> Unit,
     onOpenSubscriptions: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onOpenWatchHistory: () -> Unit,
     onOpenWallet: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onOpenCreatorStudio: () -> Unit,
@@ -160,6 +161,13 @@ fun SettingsRootView(
                         icon = Icons.Default.Shield,
                         iconTint = SettingsTokens.tilePrivacy,
                         onClick = onOpenPrivacy,
+                    )
+                    SettingsDivider()
+                    SettingsRow(
+                        title = "Watch history",
+                        icon = Icons.Default.History,
+                        iconTint = SettingsTokens.tileWatchHistory,
+                        onClick = onOpenWatchHistory,
                     )
                     SettingsDivider()
                     SettingsRow(

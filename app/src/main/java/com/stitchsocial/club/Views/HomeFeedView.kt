@@ -290,6 +290,7 @@ fun HomeFeedView(
                 }
 
                 val combinedPagerState = rememberPagerState(pageCount = { feedItems.size })
+                var horizontalSwipeActive by remember { mutableStateOf(false) }
 
                 // Children loading, seen tracking, position save
                 LaunchedEffect(combinedPagerState.currentPage) {
@@ -355,7 +356,8 @@ fun HomeFeedView(
                     }
                 }
 
-                VerticalPager(state = combinedPagerState, modifier = Modifier.fillMaxSize()) { page ->
+                // No moving to the next post mid-way through a sideways swipe.
+                VerticalPager(state = combinedPagerState, userScrollEnabled = !horizontalSwipeActive, modifier = Modifier.fillMaxSize()) { page ->
                     when (val item = feedItems[page]) {
                         is FeedItem.VideoThread -> {
                             val thread = item.thread
@@ -363,6 +365,7 @@ fun HomeFeedView(
                             key(thread.id) {
                                 ThreadVideoCard(
                                     thread = thread,
+                                    onHorizontalDragChange = { horizontalSwipeActive = it },
                                     userID = userID,
                                     isCurrentPage = isCurrentPage,
                                     engagementViewModel = engagementViewModel,
@@ -435,6 +438,7 @@ fun HomeFeedView(
             DashView(
                 userID = userID,
                 onCreate = { navigationCoordinator?.showModal(ModalState.RECORDING) },
+                navigationCoordinator = navigationCoordinator,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -482,7 +486,9 @@ private fun ThreadVideoCard(
     onStitchTap: (CoreVideoMetadata) -> Unit,
     onShowThreadView: (threadID: String, targetVideoID: String?) -> Unit,
     /** Bottom of Home's surface tabs — the top of the media-fit band. */
-    topInset: Dp = 0.dp
+    topInset: Dp = 0.dp,
+    /** A sideways stitch swipe started (true) or settled (false): the feed locks vertical paging meanwhile. */
+    onHorizontalDragChange: (Boolean) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -509,7 +515,6 @@ private fun ThreadVideoCard(
     val isActive = isCurrentPage && !isDragging
 
     val screenWidthPx = with(density) { screenWidth.toPx() }
-    val dragThreshold = screenWidthPx * 0.3f
     val velocityTracker = remember { VelocityTracker() }
 
     Box(
@@ -520,56 +525,57 @@ private fun ThreadVideoCard(
                 if (videoCount <= 1) return@pointerInput
 
                 detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true },
+                    onDragStart = {
+                        isDragging = true
+                        // Each swipe measures its own speed. The tracker was never
+                        // reset, so a flick was judged partly on earlier swipes'
+                        // finger positions and often didn't count.
+                        velocityTracker.resetTracking()
+                        onHorizontalDragChange(true)
+                    },
                     onDragEnd = {
                         scope.launch {
                             val velocity = velocityTracker.calculateVelocity().x
-                            val shouldSnap = kotlin.math.abs(offsetX.value) > dragThreshold || kotlin.math.abs(velocity) > 1000f
-
-                            if (shouldSnap) {
-                                val targetIndex = if (offsetX.value < 0) {
-                                    (currentIndex + 1).coerceIn(0, videoCount - 1)
-                                } else {
-                                    (currentIndex - 1).coerceIn(0, videoCount - 1)
-                                }
-
-                                offsetX.animateTo(
-                                    targetValue = if (targetIndex > currentIndex) -screenWidthPx
+                            // A flick decides by its direction; a slow drag by how
+                            // far it went. A fifth of the screen, not a third.
+                            val flung = kotlin.math.abs(velocity) > SWIPE_FLING_VELOCITY
+                            val goingNext = if (flung) velocity < 0 else offsetX.value < 0
+                            val shouldSnap = flung || kotlin.math.abs(offsetX.value) > screenWidthPx * SWIPE_DISTANCE_FRACTION
+                            val targetIndex = if (!shouldSnap) currentIndex
+                                else if (goingNext) (currentIndex + 1).coerceIn(0, videoCount - 1)
+                                else (currentIndex - 1).coerceIn(0, videoCount - 1)
+                            // No bounce, and it carries the finger's speed: the
+                            // medium-bouncy spring overshot and wobbled before the
+                            // next stitch counted as arrived.
+                            offsetX.animateTo(
+                                targetValue = if (targetIndex > currentIndex) -screenWidthPx
                                     else if (targetIndex < currentIndex) screenWidthPx
                                     else 0f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
-                                )
-
-                                if (targetIndex != currentIndex) {
-                                    currentIndex = targetIndex
-                                }
-
-                                offsetX.snapTo(0f)
-                            } else {
-                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
-                            }
-
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS),
+                                initialVelocity = velocity
+                            )
+                            if (targetIndex != currentIndex) currentIndex = targetIndex
+                            offsetX.snapTo(0f)
                             isDragging = false
+                            onHorizontalDragChange(false)
                         }
                     },
                     onDragCancel = {
                         scope.launch {
-                            offsetX.animateTo(0f)
+                            offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS))
                             isDragging = false
+                            onHorizontalDragChange(false)
                         }
                     }
                 ) { change, dragAmount ->
                     change.consume()
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
                     scope.launch {
                         val newOffset = (offsetX.value + dragAmount).coerceIn(
                             if (currentIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
                             if (currentIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
                         )
                         offsetX.snapTo(newOffset)
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                     }
                 }
             }

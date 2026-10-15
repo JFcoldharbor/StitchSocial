@@ -418,6 +418,10 @@ fun ContextualVideoOverlay(
                     )
 
                     videoService.recordVideoView(video.id, currentUserID, viewerData, watchTime = 5.0, source = viewSource)
+                    // Same moment counts toward the private watch history, which
+                    // Discover reads to stop serving the same videos again.
+                    // Fire-and-forget; skips pseudo cards itself.
+                    com.stitchsocial.club.watchhistory.WatchHistory.record(video)
                     Log.d("VIEW_TRACKING", "View recorded after 5s: ${video.id} by $currentUserID")
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     Log.d("VIEW_TRACKING", "View cancelled (scrolled away): ${video.id}")

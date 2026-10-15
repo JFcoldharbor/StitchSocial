@@ -145,18 +145,23 @@ data class CreatorSignalAccumulator(
         return System.currentTimeMillis() - started.time >= COOL_DELAY_DURATION_MS
     }
 
+    /** iOS parity (DiscoverySignal.swift recalculatePreference), step for step. */
     fun recalculatePreference() {
         preference = when {
-            totalCoolSignals >= 5 && videosWithCoolSignals >= 2 -> CreatorPreference.BLOCKED
-            totalCoolSignals >= 4 -> {
+            // 3+ different videos before hiding a creator: a run of fast swipes
+            // past one person's posts must not hide them for good. Android hid at
+            // 5 signals across 2 videos, and did — an account that skipped three
+            // of one creator's clips never saw their birthday card.
+            totalCoolSignals >= 7 && videosWithCoolSignals >= 3 -> CreatorPreference.BLOCKED
+            totalCoolSignals >= 5 && videosWithCoolSignals >= 2 -> {
                 if (!coolDelayActive) {
                     coolDelayActive = true
                     coolDelayStartedAt = Date()
                 }
                 CreatorPreference.STRONG_SUPPRESS
             }
-            totalCoolSignals >= 2 -> CreatorPreference.MODERATE_SUPPRESS
-            totalCoolSignals == 1 -> CreatorPreference.MILD_SUPPRESS
+            totalCoolSignals >= 3 -> CreatorPreference.MODERATE_SUPPRESS
+            totalCoolSignals >= 1 -> CreatorPreference.MILD_SUPPRESS
             totalHypeWeight >= 20 && videosWithHypeSignals >= 3 -> CreatorPreference.SUPER_FAN
             totalHypeWeight >= 10 && videosWithHypeSignals >= 2 -> CreatorPreference.STRONG_BOOST
             totalHypeWeight >= 3  -> CreatorPreference.MILD_BOOST
@@ -167,7 +172,7 @@ data class CreatorSignalAccumulator(
     fun applyDecay() {
         val lastCool = lastCoolSignalAt ?: return
         val elapsed = System.currentTimeMillis() - lastCool.time
-        if (elapsed > COOL_DECAY_WINDOW_MS && totalCoolSignals < 5) {
+        if (elapsed > COOL_DECAY_WINDOW_MS && totalCoolSignals < 7) {
             val periods = (elapsed / COOL_DECAY_WINDOW_MS).toInt()
             totalCoolSignals = maxOf(0, totalCoolSignals - minOf(periods, totalCoolSignals))
             if (totalCoolSignals < 4) {
@@ -480,6 +485,11 @@ object DiscoveryEngagementTracker {
                     coolDelayActive          = data["coolDelayActive"] as? Boolean ?: false,
                     preference               = pref
                 )
+                // Judged again from the counts, not taken as saved: verdicts
+                // saved under the old, harsher ladder (blocked at 5 signals
+                // across 2 videos) must not keep a creator hidden for good.
+                acc.recalculatePreference()
+                creatorPreferences[creatorID] = acc.preference
                 creatorAccumulators[creatorID] = acc
             }
             if (BuildConfig.DEBUG) { println("📊 DISCOVERY TRACKER: Loaded ${creatorPreferences.size} creator preferences") }

@@ -1433,6 +1433,13 @@ private fun ProfileHeader(
                 ) {
                     EnhancedProfileImage(user = user, videos = videos)
                 }
+                // "In costume 🎃" after stitching onto a holiday card; a 🎂 + 🎃
+                // pair when the holiday is also their birthday.
+                com.stitchsocial.club.occasion.ProfileOccasionButtons(
+                    badge = user.occasionBadge,
+                    birthdayVideoID = user.birthdayVideoID,
+                    birthdayUntil = user.birthdayUntil
+                )
                 if (!user.isBusiness) {
                     ProfileBadgeStack(
                         userID = user.id,

@@ -20,6 +20,16 @@
  *   - Eviction: LRU (ExoPlayer SimpleCache default)
  *   - Singleton: one cache instance shared across all players
  *
+ * NEVER CACHE AN ERROR AS A VIDEO (iOS parity, VideoDiskCache.swift):
+ *   For about a minute after an upload, while it transcodes, CloudFront
+ *   answers with an error page. Kept as the "video", that played black for
+ *   the rest of the session. So a download is kept only if it is a 2xx
+ *   (DefaultHttpDataSource throws on anything else, before a byte is
+ *   written), its Content-Type is video/ or octet-stream (HLS playlist,
+ *   audio and fMP4 types are let through too — players stream HLS through
+ *   this same cache), and a prefetched progressive file is at least 50 KB. Anything
+ *   else is removed from the cache, never indexed.
+ *
  * ADD TO OptimizationConfig:
  *   VideoDiskCache.maxCacheSizeBytes = 2 * 1024 * 1024 * 1024L
  *   VideoDiskCache.prefetchAheadCount = 3  (prefetch next 3 on swipe)
@@ -34,6 +44,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.offline.DownloadRequest
@@ -51,6 +62,8 @@ object VideoDiskCache {
     private const val PREFETCH_AHEAD_COUNT = 3
     private const val MAX_CONCURRENT_DOWNLOADS = 3
     private const val CACHE_DIR_NAME = "VideoFileCache"
+    /** Smaller than any real clip; an error page or empty body is well under it. */
+    private const val MIN_VIDEO_BYTES = 50L * 1024
 
     private var cache: SimpleCache? = null
     private var databaseProvider: StandaloneDatabaseProvider? = null
@@ -91,6 +104,9 @@ object VideoDiskCache {
                     .setConnectTimeoutMs(15_000)
                     .setReadTimeoutMs(15_000)
                     .setAllowCrossProtocolRedirects(true)
+                    // A response that isn't media fails at open(), so neither
+                    // the player nor a prefetch ever writes it to the cache.
+                    .setContentTypePredicate { isMediaContentType(it) }
             )
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
@@ -155,24 +171,66 @@ object VideoDiskCache {
     // ── Internal download ─────────────────────────────────────────
 
     private suspend fun downloadToCache(url: String) {
+        val spec = androidx.media3.datasource.DataSpec(Uri.parse(url))
+        // The key CacheDataSource writes under — needed to drop a bad entry.
+        val key = CacheKeyFactory.DEFAULT.buildCacheKey(spec)
         try {
             val factory = buildCacheDataSourceFactory()
             val dataSource = factory.createDataSource()
-            val spec = androidx.media3.datasource.DataSpec(Uri.parse(url))
             dataSource.open(spec)
             val buffer = ByteArray(64 * 1024)
             var bytesRead = 0L
-            while (true) {
-                val read = dataSource.read(buffer, 0, buffer.size)
-                if (read == androidx.media3.common.C.RESULT_END_OF_INPUT) break
-                bytesRead += read
+            try {
+                while (true) {
+                    val read = dataSource.read(buffer, 0, buffer.size)
+                    if (read == androidx.media3.common.C.RESULT_END_OF_INPUT) break
+                    bytesRead += read
+                }
+            } finally {
+                dataSource.close()
             }
-            dataSource.close()
+            // A whole progressive file this small is an error body or a stub,
+            // not a video. Playlists (.m3u8) are small by nature, so exempt.
+            if (!isPlaylist(url) && bytesRead < MIN_VIDEO_BYTES) {
+                removeFromCache(key)
+                if (BuildConfig.DEBUG) { println("⚠️ VIDEO CACHE: Dropped ${formatBytes(bytesRead)} body for ${url.takeLast(30)} — too small to be a video") }
+                return
+            }
             if (BuildConfig.DEBUG) { println("💾 VIDEO CACHE: Prefetched ${formatBytes(bytesRead)} for ${url.takeLast(30)}") }
         } catch (e: Exception) {
+            // Non-2xx status or a non-media Content-Type lands here. Make sure
+            // nothing from the attempt stays indexed.
+            removeFromCache(key)
             if (BuildConfig.DEBUG) { println("⚠️ VIDEO CACHE: Prefetch failed for ${url.takeLast(30)}: ${e.message}") }
         }
     }
+
+    private fun removeFromCache(key: String) {
+        try { cache?.removeResource(key) } catch (_: Exception) {}
+    }
+
+    // ── Response validation ───────────────────────────────────────
+
+    /**
+     * video/…, or the octet-stream types S3 serves untyped uploads as. HLS
+     * playlist types, audio/… and application/mp4 pass too because players
+     * stream HLS (playlists, audio renditions, fMP4 segments) through this
+     * cache. Missing, text/… (an HTML error page), application/xml
+     * (S3/CloudFront's AccessDenied body) and JSON all fail.
+     */
+    private fun isMediaContentType(raw: String?): Boolean {
+        val type = raw?.substringBefore(';')?.trim()?.lowercase() ?: return false
+        return type.startsWith("video/") ||
+            type.startsWith("audio/") ||
+            type == "application/mp4" ||
+            type == "application/octet-stream" ||
+            type == "binary/octet-stream" ||
+            type == "application/vnd.apple.mpegurl" ||
+            type == "application/x-mpegurl"
+    }
+
+    private fun isPlaylist(url: String): Boolean =
+        Uri.parse(url).lastPathSegment?.endsWith(".m3u8", ignoreCase = true) == true
 
     // ── Cleanup (call from Application.onTerminate or low-memory) ─
 

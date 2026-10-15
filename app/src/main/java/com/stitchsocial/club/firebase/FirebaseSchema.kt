@@ -303,6 +303,9 @@ object FirebaseSchema {
         const val BIRTHDAY_UNTIL    = "birthdayUntil"
         /** String — the posted card; the profile header's ring opens it. */
         const val BIRTHDAY_VIDEO_ID = "birthdayVideoID"
+        /** Map {emoji, label, videoID, until} — server-written when someone
+         *  stitches onto a holiday card; the profile's "In costume 🎃". */
+        const val OCCASION_BADGE    = "occasionBadge"
 
         fun documentPath(userID: String): String =
             Collections.fullPath(Collections.USERS) + "/$userID"

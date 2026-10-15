@@ -88,6 +88,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.tasks.await
@@ -245,8 +246,13 @@ class DiscoveryViewModel(
     // capped so a genuine failure can't loop forever.
     private val db = FirebaseFirestore.getInstance("stitchfin")
     private var hasLoaded = false
+    /** When the feed was last read. Older than STALE_MS on return → read again (iOS staleDuration). */
+    private var loadedAtMs = 0L
+    private val STALE_MS = 30L * 60 * 1000
     private var loadRetries = 0
     private val MAX_LOAD_RETRIES = 6
+    /** The watched-IDs read rides alongside the catalogue read; past this it's skipped. */
+    private val WATCHED_READ_TIMEOUT_MS = 2_500L
 
     init {
         loadInitialContent()
@@ -268,56 +274,31 @@ class DiscoveryViewModel(
             _isLoading.value = true
             _errorMessage.value = null
             try {
-                // TWO QUERIES — mirrors Swift shuffleWithRecencyPin bucket split:
-                //   Query 1: fresh  — createdAt >= 48hr ago, limit 50, no index needed
-                //   Query 2: rest   — createdAt < 48hr ago, limit 100, ordered DESC
-                // Parallel via async/await. Client-side filters applied to both.
-                // No composite index required — single field orderBy/whereGreaterThan only.
-
-                val cutoff = com.google.firebase.Timestamp(
-                    java.util.Date(System.currentTimeMillis() - 48L * 60 * 60 * 1000)
-                )
-
-                val (freshSnap, restSnap) = coroutineScope {
-                    val fresh = async {
-                        db.collection("videos")
-                            .whereGreaterThanOrEqualTo("createdAt", cutoff)
-                            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                            .limit(50)
-                            .get().await()
+                // ONE QUERY, the whole catalogue, newest first — iOS
+                // DiscoveryViewModel.loadInitialContent. The filters below
+                // keep roots only, so this is every public thread.
+                //
+                // It used to be two capped queries: the newest 50 of the last
+                // 48 hours, plus an 80-video feedSeed slice of the rest. After
+                // the client filters that was about 50 videos, which then
+                // looped for the whole session — and anything without a
+                // feedSeed (server-made posts like birthday cards, 129 of 540
+                // public threads) could only come in through the 48-hour
+                // query. iOS orders by createdAt, which every post has.
+                //
+                // What this user watched in the last 14 days, read alongside
+                // the catalogue so it adds no round trip. Capped and
+                // failure-proof: a slow or failed read just means nothing is
+                // treated as watched — it never holds up or fails the feed.
+                val watchedRead = async {
+                    withTimeoutOrNull(WATCHED_READ_TIMEOUT_MS) {
+                        com.stitchsocial.club.watchhistory.WatchHistory.recentlyWatchedIDs()
                     }
-                    // The back catalogue, sampled by feedSeed — iOS's approach
-                    // (DiscoveryService.fetchSeedBatch), not a time window.
-                    //
-                    // Taking the newest 100 of "older than 48h" meant Discovery
-                    // could only ever reach the same ~150 videos. Measured
-                    // against production: 1008 qualify, 6 are under 48h and 920
-                    // are older than a month — about 90% was unreachable.
-                    //
-                    // feedSeed is a random 0..1 stamped on every video, so
-                    // `feedSeed >= <random>` ordered ascending is a random slice
-                    // of the whole catalogue, and it moves every load.
-                    val seed = kotlin.random.Random.nextDouble()
-                    val rest = async {
-                        val first = db.collection("videos")
-                            .whereEqualTo("conversationDepth", 0)
-                            .whereGreaterThanOrEqualTo("feedSeed", seed)
-                            .orderBy("feedSeed")
-                            .limit(80L)
-                            .get().await().documents
-                        // Wrap around when the slice above the seed is thin,
-                        // otherwise a high seed returns almost nothing.
-                        if (first.size < 40) {
-                            first + db.collection("videos")
-                                .whereEqualTo("conversationDepth", 0)
-                                .whereLessThan("feedSeed", seed)
-                                .orderBy("feedSeed")
-                                .limit((80 - first.size).toLong())
-                                .get().await().documents
-                        } else first
-                    }
-                    fresh.await() to rest.await()
                 }
+                val snapshot = db.collection("videos")
+                    .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .get().await()
+                val cutoffMs = System.currentTimeMillis() - 48L * 60 * 60 * 1000
 
                 fun filterDocs(
                     docs: List<com.google.firebase.firestore.DocumentSnapshot>
@@ -353,23 +334,32 @@ class DiscoveryViewModel(
                         decodeVideo(data, doc.id)
                     }
 
-                val fresh = filterDocs(freshSnap.documents).shuffled()
-                val rest  = filterDocs(restSnap).distinctBy { it.id }.shuffled()
+                // The last 48 hours first, each half shuffled — iOS shuffleWithRecencyPin.
+                val all = filterDocs(snapshot.documents)
+                runCatching { watchedRead.await() }
+                val watched = com.stitchsocial.club.watchhistory.WatchHistory.watchedIDs
+                val unwatched = all.filter { it.id !in watched }
+                val fresh = unwatched.filter { it.createdAt.time >= cutoffMs }.shuffled()
+                val rest  = unwatched.filter { it.createdAt.time < cutoffMs }.shuffled()
+                val seen  = all.filter { it.id in watched }.shuffled()
 
-                // Combine: fresh pinned first, rest shuffled behind — matches Swift
-                val combined = fresh + rest
+                // Combine: fresh pinned first, rest shuffled behind — matches
+                // Swift — and anything watched in the last 14 days behind both.
+                val combined = fresh + rest + seen
 
                 hasLoaded = true
+                loadedAtMs = System.currentTimeMillis()
                 loadRetries = 0
                 _videos.value = combined
                 applyFilterAndShuffle()
-                if (BuildConfig.DEBUG) { println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest = ${combined.size} total") }
+                if (BuildConfig.DEBUG) { println("✅ DISCOVERY: ${fresh.size} fresh (≤48hr) + ${rest.size} rest + ${seen.size} watched = ${combined.size} total") }
 
                 loadFeaturedCollectionsForSwipeFeed()
                 loadSponsoredSlots()
                 loadBoostedVideos()
 
-                val prefetchUrls = combined.take(3).map { it.videoURL }.filter { it.isNotEmpty() }
+                // From the feed as shown — combined is re-ordered by the shuffle above.
+                val prefetchUrls = _filteredVideos.value.map { it.videoURL }.filter { it.isNotEmpty() }.take(3)
                 if (prefetchUrls.isNotEmpty()) {
                     com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(prefetchUrls)
                 }
@@ -545,14 +535,30 @@ class DiscoveryViewModel(
     // MARK: - Reshuffle at end (mirrors iOS reshuffleAndRestart)
 
     fun reshuffleAndRestart() {
-        // Re-apply recency pin on reshuffle — same bucket logic as load
-        val cutoffMs = System.currentTimeMillis() - 48L * 60 * 60 * 1000
-        val current = _videos.value
-        val fresh = current.filter { it.createdAt.time >= cutoffMs }.shuffled()
-        val rest  = current.filter { it.createdAt.time < cutoffMs  }.shuffled()
-        _videos.value = fresh + rest
+        // Re-apply recency pin on reshuffle — same bucket logic as load —
+        // with the watched set as it is NOW, so what was watched since the
+        // load (this session's views) also drops to the back.
+        _videos.value = watchedLast(_videos.value) { it.shuffled() }
         applyFilterAndShuffle()
-        if (BuildConfig.DEBUG) { println("🔀 DISCOVERY: Reshuffled — ${fresh.size} fresh + ${rest.size} rest") }
+        if (BuildConfig.DEBUG) { println("🔀 DISCOVERY: Reshuffled — ${_videos.value.size} videos, watched last") }
+    }
+
+    /**
+     * For You order: [fresh unwatched] + [older unwatched] + [watched in the
+     * last 14 days], each tier arranged by [arrange]. People kept seeing the
+     * same videos come round again; anything they haven't seen now comes
+     * first. Watched ones stay at the back rather than being dropped, so the
+     * feed never runs dry.
+     */
+    private fun watchedLast(
+        videos: List<CoreVideoMetadata>,
+        arrange: (List<CoreVideoMetadata>) -> List<CoreVideoMetadata>
+    ): List<CoreVideoMetadata> {
+        val watched = com.stitchsocial.club.watchhistory.WatchHistory.watchedIDs
+        val cutoffMs = System.currentTimeMillis() - 48L * 60 * 60 * 1000
+        val (seen, unseen) = videos.partition { it.id in watched }
+        val (fresh, rest) = unseen.partition { it.createdAt.time >= cutoffMs }
+        return arrange(fresh) + arrange(rest) + arrange(seen)
     }
 
     fun loadMoreContent() { reshuffleAndRestart() }
@@ -565,6 +571,12 @@ class DiscoveryViewModel(
      * mount (nothing loaded yet); the initial load does its own shuffle.
      */
     fun reshuffleOnReentry() {
+        // Away long enough that there are new posts: read the feed again.
+        if (hasLoaded && System.currentTimeMillis() - loadedAtMs > STALE_MS) {
+            refreshContent()
+            if (BuildConfig.DEBUG) { println("🔄 DISCOVERY: stale on re-entry — reloading") }
+            return
+        }
         if (hasLoaded && _videos.value.isNotEmpty()) {
             reshuffleAndRestart()
             if (BuildConfig.DEBUG) { println("🔀 DISCOVERY: reshuffled on re-entry (no reload)") }
@@ -651,7 +663,10 @@ class DiscoveryViewModel(
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
         }
 
-        val shuffled = diversifyShuffle(filtered)
+        // For You keeps its tiers (see watchedLast); diversifying the whole
+        // list at once would scatter watched videos back to the front.
+        val shuffled = if (category == DiscoveryCategory.FOR_YOU) watchedLast(filtered, ::diversifyShuffle)
+            else diversifyShuffle(filtered)
         _filteredVideos.value = injectSponsoredCards(
             if (category == DiscoveryCategory.FOR_YOU) injectBoosted(shuffled) else shuffled
         )
@@ -908,9 +923,13 @@ class DiscoveryViewModel(
         val blocked = DiscoveryEngagementTracker.blockedCreatorIDs()
         val visible = if (blocked.isEmpty()) _videos.value
             else _videos.value.filter { it.creatorID !in blocked }
-        val shuffled = diversifyShuffle(visible)
+        // Creator variety is applied inside each For You tier, not across
+        // them — across them it would undo both the 48-hour pin and the
+        // watched-last order the list was just built in.
+        val forYou = _currentCategory.value == DiscoveryCategory.FOR_YOU
+        val shuffled = if (forYou) watchedLast(visible, ::diversifyShuffle) else diversifyShuffle(visible)
         _filteredVideos.value = injectSponsoredCards(
-            if (_currentCategory.value == DiscoveryCategory.FOR_YOU) injectBoosted(shuffled) else shuffled
+            if (forYou) injectBoosted(shuffled) else shuffled
         )
     }
 
@@ -1183,7 +1202,10 @@ fun DiscoveryView(
             }
         }
         if (videos.isNotEmpty() && currentSwipeIndex >= videos.size - 1) {
+            // The end of the whole catalogue: a new order, from the top (iOS
+            // reshuffleAndRestart sets swipeIndex = 0).
             viewModel.reshuffleAndRestart()
+            currentSwipeIndex = 0
         }
         // Prefetch next 3 videos ahead of current swipe position
         if (videos.isNotEmpty()) {
@@ -1421,6 +1443,9 @@ fun DiscoveryView(
                 // is already granted (the row never asks) and only on For You;
                 // it renders nothing when there are none.
                 if (selectedCategory == DiscoveryCategory.FOR_YOU && selectedHashtag == null) {
+                    // The running holiday's thread ("🎃 Show us your costume");
+                    // nothing on other days.
+                    com.stitchsocial.club.occasion.OccasionDiscoverBanner(navigationCoordinator)
                     com.stitchsocial.club.landing.NearYouLandingsRow(
                         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
                     )
@@ -2545,6 +2570,14 @@ private fun DiscoveryFullscreenDeck(
         byIndex ?: playable.indexOfFirst { it.id == initialVideoID }.coerceAtLeast(0)
     }
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { playable.size })
+    var horizontalSwipeActive by remember { mutableStateOf(false) }
+
+    // The caller sends the cursor back to 0 when the end of the catalogue
+    // reshuffles it (iOS reshuffleAndRestart): follow it to the top. Only 0 —
+    // every other index the caller holds is one this pager reported.
+    LaunchedEffect(initialIndex) {
+        if (initialIndex == 0 && pagerState.currentPage != 0) pagerState.scrollToPage(0)
+    }
 
     fun currentFullIndex(): Int {
         val settled = playable.getOrNull(pagerState.currentPage) ?: return 0
@@ -2594,6 +2627,9 @@ private fun DiscoveryFullscreenDeck(
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
+            // No moving to the next post mid-way through a sideways swipe: a
+            // swipe that drifted vertically was taken by the pager.
+            userScrollEnabled = !horizontalSwipeActive,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val root = playable[page]
@@ -2638,7 +2674,8 @@ private fun DiscoveryFullscreenDeck(
                         onShowThreadView = onShowThreadView,
                         onStitchRecording = onStitchRecording,
                         sponsoredSlot = sponsored,
-                        onSponsoredCta = { onSponsoredCta(sponsored) }
+                        onSponsoredCta = { onSponsoredCta(sponsored) },
+                        onHorizontalDragChange = { horizontalSwipeActive = it }
                     )
                     // Impression as before (session-deduped by the service),
                     // and the post is now spoken for this session.
@@ -2692,7 +2729,8 @@ private fun DiscoveryFullscreenDeck(
                     onExit = { onDismiss(currentFullIndex()) },
                     onNavigateToProfile = { userID -> onNavigateToProfile(userID, currentFullIndex()) },
                     onShowThreadView = onShowThreadView,
-                    onStitchRecording = onStitchRecording
+                    onStitchRecording = onStitchRecording,
+                    onHorizontalDragChange = { horizontalSwipeActive = it }
                 )
             }
         }
@@ -2725,7 +2763,9 @@ private fun DiscoveryFullscreenCard(
      * Replies swiped to from it are ordinary posts.
      */
     sponsoredSlot: SponsoredSlot? = null,
-    onSponsoredCta: () -> Unit = {}
+    onSponsoredCta: () -> Unit = {},
+    /** A sideways stitch swipe started (true) or settled (false): the deck locks vertical paging meanwhile. */
+    onHorizontalDragChange: (Boolean) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -2783,7 +2823,6 @@ private fun DiscoveryFullscreenCard(
     // pauses through the transition. Position is remembered, so coming back
     // resumes rather than restarts.
     val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
-    val dragThreshold = screenWidthPx * 0.3f
 
     // Media fit band: below Discovery's floating chrome and above the tab bar
     // when hosted; a cover has neither, so it is the whole screen.
@@ -2812,50 +2851,57 @@ private fun DiscoveryFullscreenCard(
             .pointerInput(videoCount) {
                 if (videoCount <= 1) return@pointerInput
                 detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true },
+                    onDragStart = {
+                        isDragging = true
+                        // Each swipe measures its own speed. The tracker was never
+                        // reset, so a flick was judged partly on earlier swipes'
+                        // finger positions and often didn't count.
+                        velocityTracker.resetTracking()
+                        onHorizontalDragChange(true)
+                    },
                     onDragEnd = {
                         scope.launch {
                             val velocity = velocityTracker.calculateVelocity().x
-                            val shouldSnap = kotlin.math.abs(offsetX.value) > dragThreshold ||
-                                kotlin.math.abs(velocity) > 1000f
-                            if (shouldSnap) {
-                                val targetIndex = if (offsetX.value < 0) {
-                                    (currentIndex + 1).coerceIn(0, videoCount - 1)
-                                } else {
-                                    (currentIndex - 1).coerceIn(0, videoCount - 1)
-                                }
-                                offsetX.animateTo(
-                                    targetValue = if (targetIndex > currentIndex) -screenWidthPx
+                            // A flick decides by its direction; a slow drag by how
+                            // far it went. A fifth of the screen, not a third.
+                            val flung = kotlin.math.abs(velocity) > SWIPE_FLING_VELOCITY
+                            val goingNext = if (flung) velocity < 0 else offsetX.value < 0
+                            val shouldSnap = flung || kotlin.math.abs(offsetX.value) > screenWidthPx * SWIPE_DISTANCE_FRACTION
+                            val targetIndex = if (!shouldSnap) currentIndex
+                                else if (goingNext) (currentIndex + 1).coerceIn(0, videoCount - 1)
+                                else (currentIndex - 1).coerceIn(0, videoCount - 1)
+                            // No bounce, and it carries the finger's speed: the
+                            // medium-bouncy spring overshot and wobbled before the
+                            // next stitch counted as arrived.
+                            offsetX.animateTo(
+                                targetValue = if (targetIndex > currentIndex) -screenWidthPx
                                     else if (targetIndex < currentIndex) screenWidthPx
                                     else 0f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
-                                )
-                                if (targetIndex != currentIndex) currentIndex = targetIndex
-                                offsetX.snapTo(0f)
-                            } else {
-                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
-                            }
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS),
+                                initialVelocity = velocity
+                            )
+                            if (targetIndex != currentIndex) currentIndex = targetIndex
+                            offsetX.snapTo(0f)
                             isDragging = false
+                            onHorizontalDragChange(false)
                         }
                     },
                     onDragCancel = {
                         scope.launch {
-                            offsetX.animateTo(0f)
+                            offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS))
                             isDragging = false
+                            onHorizontalDragChange(false)
                         }
                     }
                 ) { change, dragAmount ->
                     change.consume()
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
                     scope.launch {
                         val newOffset = (offsetX.value + dragAmount).coerceIn(
                             if (currentIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
                             if (currentIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
                         )
                         offsetX.snapTo(newOffset)
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                     }
                 }
             }

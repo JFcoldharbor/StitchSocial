@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,8 +95,12 @@ fun DashView(
     onOpenEvents: (() -> Unit)? = null,
     onOpenCommunities: (() -> Unit)? = null,
     onOpenEvent: ((StitchEventEntity) -> Unit)? = null,
+    /** Opens the recorder stitching onto a holiday card (the top button). */
+    navigationCoordinator: com.stitchsocial.club.coordination.NavigationCoordinator? = null,
     modifier: Modifier = Modifier
 ) {
+    val occasionScope = rememberCoroutineScope()
+    LaunchedEffect(userID) { com.stitchsocial.club.occasion.OccasionCenter.refresh(userID) }
     val context = LocalContext.current
     val eventsVM: EventsViewModel = viewModel()
     val streak = StreakService.shared
@@ -213,6 +218,20 @@ fun DashView(
                 tier = tier,
                 subscriberCount = subscriberCount
             )
+
+            // Your birthday week's card, else the running holiday's prompt;
+            // nothing on ordinary days.
+            com.stitchsocial.club.occasion.OccasionCenter.state?.button?.let { button ->
+                com.stitchsocial.club.occasion.OccasionDashButton(
+                    button = button,
+                    onTap = {
+                        occasionScope.launch {
+                            com.stitchsocial.club.occasion.tapOccasionButton(button, navigationCoordinator)
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
 
             // Streak and tier as a pair, and both always render — including at
             // zero. Hiding the streak card at zero left the tier tile alone at

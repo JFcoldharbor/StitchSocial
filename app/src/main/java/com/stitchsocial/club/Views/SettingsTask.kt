@@ -88,6 +88,7 @@ object SettingsTokens {
     // Icon tiles: 30dp, radius 8, white glyph.
     val tileNotifications = Color(0xFFFF3B30)
     val tilePrivacy = Color(0xFF1C1C1E)
+    val tileWatchHistory = Color(0xFF0A84FF)
     val tileSubscriptions = Color(0xFFF0245F)
     val tileCreatorStudio = Color(0xFFF0245F)
     val tileEarnings = Color(0xFF16A34A)
