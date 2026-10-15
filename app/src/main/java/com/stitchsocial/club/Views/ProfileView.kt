@@ -1422,7 +1422,17 @@ private fun ProfileHeader(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Spacing.xs)
             ) {
-                EnhancedProfileImage(user = user, videos = videos)
+                // users/{id}.birthdayUntil came with the profile read. With the
+                // posted card's id beside it, the ring opens the card, like a
+                // story ring; without it the ring is only a ring.
+                val birthdayVideoID = user.birthdayVideoID
+                com.stitchsocial.club.birthday.BirthdayRing(
+                    until = user.birthdayUntil,
+                    diameter = 76.dp,
+                    onTap = birthdayVideoID?.let { id -> { com.stitchsocial.club.birthday.openBirthdayPost(id) } }
+                ) {
+                    EnhancedProfileImage(user = user, videos = videos)
+                }
                 if (!user.isBusiness) {
                     ProfileBadgeStack(
                         userID = user.id,
@@ -1500,6 +1510,14 @@ private fun ProfileHeader(
         // pinnedVideoCount counted every pinned video twice in the headline
         // number.
         StatsRow(user = user, videoCount = videos.size, onFollowersClick = onFollowersClick)
+
+        // Your birthday card, while there's something to do or see. Reads the
+        // status BirthdayCenter already cached — no call of its own.
+        if (isOwnProfile) {
+            com.stitchsocial.club.birthday.BirthdayProfileBanner(
+                modifier = Modifier.padding(horizontal = Spacing.lg)
+            )
+        }
 
         // Action buttons
         // Visitors only. An empty Row would still take the header VStack's

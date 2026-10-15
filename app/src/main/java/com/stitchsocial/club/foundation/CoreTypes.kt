@@ -280,7 +280,13 @@ data class BasicUserInfo(
     val customSubSharePermanent: Boolean = false,
     // users/{id}.brandRating = {average, count} — server-written from campaign reviews
     val brandRatingAverage: Double = 0.0,
-    val brandRatingCount: Int = 0
+    val brandRatingCount: Int = 0,
+    // users/{id}.birthdayUntil — the server sets it for a birthday card's
+    // day; the avatar wears the 🎂 ring until then (BirthdayRing).
+    val birthdayUntil: Date? = null,
+    // users/{id}.birthdayVideoID — the posted card, set beside birthdayUntil.
+    // The profile header's ring opens it.
+    val birthdayVideoID: String? = null
 ) {
     val isBusiness: Boolean get() = accountType == AccountType.BUSINESS
 
@@ -435,7 +441,9 @@ data class BasicUserInfo(
                     customSubShareExpiresAt = customSubShareExpiresAt,
                     customSubSharePermanent = customSubSharePermanent,
                     brandRatingAverage = (brandRating?.get("average") as? Number)?.toDouble() ?: 0.0,
-                    brandRatingCount = (brandRating?.get("count") as? Number)?.toInt() ?: 0
+                    brandRatingCount = (brandRating?.get("count") as? Number)?.toInt() ?: 0,
+                    birthdayUntil = (data["birthdayUntil"] as? Timestamp)?.toDate(),
+                    birthdayVideoID = (data["birthdayVideoID"] as? String)?.takeIf { it.isNotBlank() }
                 )
             } catch (e: Exception) {
                 null

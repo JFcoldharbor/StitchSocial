@@ -59,6 +59,9 @@ sealed class NotificationDestination {
     /** Nudges and recaps: just open the app. */
     object Home : NotificationDestination()
 
+    /** Your own birthday card — the Birthday sheet. */
+    object Birthday : NotificationDestination()
+
     /** Nothing specific to open — show the inbox rather than doing nothing. */
     object Inbox : NotificationDestination()
 
@@ -96,6 +99,26 @@ sealed class NotificationDestination {
 
             val type = rawType?.lowercase()?.trim()
             val kind = str("kind")?.lowercase()
+
+            // 0. Birthday cards (BIRTHDAY_CONTRACT). By kind, and first: the
+            //    day-of push carries a videoID and a senderID, and the rules
+            //    below would each take it somewhere plausible and wrong.
+            //    - birthday_self_week / _dayBefore / _day_of → your own sheet.
+            //    - birthday_day_before (a follower's) → the birthday person.
+            //    - birthday_day_of (a follower's) → their card's thread.
+            if (kind != null && kind.startsWith("birthday_self")) return Birthday
+            if (kind == "birthday_day_before") {
+                return str("userID", "userId", "user_id")?.let { Profile(it) }
+                    ?: str("senderID", "senderId")?.let { Profile(it) }
+                    ?: Inbox
+            }
+            if (kind == "birthday_day_of") {
+                str("videoID", "videoId", "video_id")?.let { return Video(it, str("threadID", "threadId", "thread_id")) }
+                str("threadID", "threadId", "thread_id")?.let { return Video(it, it) }
+                return str("userID", "userId", "user_id")?.let { Profile(it) }
+                    ?: str("senderID", "senderId")?.let { Profile(it) }
+                    ?: Inbox
+            }
 
             // 1. Moderation and broken uploads carry the removed video's id —
             //    playing it is the one thing not to do. The notice is the inbox.

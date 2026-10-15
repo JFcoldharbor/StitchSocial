@@ -298,6 +298,12 @@ object FirebaseSchema {
         // Pinned videos (max 3 threads)
         const val PINNED_VIDEO_IDS = "pinnedVideoIDs"
 
+        // Birthday cards (BIRTHDAY_CONTRACT) — server-written, public.
+        /** Timestamp — the avatar's 🎂 ring shows while now < this. */
+        const val BIRTHDAY_UNTIL    = "birthdayUntil"
+        /** String — the posted card; the profile header's ring opens it. */
+        const val BIRTHDAY_VIDEO_ID = "birthdayVideoID"
+
         fun documentPath(userID: String): String =
             Collections.fullPath(Collections.USERS) + "/$userID"
 

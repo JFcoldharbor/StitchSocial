@@ -76,6 +76,9 @@ private fun compactCount(n: Int): String = when {
  *   somebody else ("on X's thread"). Replaces the purple thread-creator pill.
  * @param onFollowTap null hides the badge (own video, or a surface without
  *   following).
+ * @param birthdayUntil users/{id}.birthdayUntil when the caller's user read
+ *   carried it. The avatar wears the 🎂 ring until then; null (the usual
+ *   case) draws nothing. Visual only here — the avatar still opens the profile.
  */
 @Composable
 internal fun CreatorBlock(
@@ -83,6 +86,7 @@ internal fun CreatorBlock(
     handle: String?,
     profileImageURL: String?,
     identityKey: String,
+    birthdayUntil: java.util.Date? = null,
     viewCount: Int? = null,
     showsDetail: Boolean = true,
     onViewsTap: (() -> Unit)? = null,
@@ -116,6 +120,7 @@ internal fun CreatorBlock(
                 displayName = name,
                 profileImageURL = profileImageURL,
                 identityKey = identityKey,
+                birthdayUntil = birthdayUntil,
                 size = avatarSize,
                 isFollowing = isFollowing,
                 onFollowTap = onFollowTap
@@ -167,6 +172,7 @@ private fun CreatorAvatar(
     displayName: String,
     profileImageURL: String?,
     identityKey: String,
+    birthdayUntil: java.util.Date?,
     size: Dp,
     isFollowing: Boolean,
     onFollowTap: (() -> Unit)?
@@ -174,23 +180,25 @@ private fun CreatorAvatar(
     var confirmingUnfollow by remember { mutableStateOf(false) }
 
     Box(contentAlignment = Alignment.BottomCenter) {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .shadow(3.dp, CircleShape)
-                .clip(CircleShape)
-        ) {
-            if (!profileImageURL.isNullOrEmpty()) {
-                SubcomposeAsyncImage(
-                    model = profileImageURL,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    loading = { Monogram(displayName, identityKey, size) },
-                    error = { Monogram(displayName, identityKey, size) }
-                )
-            } else {
-                Monogram(displayName, identityKey, size)
+        com.stitchsocial.club.birthday.BirthdayRing(until = birthdayUntil, diameter = size) {
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .shadow(3.dp, CircleShape)
+                    .clip(CircleShape)
+            ) {
+                if (!profileImageURL.isNullOrEmpty()) {
+                    SubcomposeAsyncImage(
+                        model = profileImageURL,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        loading = { Monogram(displayName, identityKey, size) },
+                        error = { Monogram(displayName, identityKey, size) }
+                    )
+                } else {
+                    Monogram(displayName, identityKey, size)
+                }
             }
         }
         // Sits ON the avatar's lower edge, so it reads as "add this person"

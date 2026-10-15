@@ -194,6 +194,11 @@ fun InviteWelcomeHost(
         }
     }
 
+    DisposableEffect(visible) {
+        InviteWelcomeStore.showing.value = visible
+        onDispose { InviteWelcomeStore.showing.value = false }
+    }
+
     val m = model
     if (!visible || m == null || isModalShowing) return
 

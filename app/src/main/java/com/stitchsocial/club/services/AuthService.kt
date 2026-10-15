@@ -327,6 +327,8 @@ class AuthService {
             // an adult signing out would hand their lane to whoever signs in
             // next, before the age gate has read anything.
             TeenSafety.reset()
+            // Same for the last account's birthday status and sheet.
+            com.stitchsocial.club.birthday.BirthdayCenter.reset()
             ThreadRefreshBus.clear()
             auth.signOut()
             if (BuildConfig.DEBUG) { println("AUTH SERVICE: ✅ User signed out successfully") }

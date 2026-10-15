@@ -35,6 +35,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.birthday.BirthdayCenter
+import com.stitchsocial.club.birthday.BirthdayService
+import com.stitchsocial.club.services.TeenSafety
 
 // ─────────────────────────────────────────────
 // MARK: - Privacy enums (mirror iOS)
@@ -104,6 +107,50 @@ fun PrivacySettingsView(
 
     var isLoaded by remember { mutableStateOf(false) }
     var pendingAge by remember { mutableStateOf<AgeGroup?>(null) }
+
+    // Birthday cards. The row shows only once birthday_status has answered
+    // and said this person can have one; the switch starts from its reason.
+    val birthdayStatus = BirthdayCenter.status
+    var birthdayCardsOn by remember { mutableStateOf(true) }
+    var birthdayCardsSaving by remember { mutableStateOf(false) }
+    var birthdayCardsError by remember { mutableStateOf<String?>(null) }
+    val isTeen = TeenSafety.viewerIsTeen || ageGroup == AgeGroup.TEEN
+
+    // Hidden for teens, before the status is known, and when the reason says
+    // this account can't have a card at all (no birthdate, not an adult, a
+    // business, the default date). "off" keeps the row — the switch is how
+    // they turn it back on.
+    val showsBirthdayCards = !isTeen && birthdayStatus?.showsSettingsToggle == true
+
+    LaunchedEffect(birthdayStatus) {
+        if (!birthdayCardsSaving && birthdayStatus != null) birthdayCardsOn = !birthdayStatus.isTurnedOff
+    }
+    LaunchedEffect(userID, isLoaded) {
+        // The throttled status — usually already cached from launch.
+        if (!isLoaded || isTeen) return@LaunchedEffect
+        BirthdayCenter.refresh(userID, isTeen = false)
+    }
+
+    /** One callable; the switch flips back if it fails. */
+    fun setBirthdayCards(enabled: Boolean) {
+        val previous = birthdayCardsOn
+        birthdayCardsOn = enabled
+        birthdayCardsSaving = true
+        birthdayCardsError = null
+        scope.launch {
+            try {
+                birthdayCardsOn = BirthdayService.setEnabled(enabled)
+                birthdayCardsSaving = false
+                BirthdayCenter.refreshAfterAction()?.let { birthdayCardsOn = !it.isTurnedOff }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                birthdayCardsOn = previous
+                birthdayCardsSaving = false
+                birthdayCardsError = BirthdayService.message(e)
+            }
+        }
+    }
     var showAgeConfirm by remember { mutableStateOf(false) }
 
     // Load
@@ -297,6 +344,48 @@ fun PrivacySettingsView(
                             "On your birthday, your followers get a note to send some hype. Only the day is shared — never your age or birth year.",
                             fontSize = 11.sp, color = AppTheme.colors.textSecondary
                         )
+
+                        if (showsBirthdayCards) {
+                            HorizontalDivider(
+                                color = AppTheme.colors.textSecondary.copy(alpha = 0.2f),
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    "Birthday cards",
+                                    fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                    color = AppTheme.colors.textPrimary
+                                )
+                                if (birthdayCardsSaving) {
+                                    CircularProgressIndicator(
+                                        color = AppTheme.colors.textSecondary,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                Spacer(Modifier.weight(1f))
+                                Switch(
+                                    checked = birthdayCardsOn,
+                                    onCheckedChange = { setBirthdayCards(it) },
+                                    enabled = !birthdayCardsSaving,
+                                    colors = SwitchDefaults.colors(
+                                        checkedTrackColor = Color(0xFFE91E63),
+                                        checkedThumbColor = Color.White
+                                    )
+                                )
+                            }
+                            Text(
+                                "A card on your birthday that friends can stitch wishes onto. Never shows your age.",
+                                fontSize = 11.sp, color = AppTheme.colors.textSecondary
+                            )
+                            birthdayCardsError?.let {
+                                Text(it, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF453A))
+                            }
+                        }
                     }
                 }
             }

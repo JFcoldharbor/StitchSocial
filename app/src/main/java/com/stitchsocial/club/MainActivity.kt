@@ -50,6 +50,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.stitchsocial.club.birthday.BirthdayCenter
+import com.stitchsocial.club.birthday.BirthdaySheetHost
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
@@ -633,6 +635,8 @@ fun MainScreen() {
     // funnels can be followed across sessions.
     LaunchedEffect(currentUser?.id) {
         com.stitchsocial.club.services.AnalyticsService.setUser(currentUser?.id)
+        // Signed out: nothing of the last account's birthday carries over.
+        if (currentUser == null) BirthdayCenter.reset()
     }
     // Enforcement state (suspension / ban) from the user's own doc, live, so
     // the banner and every create gate follow the server without a restart.
@@ -828,6 +832,7 @@ fun MainScreen() {
         isShowingInbox = false
         com.stitchsocial.club.landing.LandingPresenter.dismissAll()
         com.stitchsocial.club.landing.LandingPostRouter.cancel()
+        BirthdayCenter.isPresenting = false
         interruptGeneration++
 
         when (destination) {
@@ -890,6 +895,58 @@ fun MainScreen() {
             )
             NotificationDestination.Home -> selectedTab = MainAppTab.HOME
             NotificationDestination.Inbox -> isShowingInbox = true
+            NotificationDestination.Birthday -> {
+                // A birthday_self_* tap: always ask again — the push was sent
+                // because something changed. Never for a teen: the inbox
+                // instead (the server doesn't send them these anyway).
+                if (ageGateState == "ok" && !TeenSafety.viewerIsTeen) {
+                    scope.launch {
+                        BirthdayCenter.refresh(currentUser?.id, isTeen = false, force = true)
+                        if (token != routeToken) return@launch  // a newer tap took over
+                        BirthdayCenter.present()
+                    }
+                } else {
+                    isShowingInbox = true
+                }
+            }
+        }
+    }
+
+    // ── Birthday cards ──────────────────────────────────────────────────────
+
+    /**
+     * Nothing this layer knows of is covering the tabs. iOS asks whether the
+     * root has anything presented; here that is every overlay MainScreen owns,
+     * plus the invite Welcome and a tap still waiting to route. An auto-present
+     * that finds the screen busy waits for the next check.
+     */
+    fun birthdayScreenClear(): Boolean =
+        navigationCoordinator.currentModal.value == ModalState.NONE &&
+            !isShowingThreadView && !isShowingProfileView && !isShowingCommunity && !isShowingInbox &&
+            notificationVideo == null && notificationScreen == null && routeAwaitingConfirm == null &&
+            com.stitchsocial.club.landing.LandingPresenter.screen.value == null &&
+            com.stitchsocial.club.landing.LandingPresenter.activePerk.value == null &&
+            !announcementService.isShowingAnnouncement.value &&
+            !com.stitchsocial.club.foundation.FullScreenSurfaceState.isUp.value &&
+            !com.stitchsocial.club.services.InviteWelcomeStore.showing.value &&
+            NotificationRouter.pending.value == null &&
+            !BirthdayCenter.isPresenting
+
+    /**
+     * birthday_status, at most every 6 hours (BirthdayCenter throttles), and
+     * the Birthday sheet when the server says autoPresent. Only over the main
+     * app, past the age gate, and never in the teen lane — "ok" is the adult
+     * branch. Never over something else that's up.
+     */
+    fun checkBirthday() {
+        val uid = currentUser?.id ?: return
+        if (ageGateState != "ok") return
+        scope.launch {
+            val status = BirthdayCenter.refresh(uid, isTeen = false) ?: return@launch
+            if (!BirthdayCenter.shouldAutoPresent(context, status)) return@launch
+            if (currentUser?.id != uid || ageGateState != "ok" || !birthdayScreenClear()) return@launch
+            BirthdayCenter.noteAutoPresented(context, status)
+            BirthdayCenter.present()
         }
     }
 
@@ -981,6 +1038,20 @@ fun MainScreen() {
                 // router above: this branch is "signed up, past the age gate".
                 com.stitchsocial.club.landing.LandingArrival(accountCreatedAt = currentUser?.createdAt)
 
+                // Birthday cards: checked when the main app comes up (this
+                // branch composing), when the age gate settles, and on every
+                // return to the foreground. checkBirthday holds it to adults.
+                LaunchedEffect(currentUser?.id, ageGateState) { checkBirthday() }
+                val birthdayLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                DisposableEffect(birthdayLifecycle) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) checkBirthday()
+                    }
+                    birthdayLifecycle.lifecycle.addObserver(observer)
+                    onDispose { birthdayLifecycle.lifecycle.removeObserver(observer) }
+                }
+                currentUser?.let { BirthdaySheetHost(currentUser = it) }
+
                 // A brand-new email account lands on Profile, once (iOS
                 // parity). LoginView sets the flag at the one moment an account
                 // is genuinely created — a reinstall or an account switch would
@@ -1052,7 +1123,10 @@ fun MainScreen() {
                             userService = userService,
                             feedService = feedService,
                             navigationCoordinator = navigationCoordinator,
-                            isAnnouncementShowing = isShowingAnnouncement,
+                            // The Birthday sheet covers the feed the way an
+                            // announcement does: Discovery stops under it and
+                            // picks up again when it closes (iOS coversFeed).
+                            isAnnouncementShowing = isShowingAnnouncement || BirthdayCenter.isPresenting,
                             onShowThreadView = { threadID, targetVideoID ->
                                 threadViewThreadID = threadID
                                 threadViewTargetVideoID = targetVideoID

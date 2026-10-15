@@ -175,6 +175,9 @@ object InviteWelcomeStore {
     private val _version = kotlinx.coroutines.flow.MutableStateFlow(0)
     val version: kotlinx.coroutines.flow.StateFlow<Int> = _version
 
+    /** True while the Welcome is on screen — MainScreen won't auto-present the Birthday sheet over it. */
+    val showing = kotlinx.coroutines.flow.MutableStateFlow(false)
+
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

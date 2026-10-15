@@ -222,7 +222,9 @@ private data class OverlayUserCache(
     val displayName: String,
     val profileImageURL: String?,
     val tier: UserTier?,
-    val cachedAt: Date
+    val cachedAt: Date,
+    /** users/{id}.birthdayUntil, from the same read — drives the 🎂 ring. */
+    val birthdayUntil: Date? = null
 )
 
 private object UserDataCache {
@@ -357,6 +359,7 @@ fun ContextualVideoOverlay(
     var isLoadingUserData by remember { mutableStateOf(false) }
     var realCreatorName by remember { mutableStateOf<String?>(null) }
     var realCreatorProfileImageURL by remember { mutableStateOf<String?>(null) }
+    var realCreatorBirthdayUntil by remember { mutableStateOf<Date?>(null) }
     var realThreadCreatorName by remember { mutableStateOf<String?>(null) }
     var realThreadCreatorProfileImageURL by remember { mutableStateOf<String?>(null) }
     var videoEngagement by remember { mutableStateOf<ContextualVideoEngagement?>(null) }
@@ -519,6 +522,7 @@ fun ContextualVideoOverlay(
             if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: Found in cache: ${cached.displayName}") }
             realCreatorName = cached.displayName
             realCreatorProfileImageURL = cached.profileImageURL
+            realCreatorBirthdayUntil = cached.birthdayUntil
         } else {
             // Fetch from UserService
             try {
@@ -529,13 +533,15 @@ fun ContextualVideoOverlay(
                 if (profile != null) {
                     realCreatorName = profile.displayName.ifEmpty { profile.username }
                     realCreatorProfileImageURL = profile.profileImageURL
+                    realCreatorBirthdayUntil = profile.birthdayUntil
                     if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ CREATOR PILL DEBUG: displayName=${realCreatorName}, imageURL=${realCreatorProfileImageURL}") }
                     // Cache the result
                     UserDataCache.set(video.creatorID, OverlayUserCache(
                         displayName = realCreatorName ?: "",
                         profileImageURL = realCreatorProfileImageURL,
                         tier = null,
-                        cachedAt = Date()
+                        cachedAt = Date(),
+                        birthdayUntil = profile.birthdayUntil
                     ))
                     if (BuildConfig.DEBUG) { println("Ã°Å¸â€˜Â¤ OVERLAY: Fetched creator profile: ${profile.displayName}") }
                 } else {
@@ -756,6 +762,7 @@ fun ContextualVideoOverlay(
                 threadVideo = threadVideo,
                 displayCreatorName = displayCreatorName,
                 displayCreatorProfileImageURL = realCreatorProfileImageURL,
+                displayCreatorBirthdayUntil = realCreatorBirthdayUntil,
                 displayThreadCreatorName = displayThreadCreatorName,
                 displayThreadCreatorProfileImageURL = realThreadCreatorProfileImageURL,
                 temperatureColor = temperatureColor,
@@ -1292,6 +1299,7 @@ private fun FullContextualOverlay(
     threadVideo: CoreVideoMetadata?,
     displayCreatorName: String,
     displayCreatorProfileImageURL: String?,
+    displayCreatorBirthdayUntil: Date?,
     displayThreadCreatorName: String,
     displayThreadCreatorProfileImageURL: String?,
     temperatureColor: Color,
@@ -1405,6 +1413,7 @@ private fun FullContextualOverlay(
             threadVideo = threadVideo,
             displayCreatorName = displayCreatorName,
             displayCreatorProfileImageURL = displayCreatorProfileImageURL,
+            displayCreatorBirthdayUntil = displayCreatorBirthdayUntil,
             displayThreadCreatorName = displayThreadCreatorName,
             videoEngagement = videoEngagement,
             isUserVideo = isUserVideo,
@@ -1470,6 +1479,7 @@ private fun BottomSection(
     threadVideo: CoreVideoMetadata?,
     displayCreatorName: String,
     displayCreatorProfileImageURL: String?,
+    displayCreatorBirthdayUntil: Date?,
     displayThreadCreatorName: String,
     videoEngagement: ContextualVideoEngagement?,
     isUserVideo: Boolean,
@@ -1539,6 +1549,8 @@ private fun BottomSection(
                 handle = video.creatorName.ifEmpty { null },
                 profileImageURL = displayCreatorProfileImageURL,
                 identityKey = video.creatorID,
+                // users/{id}.birthdayUntil from the creator read above.
+                birthdayUntil = displayCreatorBirthdayUntil,
                 viewCount = videoEngagement?.viewCount ?: video.viewCount,
                 showsDetail = detailExpanded,
                 onViewsTap = if (isUserVideo) onViewersTap else null,
