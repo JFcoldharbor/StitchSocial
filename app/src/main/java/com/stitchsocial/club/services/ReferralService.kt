@@ -255,20 +255,12 @@ class ReferralService {
     /**
      * The text that actually gets shared (iOS parity).
      *
-     * This used to list both store URLs and ask the invitee to remember a code
-     * and type it at signup, while `universalLink` — computed right above — went
-     * unused. Nobody ever received a referral link; they received homework, and
-     * anyone who forgot the code signed up as organic with the referrer never
-     * credited.
-     *
-     * One link now. With the app installed it opens straight to signup with the
-     * code filled in; without it, the invite page carries both store links and
-     * shows the code. The code stays in the text for anyone doing it by hand.
+     * Short, with the link alone on the last line. Buried mid-paragraph the
+     * link went out as plain text in more apps; on its own line Messenger,
+     * WhatsApp and Messages turn it into the invite preview card (drawn by the
+     * invitePage function). The code stays as one line for anyone typing it in
+     * by hand; the invite page and the invite video show it too.
      */
-    private fun generateShareText(code: String) = """
-Come join me on Stitch Social.
-
-$baseURL/invite/$code
-
-That link sets you up automatically. If you'd rather do it the long way, sign up and enter the invite code $code.""".trimIndent()
+    private fun generateShareText(code: String) =
+        "Join me on Stitch 👇\nInvite code: $code\n$baseURL/invite/$code"
 }

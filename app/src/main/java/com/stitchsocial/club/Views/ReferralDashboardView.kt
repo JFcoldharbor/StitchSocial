@@ -92,6 +92,8 @@ fun ReferralDashboardView(
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_TEXT, link.shareText)
+                    // Shown as the link preview's title in the share sheet.
+                    putExtra(Intent.EXTRA_TITLE, "Join me on Stitch")
                 }
                 context.startActivity(Intent.createChooser(shareIntent, "Share your invite code"))
                 // The OS chooser hides which app was picked, so the channel is
