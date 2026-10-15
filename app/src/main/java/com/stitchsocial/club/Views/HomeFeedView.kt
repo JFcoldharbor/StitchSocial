@@ -664,7 +664,9 @@ private fun ThreadVideoCard(
                 },
                 onTapNext = {
                     if (currentIndex < allVideos.size - 1) currentIndex += 1
-                }
+                },
+                // The thread rail owns the right edge (iOS 8a).
+                showsNextPeek = false
             )
         }
 

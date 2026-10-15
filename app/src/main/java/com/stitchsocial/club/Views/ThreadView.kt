@@ -866,6 +866,8 @@ private fun FullscreenThreadPlayer(
                     if (target < videos.size) pagerState.animateScrollToPage(target)
                 }
             },
+            // The thread rail owns the right edge (iOS 8a).
+            showsNextPeek = false,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(5f)

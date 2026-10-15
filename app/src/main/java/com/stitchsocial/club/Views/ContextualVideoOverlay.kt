@@ -166,8 +166,8 @@ object OverlaySizes {
     val PROFILE_IMAGE_THREAD = 28.dp
 
     // Spacing
-    val BOTTOM_PADDING_MIN = 42.dp  // Higher from tab bar for HomeFeed
-    val BOTTOM_PADDING_MAX = 58.dp  // Higher from tab bar for large screens
+    val BOTTOM_PADDING_MIN = 56.dp  // Clears the tab bar; the creator row hugs the title on its own
+    val BOTTOM_PADDING_MAX = 76.dp  // The action labels sat under the tab bar at 58
 }
 
 // MARK: - Enums
@@ -349,7 +349,7 @@ fun ContextualVideoOverlay(
         when {
             screenHeight < 600.dp -> OverlaySizes.BOTTOM_PADDING_MIN
             screenHeight > 800.dp -> OverlaySizes.BOTTOM_PADDING_MAX
-            else -> 50.dp // Medium screens
+            else -> 66.dp // Medium screens
         }
     }
 

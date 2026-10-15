@@ -49,7 +49,12 @@ fun VideoNavigationPeeks(
      * Null keeps them visual-only, so existing callers are unaffected.
      */
     onTapPrevious: (() -> Unit)? = null,
-    onTapNext: (() -> Unit)? = null
+    onTapNext: (() -> Unit)? = null,
+    /**
+     * False where the thread rail is drawn (iOS 8a): the rail owns the right
+     * edge, and a next card there sat on top of its tiles. The left peek stays.
+     */
+    showsNextPeek: Boolean = true
 ) {
     val previousVideo = if (currentVideoIndex > 0) allVideos[currentVideoIndex - 1] else null
     val nextVideo = if (currentVideoIndex < allVideos.size - 1) allVideos[currentVideoIndex + 1] else null
@@ -89,7 +94,7 @@ fun VideoNavigationPeeks(
         }
 
         // Right peek — Next video
-        if (nextVideo != null) {
+        if (nextVideo != null && showsNextPeek) {
             NavigationPeekCard(
                 video = nextVideo,
                 isLeft = false,

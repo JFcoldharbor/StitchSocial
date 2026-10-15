@@ -2996,6 +2996,8 @@ private fun DiscoveryFullscreenCard(
                     currentVideoIndex = currentIndex,
                     onTapPrevious = { if (currentIndex > 0) currentIndex -= 1 },
                     onTapNext = { if (currentIndex < allVideos.size - 1) currentIndex += 1 },
+                    // The thread rail owns the right edge (iOS 8a).
+                    showsNextPeek = false,
                     // Hidden while the pager moves so a peek doesn't slide across
                     // the incoming video.
                     modifier = Modifier
