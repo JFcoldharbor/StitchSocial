@@ -505,14 +505,26 @@ private fun ThreadVideoCard(
     val videoCount = allVideos.size
 
     var currentIndex by remember { mutableStateOf(0) }
+    // The stitch either side, loaded and paused, so a sideways swipe lands on a
+    // video that is already playing (PlayerWarmPool). Only the card on screen.
+    val warmContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(allVideos, currentIndex, isCurrentPage) {
+        if (!isCurrentPage) return@LaunchedEffect
+        val idx = currentIndex.coerceIn(0, (allVideos.size - 1).coerceAtLeast(0))
+        val neighbours = listOfNotNull(allVideos.getOrNull(idx + 1), allVideos.getOrNull(idx - 1))
+            .filter { it.videoURL.isNotBlank() }
+        com.stitchsocial.club.services.PlayerWarmPool.keepOnly(neighbours.map { it.id }.toSet())
+        neighbours.forEach { com.stitchsocial.club.services.PlayerWarmPool.warm(warmContext, it) }
+    }
     val currentVideo = allVideos.getOrElse(currentIndex) { allVideos.last() }
     val isOnParent = currentIndex == 0
 
     val offsetX = remember { Animatable(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
-    // Derive isActive from page visibility and drag state (both parent and children can play)
-    val isActive = isCurrentPage && !isDragging
+    // Keeps playing while a sideways swipe drags it off — pausing at the first
+    // touch flashed the ▶︎ button on every swipe.
+    val isActive = isCurrentPage
 
     val screenWidthPx = with(density) { screenWidth.toPx() }
     val velocityTracker = remember { VelocityTracker() }
@@ -595,39 +607,6 @@ private fun ThreadVideoCard(
                 )
             }
 
-            ContextualVideoOverlay(
-                video = currentVideo,
-                overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
-                currentUserID = userID,
-                threadVideo = if (!isOnParent) thread.parentVideo else null,
-                engagementViewModel = engagementViewModel,
-                iconManager = iconManager,
-                followManager = followManager,
-                navigationCoordinator = navigationCoordinator,
-                onAction = { action ->
-                    when (action) {
-                        is OverlayAction.NavigateToProfile -> onCreatorProfileTap(action.userID)
-                        is OverlayAction.StitchRecording -> onStitchTap(currentVideo)
-                        is OverlayAction.NavigateToThread -> {
-                            val threadID = currentVideo.threadID ?: currentVideo.id
-                            // action.targetVideoID is set when the user taps a specific
-                            // reply in the Thread3DInfoPanel preview; null falls back to
-                            // the current feed video's id (existing behavior).
-                            onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
-                        }
-                        else -> {}
-                    }
-                },
-                // A tile in the thread rail: page this strip to it when it's
-                // here; a clip the strip doesn't hold opens in the thread
-                // player, focused on it.
-                onSelectStitch = { target ->
-                    val idx = allVideos.indexOfFirst { it.id == target.id }
-                    if (idx >= 0) currentIndex = idx
-                    else onShowThreadView(target.threadID ?: thread.parentVideo.id, target.id)
-                    true
-                }
-            )
         }
 
         if (isDragging && videoCount > 1) {
@@ -657,6 +636,43 @@ private fun ThreadVideoCard(
                 }
             }
         }
+
+        // The overlay stands still while the video slides under it (iOS draws
+        // one overlay over the strip): share, the three dots, the creator and
+        // the actions don't ride the swipe, and switch when the stitch lands.
+        ContextualVideoOverlay(
+            video = currentVideo,
+            overlayContext = if (isOnParent) OverlayContext.HOME_FEED else OverlayContext.THREAD_VIEW,
+            currentUserID = userID,
+            threadVideo = if (!isOnParent) thread.parentVideo else null,
+            engagementViewModel = engagementViewModel,
+            iconManager = iconManager,
+            followManager = followManager,
+            navigationCoordinator = navigationCoordinator,
+            onAction = { action ->
+                when (action) {
+                    is OverlayAction.NavigateToProfile -> onCreatorProfileTap(action.userID)
+                    is OverlayAction.StitchRecording -> onStitchTap(currentVideo)
+                    is OverlayAction.NavigateToThread -> {
+                        val threadID = currentVideo.threadID ?: currentVideo.id
+                        // action.targetVideoID is set when the user taps a specific
+                        // reply in the Thread3DInfoPanel preview; null falls back to
+                        // the current feed video's id (existing behavior).
+                        onShowThreadView(threadID, action.targetVideoID ?: currentVideo.id)
+                    }
+                    else -> {}
+                }
+            },
+            // A tile in the thread rail: page this strip to it when it's
+            // here; a clip the strip doesn't hold opens in the thread
+            // player, focused on it.
+            onSelectStitch = { target ->
+                val idx = allVideos.indexOfFirst { it.id == target.id }
+                if (idx >= 0) currentIndex = idx
+                else onShowThreadView(target.threadID ?: thread.parentVideo.id, target.id)
+                true
+            }
+        )
 
         // Edge peek navigation (matches iOS VideoNavigationPeeks)
         if (videoCount > 1 && isCurrentPage) {

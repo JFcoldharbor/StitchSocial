@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A PlayerView drawing into a TextureView. Only the sideways stitch pager uses
+  it: a SurfaceView doesn't clip to a page that is scrolling horizontally, so
+  the neighbouring stitch's video showed through a strip at the screen edge.
+  Everywhere else keeps PlayerView's default SurfaceView (cheaper to draw).
+-->
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:surface_type="texture_view"
+    app:use_controller="false" />

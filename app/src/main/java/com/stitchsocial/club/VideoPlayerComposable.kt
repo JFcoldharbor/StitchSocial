@@ -85,6 +85,10 @@ fun VideoPlayerComposable(
      * video. Optional, so every existing call site is unaffected.
      */
     onPlaybackStarted: (() -> Unit)? = null,
+    /** The first frame is on the surface — playing or not. A paused neighbour in a pager shows it, so its poster can go. */
+    onFirstFrameRendered: (() -> Unit)? = null,
+    /** Draw into a TextureView — for a player inside a horizontally scrolling pager, where a SurfaceView won't clip. */
+    textureSurface: Boolean = false,
     /**
      * Media fit (MEDIA_FIT_CONTRACT). Null keeps the old behaviour: fill the
      * frame, cropping (RESIZE_MODE_ZOOM) — grid tiles, the carousel and the
@@ -125,11 +129,9 @@ fun VideoPlayerComposable(
     //
     // HLS still wins when nothing is cached — adaptive bitrate is the better
     // choice over a cold network.
-    val cachedMp4 = videoModel?.mp4URL?.takeIf {
-        it.isNotEmpty() && com.stitchsocial.club.services.VideoDiskCache.isCached(it)
-    }
-    val remoteURL = cachedMp4
-        ?: videoModel?.playbackURL
+    // The rule itself lives in PlayerWarmPool.playbackURL, so a stitch warmed
+    // ahead of a swipe was loaded with exactly the URL this screen picks.
+    val remoteURL = videoModel?.let { com.stitchsocial.club.services.PlayerWarmPool.playbackURL(it) }
         ?: getVideoProperty(video, "videoURL") ?: ""
     val videoTitle = getVideoProperty(video, "title") ?: "Unknown Video"
     val videoId = getVideoProperty(video, "id") ?: "unknown_id"
@@ -162,40 +164,15 @@ fun VideoPlayerComposable(
 
     // Create ExoPlayer instance
     val exoPlayer = remember(currentURL, retryToken) {
-        // Use CacheDataSource if VideoDiskCache is initialised — falls back to default
-        val playerBuilder = try {
-            val cacheFactory = com.stitchsocial.club.services.VideoDiskCache.buildCacheDataSourceFactory()
-            ExoPlayer.Builder(context)
-                .setMediaSourceFactory(
-                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheFactory)
-                )
-        } catch (_: Exception) {
-            ExoPlayer.Builder(context)
-        }
-
-        // Short-form tuning — the single biggest lever against "buffers too much".
-        // The feed player had NO LoadControl, so it used ExoPlayer defaults: wait
-        // ~2.5s of buffer before playback starts and keep up to 50s buffered. For
-        // TikTok-style vertical clips that reads as constant buffering. Start after
-        // ~0.3s buffered and cap the buffer so we don't over-fetch. (GlobalVideoPlayer
-        // already tunes this; the feed player never did.)
-        val shortFormLoadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs = */ 2_000,
-                /* maxBufferMs = */ 20_000,
-                /* bufferForPlaybackMs = */ 300,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000
-            )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-
-        playerBuilder.setLoadControl(shortFormLoadControl).build().apply {
-            // Configure for seamless looping
-            repeatMode = Player.REPEAT_MODE_ONE
-            playWhenReady = false
-
+        // A stitch warmed ahead of the swipe (PlayerWarmPool) is already loaded
+        // and paused on its first frame: take it and it plays at once. Not on a
+        // recovery — that rebuild exists because a player went bad.
+        val warmed = if (retryToken == 0) com.stitchsocial.club.services.PlayerWarmPool.take(videoId, currentURL) else null
+        (warmed ?: com.stitchsocial.club.services.PlayerWarmPool.newPlayer(context)).apply {
             try {
-                if (currentURL.isNotEmpty()) {
+                if (warmed != null) {
+                    Log.d("VIDEO_PLAYER", "⚡ Warm player for $videoId")
+                } else if (currentURL.isNotEmpty()) {
                     val mediaItem = MediaItem.fromUri(currentURL)
                     setMediaItem(mediaItem)
                     // Pick up where this video was left, if anywhere.
@@ -214,6 +191,10 @@ fun VideoPlayerComposable(
 
             // Add listener for play state
             addListener(object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    onFirstFrameRendered?.invoke()
+                }
+
                 override fun onIsPlayingChanged(playing: Boolean) {
                     if (playing) onPlaybackStarted?.invoke()
                     isPlaying = playing
@@ -468,7 +449,10 @@ fun VideoPlayerComposable(
                         //
                         // A SurfaceView still won't let anything draw BEHIND it,
                         // but the poster is drawn ON TOP, which works either way.
-                        PlayerView(ctx).apply {
+                        (if (textureSurface) {
+                            android.view.LayoutInflater.from(ctx)
+                                .inflate(com.stitchsocial.club.R.layout.player_view_texture, null, false) as PlayerView
+                        } else PlayerView(ctx)).apply {
                             player = exoPlayer
                             useController = false
 

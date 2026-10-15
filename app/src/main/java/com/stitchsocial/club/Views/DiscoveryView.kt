@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.horizontalScroll
@@ -52,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -2816,13 +2818,23 @@ private fun DiscoveryFullscreenCard(
     val currentVideo = allVideos.getOrElse(safeIndex) { root }
     val isOnParent = safeIndex == 0
 
-    val offsetX = remember { Animatable(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-
-    // HomeFeed's rule, which is also iOS's: only the settled video plays, so it
-    // pauses through the transition. Position is remembered, so coming back
-    // resumes rather than restarts.
-    val isActive = isCurrentPage && !isDragging && !isAnnouncementShowing
+    // Sideways is a pager, exactly like vertical: the stitch either side is a
+    // live player paused on its first frame, it slides in under your finger,
+    // and the one you're watching keeps playing until the swipe settles. It
+    // was a hand-built drag over still images, so every swipe showed a cover
+    // and a ▶︎ while the next player was built.
+    val stitchPager = rememberPagerState(initialPage = 0, pageCount = { videoCount })
+    val isDragging = stitchPager.isScrollInProgress
+    LaunchedEffect(stitchPager.settledPage) {
+        if (currentIndex != stitchPager.settledPage) currentIndex = stitchPager.settledPage
+    }
+    // The rail and the edge peeks move currentIndex; the pager follows.
+    LaunchedEffect(currentIndex) {
+        if (stitchPager.settledPage != currentIndex && !stitchPager.isScrollInProgress) {
+            stitchPager.animateScrollToPage(currentIndex)
+        }
+    }
+    LaunchedEffect(isDragging) { onHorizontalDragChange(isDragging) }
 
     // Media fit band: below Discovery's floating chrome and above the tab bar
     // when hosted; a cover has neither, so it is the whole screen.
@@ -2842,138 +2854,66 @@ private fun DiscoveryFullscreenCard(
     val fitOverride: String? = if (isAdOnScreen) {
         sponsoredSlot?.fit?.takeIf { it != "auto" } ?: currentVideo.promotion?.fit
     } else null
-    val velocityTracker = remember { VelocityTracker() }
+    // Media-fit band for a stitch that isn't the ad position.
+    val plainBand = MediaFitBand(
+        top = if (hosted) topInset else 0.dp,
+        bottom = if (hosted) TabBarMetrics.clearance else 0.dp
+    )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .pointerInput(videoCount) {
-                if (videoCount <= 1) return@pointerInput
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                        // Each swipe measures its own speed. The tracker was never
-                        // reset, so a flick was judged partly on earlier swipes'
-                        // finger positions and often didn't count.
-                        velocityTracker.resetTracking()
-                        onHorizontalDragChange(true)
-                    },
-                    onDragEnd = {
-                        scope.launch {
-                            val velocity = velocityTracker.calculateVelocity().x
-                            // A flick decides by its direction; a slow drag by how
-                            // far it went. A fifth of the screen, not a third.
-                            val flung = kotlin.math.abs(velocity) > SWIPE_FLING_VELOCITY
-                            val goingNext = if (flung) velocity < 0 else offsetX.value < 0
-                            val shouldSnap = flung || kotlin.math.abs(offsetX.value) > screenWidthPx * SWIPE_DISTANCE_FRACTION
-                            val targetIndex = if (!shouldSnap) currentIndex
-                                else if (goingNext) (currentIndex + 1).coerceIn(0, videoCount - 1)
-                                else (currentIndex - 1).coerceIn(0, videoCount - 1)
-                            // No bounce, and it carries the finger's speed: the
-                            // medium-bouncy spring overshot and wobbled before the
-                            // next stitch counted as arrived.
-                            offsetX.animateTo(
-                                targetValue = if (targetIndex > currentIndex) -screenWidthPx
-                                    else if (targetIndex < currentIndex) screenWidthPx
-                                    else 0f,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS),
-                                initialVelocity = velocity
-                            )
-                            if (targetIndex != currentIndex) currentIndex = targetIndex
-                            offsetX.snapTo(0f)
-                            isDragging = false
-                            onHorizontalDragChange(false)
-                        }
-                    },
-                    onDragCancel = {
-                        scope.launch {
-                            offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = SWIPE_SETTLE_STIFFNESS))
-                            isDragging = false
-                            onHorizontalDragChange(false)
-                        }
-                    }
-                ) { change, dragAmount ->
-                    change.consume()
-                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    scope.launch {
-                        val newOffset = (offsetX.value + dragAmount).coerceIn(
-                            if (currentIndex == 0) -screenWidthPx else -screenWidthPx * 1.5f,
-                            if (currentIndex == videoCount - 1) screenWidthPx else screenWidthPx * 1.5f
-                        )
-                        offsetX.snapTo(newOffset)
-                    }
-                }
-            }
-    ) {
-        // The neighbours, as STILLS, riding one screen away — HomeFeed's
-        // approach. A thumbnail can't fight the player for a surface, which is
-        // what made two live pages overlap.
-        if (isDragging && videoCount > 1) {
-            val dragOffset = offsetX.value
-            if (dragOffset < 0 && currentIndex < videoCount - 1) {
-                val nextVideo = allVideos[currentIndex + 1]
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { translationX = screenWidthPx + dragOffset }
-                        .background(Color.Black)
-                ) { VideoThumbnailPeek(video = nextVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand) }
-            }
-            if (dragOffset > 0 && currentIndex > 0) {
-                val prevVideo = allVideos[currentIndex - 1]
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { translationX = -screenWidthPx + dragOffset }
-                        .background(Color.Black)
-                ) { VideoThumbnailPeek(video = prevVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand) }
-            }
-        }
-
-        // Horizontal stitch navigation, matching HomeFeedView exactly.
-        //
-        // The pager was the wrong shape for this: it scrolls two live players
-        // side by side, which on Android means two PlayerViews competing for the
-        // screen. HomeFeed's model is one player for the video you're watching
-        // and THUMBNAILS for the ones either side — the neighbours are pictures
-        // until you commit to them, so there is only ever one video on screen.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { translationX = offsetX.value }
-        ) {
-            key(currentVideo.id) {
-                var showPoster by remember(currentVideo.id) { mutableStateOf(true) }
-                // A tap pauses, hosted or as a cover. It used to open this very
-                // deck, which is now what you are already looking at — so the
-                // gesture is free, and pause-on-tap is what every other feed
-                // surface does. The player owns the override (tapToPause): it
-                // clears when the cell goes inactive, so the next page autoplays.
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        HorizontalPager(
+            state = stitchPager,
+            // Neighbours only on the post on screen: each is a decoder.
+            beyondViewportPageCount = if (isCurrentPage) 1 else 0,
+            key = { allVideos[it].id },
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val video = allVideos[page]
+            val isAdPage = page == 0 && isAdOnScreen
+            // Plays when it is the settled stitch of the post on screen; the
+            // one being swiped in waits on its first frame until it lands.
+            val pageActive = isCurrentPage && !isAnnouncementShowing && page == stitchPager.settledPage
+            var showPoster by remember(video.id) { mutableStateOf(true) }
+            // Clipped to its own page: a 9:16 video filling a taller screen is
+            // wider than the page, and unclipped the NEXT stitch's overflow drew
+            // over the right edge of this one (only the last stitch, with nothing
+            // after it, looked right). Clipping works because the surface here is
+            // a TextureView — a SurfaceView ignores it.
+            Box(Modifier.fillMaxSize().clipToBounds()) {
+                // A tap pauses (tapToPause); the override clears when the page
+                // goes inactive, so the next stitch autoplays.
                 VideoPlayerComposable(
-                    video = currentVideo,
-                    isActive = isActive,
+                    video = video,
+                    isActive = pageActive,
                     modifier = Modifier.fillMaxSize(),
                     tapToPause = true,
                     onPlaybackStarted = { showPoster = false },
-                    fitBand = fitBand,
-                    fitOverride = fitOverride
+                    onFirstFrameRendered = { showPoster = false },
+                    // A SurfaceView doesn't clip to a sideways-scrolling page:
+                    // the next stitch showed through a strip at the edge.
+                    textureSurface = true,
+                    fitBand = if (isAdPage) fitBand else plainBand,
+                    fitOverride = if (isAdPage) fitOverride else null
                 )
-
-                // Covers the prepare-and-buffer gap on the incoming video so the
-                // swipe doesn't land on black. Clears on the first frame; the
-                // delay is only a ceiling for a video that never starts.
+                // Only until the first frame is drawn — then the player itself
+                // is the picture, paused or playing.
                 if (showPoster) {
-                    // Same mode and rect as the player under it, so the first
-                    // frame lands where the poster was.
-                    VideoThumbnailPeek(video = currentVideo, modifier = Modifier.fillMaxSize(), fitBand = fitBand, fitOverride = fitOverride)
+                    VideoThumbnailPeek(video = video, modifier = Modifier.fillMaxSize(),
+                        fitBand = if (isAdPage) fitBand else plainBand, fitOverride = if (isAdPage) fitOverride else null)
                 }
-                LaunchedEffect(currentVideo.id) {
+                LaunchedEffect(video.id) {
                     kotlinx.coroutines.delay(2000)
                     showPoster = false
                 }
             }
+        }
 
+        // The overlay and the edge peeks stand still while the video slides under
+        // them, the way iOS draws one overlay over the strip — share, the three
+        // dots, the creator and the actions don't ride the swipe, and they switch
+        // to the next stitch when it lands. They used to sit inside the sliding
+        // layer and hide for the whole drag.
+        Box(modifier = Modifier.fillMaxSize()) {
             // Hosted, the chrome above is Discovery's own and the tab bar is still
             // below, so the overlay keeps HomeFeed's bottom clearance and is pushed
             // down past the toolbar and tabs. Top padding only — the bottom edge of
@@ -2988,9 +2928,7 @@ private fun DiscoveryFullscreenCard(
                 engagementViewModel = engagementViewModel,
                 iconManager = iconManager,
                 followManager = followManager,
-                // Hide the overlay while the pager moves, so it doesn't ride
-                // across the incoming video.
-                isVisible = !isDragging,
+                isVisible = true,
                 // A cover hides the tab bar: drop the metadata + actions lower and
                 // let the overlay's scrim sit flush to the screen edge. Hosted, the
                 // tab bar is there and the default clearance is the right one.
