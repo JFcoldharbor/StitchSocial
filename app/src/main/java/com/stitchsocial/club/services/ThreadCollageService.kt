@@ -74,8 +74,8 @@ class ThreadCollageService {
     companion object {
         private const val TAG = "ThreadCollageService"
 
-        /** Max response clips a user can add alongside the main clip. */
-        const val MAX_RESPONSE_CLIPS = 5
+        // No cap on how many response clips: the 60-second budget is the
+        // only limit (isOverBudget gates Build until the user trims to fit).
 
         /** Default seed duration for a freshly added response clip.
          *  Small enough that stacking responses doesn't immediately blow the
@@ -177,9 +177,6 @@ class ThreadCollageService {
             recomputeTotal()
             true
         } else {
-            val responseCount = current.count { !it.isMainClip }
-            if (responseCount >= MAX_RESPONSE_CLIPS) return false
-
             current.add(
                 CollageClip(
                     id = video.id,

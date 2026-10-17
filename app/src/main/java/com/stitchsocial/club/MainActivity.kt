@@ -1391,6 +1391,14 @@ fun MainScreen() {
                                         modal = ModalState.USER_PROFILE,
                                         data = mapOf("userID" to creatorId)
                                     )
+                                },
+                                // A holiday card's "Stitch yours": counted as
+                                // seen (onComplete runs first), then the
+                                // recorder opens stitching onto it.
+                                onStitch = { cardVideoID ->
+                                    scope.launch {
+                                        com.stitchsocial.club.occasion.stitchOntoCard(navigationCoordinator, cardVideoID)
+                                    }
                                 }
                             )
                         }

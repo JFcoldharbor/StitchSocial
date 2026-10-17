@@ -31,7 +31,8 @@ import java.util.TimeZone
  *
  *  - OccasionState: `occasion_current`'s answer — the button at the top of
  *    Dash (your birthday week wins over a holiday, so it may be a birthday
- *    button) and the holiday thread Discover features (shown even during your
+ *    button; with neither, a holiday under two weeks away shows as a
+ *    heads-up) and the holiday thread Discover features (shown even during your
  *    birthday week). Both null most days, and always for teens.
  *  - OccasionService: the callable, with the device's time zone.
  *  - OccasionCenter: the last answer in memory, a 30-minute throttle, and
@@ -52,7 +53,9 @@ data class OccasionButton(
     val occasionID: String? = null,
     val videoID: String? = null
 ) {
-    enum class Kind(val raw: String) { BIRTHDAY("birthday"), OCCASION("occasion") }
+    /** UPCOMING: a holiday whose cards haven't posted yet ("🎃 Halloween cards
+     *  drop tomorrow") — a heads-up with nothing to open. */
+    enum class Kind(val raw: String) { BIRTHDAY("birthday"), OCCASION("occasion"), UPCOMING("upcoming") }
 
     companion object {
         fun parse(raw: Any?): OccasionButton? {

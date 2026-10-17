@@ -124,7 +124,6 @@ fun ThreadCollageSelectionView(
                     candidates = threadData.childVideos,
                     selectedClips = selectedClips,
                     responseClipCount = service.responseClipCount,
-                    maxResponses = ThreadCollageService.MAX_RESPONSE_CLIPS,
                     onTapVideo = { video ->
                         // If already selected, open trim. Otherwise toggle in.
                         if (service.isSelected(video.id)) {
@@ -370,7 +369,6 @@ private fun ResponsesSection(
     candidates: List<CoreVideoMetadata>,
     selectedClips: List<com.stitchsocial.club.services.CollageClip>,
     responseClipCount: Int,
-    maxResponses: Int,
     onTapVideo: (CoreVideoMetadata) -> Unit,
     onLongPressVideo: (CoreVideoMetadata) -> Unit,
 ) {
@@ -386,7 +384,7 @@ private fun ResponsesSection(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "$responseClipCount / $maxResponses",
+                text = "$responseClipCount selected",
                 color = Color.White.copy(alpha = 0.5f),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,

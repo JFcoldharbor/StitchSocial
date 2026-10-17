@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -106,6 +107,7 @@ fun DashView(
     val streak = StreakService.shared
 
     val streakDays by streak.current.collectAsState()
+    val streakLongest by streak.longest.collectAsState()
     val liveEvents by eventsVM.liveEvents.collectAsState()
     val upcomingEvents by eventsVM.upcomingEvents.collectAsState()
 
@@ -219,8 +221,9 @@ fun DashView(
                 subscriberCount = subscriberCount
             )
 
-            // Your birthday week's card, else the running holiday's prompt;
-            // nothing on ordinary days.
+            // Your birthday week's card, else the running holiday's prompt,
+            // else a holiday coming up in the next two weeks; nothing on
+            // ordinary days.
             com.stitchsocial.club.occasion.OccasionCenter.state?.button?.let { button ->
                 com.stitchsocial.club.occasion.OccasionDashButton(
                     button = button,
@@ -239,8 +242,11 @@ fun DashView(
             // tells a new user a streak is a thing they could have.
             DashStatRow(
                 streakDays = streakDays,
+                longest = streakLongest,
                 isAtRisk = streak.isAtRisk,
                 hoursUntilBreak = streak.hoursUntilBreak,
+                requirement = streak.todayRequirementLabel,
+                daysToNextWeek = streak.daysToNextTier,
                 tier = tier,
                 clout = user?.clout ?: 0,
                 onCreate = onCreate,
@@ -544,15 +550,23 @@ private fun DashHeader(
 @Composable
 private fun DashStatRow(
     streakDays: Int,
+    longest: Int,
     isAtRisk: Boolean,
     hoursUntilBreak: Int,
+    requirement: String,
+    daysToNextWeek: Int?,
     tier: UserTier,
     clout: Int,
     onCreate: () -> Unit,
     onTierTap: () -> Unit
 ) {
     val live = streakDays > 0
-    val streakTint = if (live) StitchColors.primary else Color.White.copy(alpha = 0.35f)
+    val streakTint = if (live) DashStreakOrange else Color.White.copy(alpha = 0.35f)
+    // Streak weeks: the daily bar rises every 7 days (StreakService), so the
+    // tile shows where you are in this one. Today's segment is open until it's
+    // secured.
+    val week = if (live) (streakDays - 1) / 7 + 1 else 1
+    val doneThisWeek = if (live) (streakDays - 1) % 7 + 1 else 0
 
     val nextTier = tier.nextTier
     val cloutNeeded = nextTier?.cloutRange?.first?.minus(clout)?.coerceAtLeast(0) ?: 0
@@ -575,13 +589,32 @@ private fun DashStatRow(
             value = "$streakDays",
             valueSuffix = if (streakDays == 1) "day" else "days",
             caption = when {
-                live && isAtRisk -> "Ends in ${hoursUntilBreak}h"
-                live -> "Secured for today"
-                else -> "Post or react to start"
+                !live -> "Hype or post to start"
+                isAtRisk -> "${hoursUntilBreak}h left · $requirement"
+                daysToNextWeek != null -> "Secured · week ${week + 1} in ${daysToNextWeek}d"
+                else -> "Secured · best ${maxOf(longest, streakDays)}"
             },
             emphasised = live && isAtRisk,
-            modifier = Modifier.weight(1f).clickable { onCreate() }
-        )
+            modifier = Modifier.weight(1f).clickable { onCreate() },
+            mark = { DashStreakFlame(live, week) }
+        ) {
+            Row(
+                modifier = Modifier.padding(top = 7.dp).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                for (i in 0 until 7) {
+                    val today = live && isAtRisk && i == doneThisWeek
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (i < doneThisWeek) streakTint else Color.White.copy(alpha = 0.10f))
+                            .border(1.dp, if (today) streakTint else Color.Transparent, RoundedCornerShape(50))
+                    )
+                }
+            }
+        }
 
         DashStatTile(
             tint = tier.color,
@@ -592,7 +625,10 @@ private fun DashStatRow(
             // "1,240 to Rising" is a target; "12%" is a score.
             caption = nextTier?.let { "$cloutNeeded to ${it.displayName}" } ?: "Top tier",
             emphasised = false,
-            modifier = Modifier.weight(1f).clickable { onTierTap() }
+            modifier = Modifier.weight(1f).clickable { onTierTap() },
+            // The tier's crest — the one the rank sheet opens on. Founder's
+            // is the crest above the ladder.
+            mark = { DashTierCrest(tier) }
         ) {
             // The bar supports the number rather than replacing it.
             if (nextTier != null) {
@@ -629,11 +665,12 @@ private fun DashStatTile(
     caption: String,
     emphasised: Boolean,
     modifier: Modifier = Modifier,
+    mark: @Composable () -> Unit,
     footer: @Composable () -> Unit = {}
 ) {
     Column(
         modifier = modifier
-            .heightIn(min = 132.dp)
+            .heightIn(min = 200.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(
                 Brush.linearGradient(
@@ -650,14 +687,10 @@ private fun DashStatTile(
             )
             .padding(13.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(tint.copy(alpha = 0.18f))
-        )
+        // The mark is the tile's picture: big, and centred over the text.
+        Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) { mark() }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -688,6 +721,69 @@ private fun DashStatTile(
         )
 
         footer()
+    }
+}
+
+/** The flame's own orange — a streak is fire, not the brand pink. */
+private val DashStreakOrange = Color(0xFFFF8C29)
+
+/**
+ * A flame that grows with the streak week, with the week on a chip once there
+ * is one — a lit fire you're keeping rather than an empty circle.
+ */
+@Composable
+private fun DashStreakFlame(live: Boolean, week: Int) {
+    Box(Modifier.size(100.dp)) {
+        Text(
+            "🔥",
+            fontSize = if (live) (62 + (minOf(week, 4) - 1) * 5).sp else 60.sp,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .graphicsLayer { alpha = if (live) 1f else 0.35f }
+        )
+        if (live) {
+            Text(
+                "W$week",
+                color = Color.Black,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(DashStreakOrange)
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+private val dashCrests = listOf(
+    R.drawable.rank_1, R.drawable.rank_2, R.drawable.rank_3, R.drawable.rank_4,
+    R.drawable.rank_5, R.drawable.rank_6, R.drawable.rank_7, R.drawable.rank_8,
+    R.drawable.rank_9, R.drawable.rank_10
+)
+private val dashLadder = listOf(
+    UserTier.ROOKIE, UserTier.RISING, UserTier.VETERAN, UserTier.INFLUENCER,
+    UserTier.AMBASSADOR, UserTier.ELITE, UserTier.PARTNER, UserTier.LEGENDARY,
+    UserTier.TOP_CREATOR, UserTier.FOUNDER
+)
+
+/** The rank crest (RankSheetView's art); co-founder wears Founder's. */
+@Composable
+private fun DashTierCrest(tier: UserTier) {
+    val shown = if (tier == UserTier.CO_FOUNDER) UserTier.FOUNDER else tier
+    val index = dashLadder.indexOf(shown)
+    if (index >= 0) {
+        Image(
+            painter = painterResource(dashCrests[index]),
+            contentDescription = "${tier.displayName} crest",
+            modifier = Modifier.requiredSize(130.dp)
+        )
+    } else {
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(tier.color.copy(alpha = 0.18f))
+        )
     }
 }
 

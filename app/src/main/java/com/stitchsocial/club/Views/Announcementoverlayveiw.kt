@@ -10,6 +10,9 @@
  * - Creator pill with profile navigation
  * - Priority-based styling
  * - Continue/Acknowledge buttons
+ * - A holiday card (videos/{id}.isOccasionCard) is its own message: no creator
+ *   pill or title box over its call to action, just "Stitch yours" (recorder
+ *   onto the card's thread) and "Not now", pinned low. iOS parity.
  *
  * Port from iOS Swift version
  */
@@ -55,6 +58,7 @@ import com.stitchsocial.club.services.AnnouncementService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
 import com.stitchsocial.club.BuildConfig
 
@@ -68,6 +72,7 @@ import com.stitchsocial.club.BuildConfig
  * @param onComplete Callback when user completes/watches the announcement
  * @param onDismiss Callback when announcement is dismissed
  * @param onCreatorTap Callback when creator pill is tapped
+ * @param onStitch Opens the recorder stitching onto a holiday card (its videoID)
  */
 @Composable
 fun AnnouncementOverlayView(
@@ -77,9 +82,20 @@ fun AnnouncementOverlayView(
     creatorProfileImageUrl: String? = null,
     onComplete: (watchedSeconds: Int) -> Unit,
     onDismiss: () -> Unit,
-    onCreatorTap: ((String) -> Unit)? = null
+    onCreatorTap: ((String) -> Unit)? = null,
+    onStitch: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+
+    // One field off the video doc — see the header.
+    var isOccasionCard by remember { mutableStateOf(false) }
+    LaunchedEffect(announcement.videoId) {
+        isOccasionCard = runCatching {
+            com.google.firebase.firestore.FirebaseFirestore.getInstance("stitchfin")
+                .collection("videos").document(announcement.videoId).get().await()
+                .getBoolean("isOccasionCard") == true
+        }.getOrDefault(false)
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     // Video state
@@ -258,7 +274,19 @@ fun AnnouncementOverlayView(
             Spacer(modifier = Modifier.weight(1f))
 
             // Bottom controls
-            AnnouncementFooter(
+            if (isOccasionCard) {
+                OccasionCardFooter(
+                    title = announcement.title,
+                    canDismiss = canDismiss && announcement.isDismissable,
+                    canStitch = onStitch != null,
+                    onStitch = {
+                        onComplete(watchedSeconds)
+                        onStitch?.invoke(announcement.videoId)
+                    },
+                    onNotNow = { onComplete(watchedSeconds) },
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+            } else AnnouncementFooter(
                 announcement = announcement,
                 creatorName = creatorName,
                 creatorProfileImageUrl = creatorProfileImageUrl,
@@ -338,6 +366,56 @@ private fun AnnouncementHeader(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+// MARK: - Holiday card footer
+
+/**
+ * Only the two buttons, low and slim: the card's own words and call to action
+ * sit in its middle and lower third, and this must not cover them.
+ */
+@Composable
+private fun OccasionCardFooter(
+    title: String,
+    canDismiss: Boolean,
+    canStitch: Boolean,
+    onStitch: () -> Unit,
+    onNotNow: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // The card title's own emoji ("👀 What are you going as?" → 👀).
+    val emoji = remember(title) {
+        val cp = title.trim().takeIf { it.isNotEmpty() }?.codePointAt(0)
+        if (cp != null && Character.getType(cp) == Character.OTHER_SYMBOL.toInt()) String(Character.toChars(cp)) else ""
+    }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Button(
+            onClick = onStitch,
+            enabled = canStitch,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A1A)),
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.weight(1f).height(50.dp)
+        ) {
+            Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Stitch yours $emoji".trim(), color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+        if (canDismiss) {
+            OutlinedButton(
+                onClick = onNotNow,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.55f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier.height(50.dp)
+            ) {
+                Text("Not now", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

@@ -432,13 +432,13 @@ class CommunityService private constructor() {
                 }
             }
 
-            listItems.sortWith(compareByDescending<CommunityListItem> { it.isCreatorLive }
-                .thenByDescending { it.lastActivityAt })
+            val pictured = withCreatorAvatars(listItems).sortedWith(
+                compareByDescending<CommunityListItem> { it.isCreatorLive }.thenByDescending { it.lastActivityAt })
 
-            _myCommunities.value = listItems
-            communityListCache = CachedItem(listItems, System.currentTimeMillis(), listTTL)
-            Log.d(TAG, "Loaded ${listItems.size} communities for $userID")
-            return listItems
+            _myCommunities.value = pictured
+            communityListCache = CachedItem(pictured, System.currentTimeMillis(), listTTL)
+            Log.d(TAG, "Loaded ${pictured.size} communities for $userID")
+            return pictured
         } finally {
             _isLoading.value = false
         }
@@ -468,8 +468,33 @@ class CommunityService private constructor() {
                 isCreatorLive = c.isCreatorLive, isVerified = false
             )
         }
-        allCommunitiesCache = CachedItem(items, System.currentTimeMillis(), listTTL)
-        return items
+        val pictured = withCreatorAvatars(items)
+        allCommunitiesCache = CachedItem(pictured, System.currentTimeMillis(), listTTL)
+        return pictured
+    }
+
+    /**
+     * A community without its own picture shows its creator's avatar — a
+     * community is a creator's (its id IS the creator's uid), and a row of
+     * letter monograms is what Dash looked like with none set. One read per 30
+     * creators, cached with the list. iOS parity: withCreatorAvatars.
+     */
+    private suspend fun withCreatorAvatars(items: List<CommunityListItem>): List<CommunityListItem> {
+        val missing = items.filter { it.profileImageURL.isNullOrBlank() }.map { it.id }
+        if (missing.isEmpty()) return items
+        val avatars = mutableMapOf<String, String>()
+        for (batch in missing.chunked(30)) {
+            val snap = runCatching {
+                db.collection("users").whereIn(FieldPath.documentId(), batch).get().await()
+            }.getOrNull() ?: continue
+            for (doc in snap.documents) {
+                doc.getString("profileImageURL")?.takeIf { it.isNotBlank() }?.let { avatars[doc.id] = it }
+            }
+        }
+        return items.map { item ->
+            val url = avatars[item.id]
+            if (item.profileImageURL.isNullOrBlank() && url != null) item.copy(profileImageURL = url) else item
+        }
     }
 
     // MARK: - Fetch Members (Paginated)

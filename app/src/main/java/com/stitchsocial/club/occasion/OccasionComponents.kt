@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
@@ -54,7 +55,8 @@ import java.util.Date
  *
  *  - OccasionDashButton: the button at the top of Dash. A holiday's opens the
  *    camera already stitching onto its card; a birthday's opens the birthday
- *    sheet (or the live card). Hidden on days with neither.
+ *    sheet (or the live card). Before a holiday's first card, a heads-up that
+ *    doesn't open anything. Hidden on days with none of these.
  *  - OccasionDiscoverBanner: the running holiday's thread in Discover, with
  *    "Stitch yours" and the thread itself. Renders nothing when there's no
  *    holiday, like NearYouLandingsRow beside it.
@@ -94,6 +96,10 @@ suspend fun stitchOntoCard(navigationCoordinator: NavigationCoordinator?, cardVi
 
 @Composable
 fun OccasionDashButton(button: OccasionButton, onTap: () -> Unit, modifier: Modifier = Modifier) {
+    if (button.kind == OccasionButton.Kind.UPCOMING) {
+        OccasionUpcomingRow(button, modifier)
+        return
+    }
     val isOccasion = button.kind == OccasionButton.Kind.OCCASION
     Row(
         modifier = modifier
@@ -130,10 +136,39 @@ fun OccasionDashButton(button: OccasionButton, onTap: () -> Unit, modifier: Modi
     }
 }
 
+/** Same card, a calendar instead of an action, and no tap: there's no card to stitch onto yet. */
+@Composable
+private fun OccasionUpcomingRow(button: OccasionButton, modifier: Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(OccasionPalette.violet.copy(alpha = 0.42f), OccasionPalette.orange.copy(alpha = 0.42f))))
+            .border(1.dp, OccasionPalette.orange.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(button.label, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("The card lands right here — get your stitch ready", color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = OccasionPalette.orange, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 /** What a Dash button tap does. */
 suspend fun tapOccasionButton(button: OccasionButton, navigationCoordinator: NavigationCoordinator?) {
     when (button.kind) {
         OccasionButton.Kind.OCCASION -> button.videoID?.let { stitchOntoCard(navigationCoordinator, it) }
+        OccasionButton.Kind.UPCOMING -> Unit   // a heads-up; the row isn't tappable
         // A live card opens its thread; otherwise the birthday sheet.
         OccasionButton.Kind.BIRTHDAY ->
             if (button.videoID != null) openBirthdayPost(button.videoID) else BirthdayCenter.present()
