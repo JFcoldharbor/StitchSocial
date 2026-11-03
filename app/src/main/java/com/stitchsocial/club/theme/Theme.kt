@@ -224,6 +224,18 @@ fun StitchSocialClubTheme(
     }
 }
 
+/**
+ * A screen that is always dark, whatever the app's theme (an artist's Landing,
+ * like iOS's preferredColorScheme(.dark)). Leaves the system bars alone so they
+ * don't stay dark after the screen closes.
+ */
+@Composable
+fun AlwaysDark(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalStitchColors provides DarkSemanticColors) {
+        MaterialTheme(colorScheme = StitchDarkColorScheme, typography = Typography, content = content)
+    }
+}
+
 // MARK: - Theme Extensions
 
 /**

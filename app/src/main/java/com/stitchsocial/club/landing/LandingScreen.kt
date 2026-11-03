@@ -71,7 +71,9 @@ fun LandingScreen(
     autoClaim: Boolean = false,
     onDismiss: () -> Unit,
     onRecord: () -> Unit,
-    onOpenVideo: (CoreVideoMetadata) -> Unit
+    onOpenVideo: (CoreVideoMetadata) -> Unit,
+    /** Artist Landings: opens the recorder stitching onto the song's hook. */
+    onStitch: (CoreVideoMetadata) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -114,6 +116,15 @@ fun LandingScreen(
     }
 
     val l = landing
+    if (l?.isArtist == true) {
+        com.stitchsocial.club.ui.theme.AlwaysDark {
+            ArtistLandingScreen(
+                initial = l, spot = spot, source = source, autoClaim = autoClaim,
+                onDismiss = onDismiss, onRecord = onRecord, onStitch = onStitch, onOpenVideo = onOpenVideo
+            )
+        }
+        return
+    }
     val myPerks = remember(allPerks, l?.landingID) { allPerks.filter { it.landingID == l?.landingID } }
     val welcome = myPerks.firstOrNull { it.isWelcome }
     val todayPostID = l?.let { LandingService.todayPostPerkID(it.landingID, uid) }
@@ -495,7 +506,7 @@ private fun LandingHeader(landing: Landing, following: Boolean = false) {
 }
 
 @Composable
-private fun NotActive(text: String) {
+internal fun NotActive(text: String) {
     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(text, fontSize = 16.sp, color = AppTheme.colors.textSecondary, textAlign = TextAlign.Center)
     }
@@ -640,7 +651,7 @@ private fun Checklist(
 }
 
 @Composable
-private fun StepRow(badge: @Composable () -> Unit, title: String, subtitle: String, muted: Boolean = false) {
+internal fun StepRow(badge: @Composable () -> Unit, title: String, subtitle: String, muted: Boolean = false) {
     val colors = AppTheme.colors
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         badge()
@@ -655,7 +666,7 @@ private fun StepRow(badge: @Composable () -> Unit, title: String, subtitle: Stri
 }
 
 @Composable
-private fun StepBadge(number: String?, active: Boolean) {
+internal fun StepBadge(number: String?, active: Boolean) {
     val colors = AppTheme.colors
     Box(
         modifier = Modifier
@@ -676,7 +687,7 @@ private fun StepBadge(number: String?, active: Boolean) {
  * theme.
  */
 @Composable
-private fun PerkTicket(
+internal fun PerkTicket(
     label: String,
     perk: Perk,
     detail: String,
@@ -699,7 +710,7 @@ private fun PerkTicket(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = ink.copy(alpha = 0.6f))
-            Text("Free ${perk.title}", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = ink)
+            Text(perk.displayTitle, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = ink)
             Text(detail, fontSize = 13.sp, color = ink.copy(alpha = 0.75f))
         }
         LandingButton(
@@ -720,7 +731,7 @@ private fun PerkTicket(
 
 /** A used or expired perk, with the stamp (Earned.dc "USED 7:41 PM"). */
 @Composable
-private fun SpentTicket(label: String, perk: Perk) {
+internal fun SpentTicket(label: String, perk: Perk) {
     val colors = AppTheme.colors
     val status = perk.effectiveStatus()
     val time = (perk.usedAt ?: perk.activeUntil)?.let { SimpleDateFormat("h:mm a", Locale.US).format(it) }
@@ -742,7 +753,7 @@ private fun SpentTicket(label: String, perk: Perk) {
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = colors.textSecondary)
-            Text("Free ${perk.title}", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary.copy(alpha = 0.75f))
+            Text(perk.displayTitle, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary.copy(alpha = 0.75f))
         }
         Text(
             stamp,
@@ -827,13 +838,21 @@ private fun PostStepCard(
  * with nothing earned.
  */
 @Composable
-private fun VisitCard(
+internal fun VisitCard(
     landing: Landing,
     member: LandingMember?,
     checkingIn: Boolean,
-    onCheckIn: () -> Unit
+    onCheckIn: () -> Unit,
+    /** Artist Landings count shows, and check in from the show card. */
+    title: String? = null,
+    unit: String = "visit",
+    showCheckIn: Boolean = true
 ) {
     val colors = AppTheme.colors
+    // Show rewards can be experiences ("Soundcheck access"), not free items.
+    val rewardLabel: (String) -> String = { reward ->
+        if (unit == "show") reward.replaceFirstChar { it.uppercase() } else "Free $reward"
+    }
     val visitDays = member?.visitDays ?: 0
     val rungs = member?.rewards?.takeIf { it.isNotEmpty() }
         ?: landing.visitRewards.map { MemberReward(it.visits, it.title, earned = visitDays >= it.visits) }
@@ -857,7 +876,7 @@ private fun VisitCard(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "Visit card · $visitDays ${if (visitDays == 1) "visit" else "visits"}",
+            title ?: "Visit card · $visitDays ${if (visitDays == 1) "visit" else "visits"}",
             fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary
         )
         LinearProgressIndicator(
@@ -868,7 +887,7 @@ private fun VisitCard(
             drawStopIndicator = {}
         )
         Text(
-            if (next != null) "Next: Free ${next.title} at visit ${next.visits}" else "Every reward earned. Thanks for coming back.",
+            if (next != null) "Next: ${rewardLabel(next.title)} at $unit ${next.visits}" else "Every reward earned. Thanks for coming back.",
             fontSize = 13.sp, color = colors.textSecondary
         )
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -882,12 +901,12 @@ private fun VisitCard(
                         )
                     }
                     Text(
-                        "Visit ${rung.visits}",
+                        "${unit.replaceFirstChar { it.uppercase() }} ${rung.visits}",
                         fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.textSecondary,
                         modifier = Modifier.width(64.dp)
                     )
                     Text(
-                        "Free ${rung.title}",
+                        rewardLabel(rung.title),
                         fontSize = 14.sp, maxLines = 1,
                         color = if (rung.earned) colors.textSecondary else colors.textPrimary,
                         modifier = Modifier.weight(1f)
@@ -895,7 +914,9 @@ private fun VisitCard(
                 }
             }
         }
-        if (member?.checkedInToday == true) {
+        if (!showCheckIn) {
+            // The artist show card owns check-in.
+        } else if (member?.checkedInToday == true) {
             Text(
                 "Checked in today ✓",
                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = LandingColors.done,
@@ -909,7 +930,13 @@ private fun VisitCard(
 
 /** The celebration when a check-in earns a rung: "Visit {n}! Free {title} is in your perks". */
 @Composable
-private fun VisitRewardSheet(perk: Perk, onUse: () -> Unit, onLater: () -> Unit) {
+internal fun VisitRewardSheet(
+    perk: Perk,
+    onUse: () -> Unit,
+    onLater: () -> Unit,
+    unit: String = "Visit",
+    hint: String = "Tap Use now when you order. It stays active for 15 minutes."
+) {
     val colors = AppTheme.colors
     Column(
         modifier = Modifier
@@ -921,12 +948,12 @@ private fun VisitRewardSheet(perk: Perk, onUse: () -> Unit, onLater: () -> Unit)
     ) {
         Text("🎉", fontSize = 44.sp)
         Text(
-            "Visit ${perk.milestone ?: ""}! Free ${perk.title} is in your perks",
+            "$unit ${perk.milestone ?: ""}! ${perk.displayTitle} is in your perks",
             fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary,
             textAlign = TextAlign.Center
         )
         Text(
-            "Tap Use now when you order. It stays active for 15 minutes.",
+            hint,
             fontSize = 13.sp, color = colors.textSecondary, textAlign = TextAlign.Center
         )
         LandingButton("Use now", onClick = onUse, enabled = perk.isUsable())
@@ -937,7 +964,14 @@ private fun VisitRewardSheet(perk: Perk, onUse: () -> Unit, onLater: () -> Unit)
 // MARK: - Moments
 
 @Composable
-private fun MomentStrip(title: String, count: String?, videos: List<CoreVideoMetadata>, onOpen: (CoreVideoMetadata) -> Unit) {
+internal fun MomentStrip(
+    title: String,
+    count: String?,
+    videos: List<CoreVideoMetadata>,
+    onOpen: (CoreVideoMetadata) -> Unit,
+    /** Restaurants read a numeric spot as a table. A venue's QR spots don't. */
+    showSpots: Boolean = true
+) {
     val colors = AppTheme.colors
     Column(modifier = Modifier.padding(top = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
@@ -948,13 +982,13 @@ private fun MomentStrip(title: String, count: String?, videos: List<CoreVideoMet
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(videos, key = { it.id }) { video -> MomentCard(video) { onOpen(video) } }
+            items(videos, key = { it.id }) { video -> MomentCard(video, showSpots) { onOpen(video) } }
         }
     }
 }
 
 @Composable
-private fun MomentCard(video: CoreVideoMetadata, onTap: () -> Unit) {
+private fun MomentCard(video: CoreVideoMetadata, showSpot: Boolean, onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .width(112.dp)
@@ -975,8 +1009,9 @@ private fun MomentCard(video: CoreVideoMetadata, onTap: () -> Unit) {
             modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (video.incentivized) PostedForPerkChip()
-            val handle = "@${video.creatorName}" + (video.landingSpot?.let { " · ${spotLabel(it)}" } ?: "")
+            // Sized to fit the card: at the default it clipped to "Posted for a".
+            if (video.incentivized) PostedForPerkChip(fontSize = 9.sp)
+            val handle = "@${video.creatorName}" + (video.landingSpot?.takeIf { showSpot }?.let { " · ${spotLabel(it)}" } ?: "")
             Text(handle, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
         }
     }
@@ -992,20 +1027,22 @@ internal fun spotLabel(spot: String): String =
 // MARK: - Access number
 
 @Composable
-private fun AccessNumberDialog(
+internal fun AccessNumberDialog(
     landingName: String,
     onSubmit: (code: String, onResult: (String?) -> Unit) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    title: String = "Enter the code on the sign",
+    body: String = "It's the 4-digit number printed with the QR at $landingName."
 ) {
     var code by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Enter the code on the sign") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("It's the 4-digit number printed with the QR at $landingName.", fontSize = 14.sp)
+                Text(body, fontSize = 14.sp)
                 OutlinedTextField(
                     value = code,
                     onValueChange = { v -> code = v.filter { it.isDigit() }.take(4); error = null },

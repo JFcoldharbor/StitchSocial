@@ -12,6 +12,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 /**
@@ -27,6 +28,8 @@ class LocationService(private val context: Context) {
 
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(context) }
 
+    private companion object { const val FIX_TIMEOUT_MS = 8_000L }
+
     fun hasPermission(): Boolean {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -38,8 +41,16 @@ class LocationService(private val context: Context) {
     suspend fun fetchCurrentLocation(): Fix? {
         if (!hasPermission()) return null
         return runCatching {
-            val loc = fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, CancellationTokenSource().token).await()
-                ?: fused.lastLocation.await()
+            // A phone with no fix (indoors, a packed arena) can leave this request
+            // pending for a long time, and whoever is waiting shows a spinner.
+            // After the timeout: the last known place, or null so callers fall back.
+            val cancel = CancellationTokenSource()
+            val loc = withTimeoutOrNull(FIX_TIMEOUT_MS) {
+                fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cancel.token).await()
+            } ?: run {
+                cancel.cancel()
+                withTimeoutOrNull(FIX_TIMEOUT_MS / 4) { fused.lastLocation.await() }
+            }
             loc?.let { Fix(it.latitude, it.longitude, it.accuracy) }
         }.getOrNull()
     }

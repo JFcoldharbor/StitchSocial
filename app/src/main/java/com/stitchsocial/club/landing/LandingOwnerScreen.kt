@@ -25,6 +25,9 @@ import com.stitchsocial.club.ui.theme.AppTheme
 import com.stitchsocial.club.ui.theme.DismissX
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Date
 import java.util.Locale
 
 /** Setup and full editing live in the brand portal (the web wizard). */
@@ -54,6 +57,8 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
     var moments by remember { mutableStateOf<List<PendingMoment>>(emptyList()) }
     var busyStatus by remember { mutableStateOf(false) }
     var busyQR by remember { mutableStateOf(false) }
+    var busyStopQR by remember { mutableStateOf<String?>(null) }
+    var busyPair by remember { mutableStateOf(false) }
     var busyMoment by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
@@ -130,7 +135,7 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                                 "live" -> "Live" to LandingColors.done
                                 "paused" -> "Paused" to Color(0xFFFFB020)
                                 "removed" -> "Removed by Stitch" to colors.destructive
-                                else -> "Draft · finish setup on the web" to colors.textSecondary
+                                else -> (if (landing.isArtist) "Draft · Stitch is setting this up" else "Draft · finish setup on the web") to colors.textSecondary
                             }
                             Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = tint)
                         }
@@ -159,6 +164,23 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                     }
                 }
 
+                if (landing.isArtist) {
+                    ArtistShowsCard(
+                        landing = landing,
+                        codes = data?.stopAccessCodes.orEmpty(),
+                        busyStopID = busyStopQR,
+                        onQR = { stop ->
+                            busyStopQR = stop.stopID
+                            scope.launch {
+                                runCatching { LandingService.qrKitURL(landing.landingID, stop.stopID) }
+                                    .onSuccess { url -> if (url != null) BrandPortal.open(context, url) else message = "Couldn't make the QR kit." }
+                                    .onFailure { message = "Couldn't make the QR kit. Try again." }
+                                busyStopQR = null
+                            }
+                        }
+                    )
+                }
+
                 // Today's numbers.
                 data?.let { d ->
                     OwnerCard {
@@ -183,34 +205,42 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
 
                 // Visit card ladder (addendum 2) — read-only; edited on the web.
                 OwnerCard {
-                    Text("Visit rewards", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+                    Text(if (landing.isArtist) "Show rewards" else "Visit rewards", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
                     Spacer(Modifier.height(8.dp))
                     if (landing.visitRewards.isEmpty()) {
                         Text(
-                            "No visit card yet. Reward guests who keep coming back.",
+                            if (landing.isArtist) "No show rewards yet." else "No visit card yet. Reward guests who keep coming back.",
                             fontSize = 13.sp, color = colors.textSecondary
                         )
                     }
                     landing.visitRewards.forEach { rung ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                             Text(
-                                "Visit ${rung.visits}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                "${if (landing.isArtist) "Show" else "Visit"} ${rung.visits}", fontSize = 13.sp, fontWeight = FontWeight.Bold,
                                 color = colors.textSecondary, modifier = Modifier.width(72.dp)
                             )
                             Text("Free ${rung.title}", fontSize = 14.sp, color = colors.textPrimary, maxLines = 1)
                         }
                     }
-                    TextButton(
-                        onClick = { BrandPortal.open(context, LANDING_WEB_URL) },
-                        contentPadding = PaddingValues(0.dp)
-                    ) { Text("Edit on the web", color = LandingColors.accent, fontWeight = FontWeight.Bold) }
+                    if (landing.isArtist) {
+                        Text(
+                            "Stitch manages your tour and perks. Contact Stitch to change them.",
+                            fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 6.dp)
+                        )
+                    } else {
+                        TextButton(
+                            onClick = { BrandPortal.open(context, LANDING_WEB_URL) },
+                            contentPadding = PaddingValues(0.dp)
+                        ) { Text("Edit on the web", color = LandingColors.accent, fontWeight = FontWeight.Bold) }
+                    }
                 }
 
                 // Approvals queue.
                 OwnerCard {
-                    Text("For your TV", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+                    Text(if (landing.isArtist) "For the big screen" else "For your TV", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
                     Text(
-                        "Approve a moment to play it on your screens. You can't hide posts; report anything that breaks the rules.",
+                        if (landing.isArtist) "Approve a fan's moment to play it on the venue screen. You can't hide posts; report anything that breaks the rules."
+                        else "Approve a moment to play it on your screens. You can't hide posts; report anything that breaks the rules.",
                         fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
                     )
                     if (moments.isEmpty()) {
@@ -220,6 +250,7 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                         MomentApprovalRow(
                             moment = m,
                             busy = busyMoment == m.videoID,
+                            approvedLabel = if (landing.isArtist) "On screen" else "On TV",
                             onApprove = {
                                 busyMoment = m.videoID
                                 scope.launch {
@@ -242,8 +273,34 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                     }
                 }
 
+                if (landing.isArtist) {
+                    PairScreenCard(
+                        pairedCount = data?.screenCount ?: 0,
+                        busy = busyPair,
+                        onPair = { code ->
+                            busyPair = true
+                            scope.launch {
+                                runCatching { LandingService.pairScreen(landing.landingID, code) }
+                                    .onSuccess {
+                                        data = data?.let { it.copy(screenCount = it.screenCount + 1) }
+                                        message = "Screen paired."
+                                    }
+                                    .onFailure { e ->
+                                        message = when ((e as? LandingException)?.reason) {
+                                            "bad_code" -> "That code doesn't match a screen. Check it and try again."
+                                            "code_expired" -> "That code expired. Refresh stitchsocial.me/tv for a new one."
+                                            "already_paired" -> "That screen is already paired."
+                                            else -> "Couldn't pair the screen. Try again."
+                                        }
+                                    }
+                                busyPair = false
+                            }
+                        }
+                    )
+                }
+
                 // Out to the web.
-                LandingButton(
+                if (!landing.isArtist) LandingButton(
                     "Download QR kit",
                     busy = busyQR,
                     onClick = {
@@ -256,12 +313,12 @@ fun LandingOwnerScreen(onDismiss: () -> Unit) {
                         }
                     }
                 )
-                OutlinedButton(
+                if (!landing.isArtist) OutlinedButton(
                     onClick = { BrandPortal.open(context, LANDING_WEB_URL) },
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) { Text("Edit on the web", color = colors.textPrimary, fontWeight = FontWeight.Bold) }
-                if ((data?.screenCount ?: 0) == 0) {
+                if (!landing.isArtist && (data?.screenCount ?: 0) == 0) {
                     Text(
                         "Pair a TV at stitchsocial.me/tv, then enter its code on the web.",
                         fontSize = 12.sp, color = colors.textSecondary, textAlign = TextAlign.Center,
@@ -295,6 +352,84 @@ private fun OwnerCard(content: @Composable ColumnScope.() -> Unit) {
     )
 }
 
+/** Each upcoming show's private wristband number and QR kit. */
+@Composable
+private fun ArtistShowsCard(
+    landing: Landing,
+    codes: Map<String, String>,
+    busyStopID: String?,
+    onQR: (TourStop) -> Unit
+) {
+    val colors = AppTheme.colors
+    val now = Date()
+    val stops = landing.tourStops.filter { it.closesAt == null || it.closesAt.after(now) }.sortedBy { it.date }
+    OwnerCard {
+        Text("Your shows", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+        Text(
+            "Each show has its own number for wristbands and signs. Keep it private until the show.",
+            fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
+        )
+        if (stops.isEmpty()) Text("No upcoming shows.", fontSize = 13.sp, color = colors.textSecondary)
+        stops.forEach { stop ->
+            val date = runCatching {
+                LocalDate.parse(stop.date).format(DateTimeFormatter.ofPattern("MMM d", Locale.US))
+            }.getOrDefault(stop.date)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stop.venue.ifBlank { stop.city }, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1)
+                    Text(
+                        listOf(date, stop.city).filter { it.isNotBlank() }.joinToString(" · ") +
+                            (codes[stop.stopID]?.let { " · No. $it" } ?: ""),
+                        fontSize = 12.sp, color = colors.textSecondary, maxLines = 1
+                    )
+                }
+                if (busyStopID == stop.stopID) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LandingColors.accent)
+                } else {
+                    TextButton(onClick = { onQR(stop) }, enabled = busyStopID == null) {
+                        Text("QR kit", color = LandingColors.accent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The artist panel on the web doesn't pair screens, so it's done here. */
+@Composable
+private fun PairScreenCard(pairedCount: Int, busy: Boolean, onPair: (String) -> Unit) {
+    val colors = AppTheme.colors
+    var code by remember { mutableStateOf("") }
+    OwnerCard {
+        Text("Pair a screen", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+        Text(
+            "Open stitchsocial.me/tv on the venue screen and enter its 6-character code." +
+                if (pairedCount > 0) " $pairedCount paired." else "",
+            fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = code,
+                onValueChange = { v -> code = v.uppercase().filter { it.isLetterOrDigit() }.take(6) },
+                label = { Text("Code") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            LandingButton(
+                "Pair",
+                busy = busy,
+                enabled = code.length == 6 && !busy,
+                onClick = { onPair(code) },
+                modifier = Modifier.width(96.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun StatGrid(stats: List<Pair<String, Int>>) {
     val colors = AppTheme.colors
@@ -314,7 +449,7 @@ private fun StatGrid(stats: List<Pair<String, Int>>) {
 }
 
 @Composable
-private fun MomentApprovalRow(moment: PendingMoment, busy: Boolean, onApprove: () -> Unit, onReport: () -> Unit) {
+private fun MomentApprovalRow(moment: PendingMoment, busy: Boolean, approvedLabel: String = "On TV", onApprove: () -> Unit, onReport: () -> Unit) {
     val colors = AppTheme.colors
     val time = moment.createdAt?.let { SimpleDateFormat("h:mm a", Locale.US).format(it) }
     Row(
@@ -339,7 +474,7 @@ private fun MomentApprovalRow(moment: PendingMoment, busy: Boolean, onApprove: (
         if (busy) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LandingColors.accent)
         } else if (moment.landingScreen == "approved") {
-            Text("On TV", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LandingColors.done)
+            Text(approvedLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LandingColors.done)
         } else {
             TextButton(onClick = onReport) { Text("Report", color = colors.textSecondary, fontSize = 13.sp) }
             Button(

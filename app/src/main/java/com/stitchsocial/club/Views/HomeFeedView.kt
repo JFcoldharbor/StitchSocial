@@ -368,6 +368,7 @@ fun HomeFeedView(
                                     onHorizontalDragChange = { horizontalSwipeActive = it },
                                     userID = userID,
                                     isCurrentPage = isCurrentPage,
+                                    isAnnouncementShowing = isAnnouncementShowing,
                                     engagementViewModel = engagementViewModel,
                                     iconManager = iconManager,
                                     followManager = followManager,
@@ -477,6 +478,7 @@ private fun ThreadVideoCard(
     thread: ThreadData,
     userID: String,
     isCurrentPage: Boolean,
+    isAnnouncementShowing: Boolean = false,
     engagementViewModel: EngagementViewModel,
     iconManager: FloatingIconManager,
     followManager: FollowManager,
@@ -515,7 +517,9 @@ private fun ThreadVideoCard(
             videos = allVideos,
             index = currentIndex,
             onIndexChange = { currentIndex = it },
-            isOnScreen = isCurrentPage,
+            // Nothing plays under an announcement. The one-shot pause broadcast can't
+            // stop a player that starts after it, such as a feed that finishes loading.
+            isOnScreen = isCurrentPage && !isAnnouncementShowing,
             fitBandFor = { fitBand },
             onScrollingChange = onHorizontalDragChange
         )

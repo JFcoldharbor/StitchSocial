@@ -63,7 +63,7 @@ fun MyPerksScreen(onDismiss: () -> Unit) {
             }
             all.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
-                    "No perks yet. Scan a Stitch code at a restaurant to get one.",
+                    "No perks yet. Scan a Stitch code at a restaurant or a show to get one.",
                     color = colors.textSecondary, textAlign = TextAlign.Center
                 )
             }
@@ -136,7 +136,7 @@ private fun PerkRow(perk: Perk, now: Date, action: String?, onAction: () -> Unit
     val status = perk.effectiveStatus(now)
     val detail = when {
         status == "active" -> perk.activeUntil?.let { "Active until ${time.format(it)}" } ?: "Active now"
-        perk.isWaiting(now) -> "Good from your next visit"
+        perk.isWaiting(now) -> if (perk.isArtist) "Good from your next show" else "Good from your next visit"
         status == "issued" -> perk.expiresAt?.let { "Use by ${day.format(it)}" } ?: "Ready"
         status == "used" -> perk.usedAt?.let { "Used ${day.format(it)}" } ?: "Used"
         status == "expired" -> "Expired"
@@ -158,7 +158,7 @@ private fun PerkRow(perk: Perk, now: Date, action: String?, onAction: () -> Unit
                 "${perk.landingName} · ${perk.kindLabel}",
                 fontSize = 12.sp, color = colors.textSecondary, maxLines = 1
             )
-            Text("Free ${perk.title}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary, maxLines = 1)
+            Text(perk.displayTitle, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary, maxLines = 1)
             Text(detail, fontSize = 12.sp, color = if (status == "active") LandingColors.done else colors.textSecondary)
         }
         if (action != null) {

@@ -42,6 +42,9 @@ import java.util.Locale
 fun ActivePerkScreen(perk: Perk, username: String, onDismiss: () -> Unit) {
     BackHandler(onBack = onDismiss)
 
+    // Artist perks have no order to go with.
+    val isArtist = perk.isArtist
+
     val activeUntil = perk.activeUntil ?: Date(System.currentTimeMillis() + 15 * 60_000)
     val windowMs = (activeUntil.time - (perk.activatedAt?.time ?: (activeUntil.time - 15 * 60_000)))
         .coerceAtLeast(1L)
@@ -100,12 +103,12 @@ fun ActivePerkScreen(perk: Perk, username: String, onDismiss: () -> Unit) {
                     fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA3A3B8), textAlign = TextAlign.Center
                 )
                 Text(
-                    "Free ${perk.title}",
+                    perk.displayTitle,
                     fontSize = 44.sp, lineHeight = 46.sp, fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFFF4F4F8), textAlign = TextAlign.Center
                 )
                 Text(
-                    "for @$username" + if (perk.isWelcome) " · with any order" else "",
+                    "for @$username" + if (perk.isWelcome) " · with any order".takeUnless { isArtist }.orEmpty() else "",
                     fontSize = 15.sp, color = Color(0xFFC9C9D6), textAlign = TextAlign.Center
                 )
             }
@@ -146,7 +149,11 @@ fun ActivePerkScreen(perk: Perk, username: String, onDismiss: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(clock, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = accent)
                 Text(
-                    if (expired) "This perk has been used." else "Show this to your server or cashier.",
+                    when {
+                        expired -> "This perk has been used."
+                        isArtist -> "Show this to the team at the show."
+                        else -> "Show this to your server or cashier."
+                    },
                     fontSize = 14.sp, color = Color(0xFFC9C9D6), textAlign = TextAlign.Center
                 )
                 Text(

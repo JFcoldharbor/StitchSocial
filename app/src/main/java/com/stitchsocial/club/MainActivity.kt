@@ -1579,7 +1579,22 @@ fun MainScreen() {
                                             mapOf("context" to RecordingContext.NewThread)
                                         )
                                     },
-                                    onOpenVideo = { video -> notificationVideo = video }
+                                    onOpenVideo = { video -> notificationVideo = video },
+                                    onStitch = { hook ->
+                                        // Suspended: the shared sheet explains instead.
+                                        if (com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+                                            com.stitchsocial.club.VideoManager.startRecording()
+                                            navigationCoordinator.showModal(
+                                                ModalState.RECORDING,
+                                                mapOf(
+                                                    "context" to com.stitchsocial.club.camera.RecordingContextFactory.createStitchToThread(
+                                                        hook.threadID ?: hook.id, hook.creatorName, hook.title
+                                                    ),
+                                                    "parentVideo" to hook
+                                                )
+                                            )
+                                        }
+                                    }
                                 )
                             com.stitchsocial.club.landing.LandingPresenter.Screen.MyPerks ->
                                 com.stitchsocial.club.landing.MyPerksScreen(onDismiss = closeLanding)

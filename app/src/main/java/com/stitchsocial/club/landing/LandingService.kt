@@ -55,6 +55,10 @@ object LandingService {
     fun welcomePerkID(landingID: String, uid: String) = "welcome_${landingID}_$uid"
     fun todayPostPerkID(landingID: String, uid: String) = "post_${landingID}_${uid}_${todayKey()}"
 
+    /** An artist Landing's post perk and visit are keyed by the stop's day, not New York's. */
+    fun postPerkID(landingID: String, uid: String, dayKey: String) = "post_${landingID}_${uid}_$dayKey"
+    fun visitID(landingID: String, uid: String, dayKey: String) = "${landingID}_${uid}_$dayKey"
+
     /** Start of today, local to the Landing — "Tonight at …" means since then. */
     fun startOfToday(): Date = Date.from(LocalDate.now(zone).atStartOfDay(zone).toInstant())
 
@@ -147,7 +151,9 @@ object LandingService {
             visitID = visitID,
             visitDays = (data["visitDays"] as? Number)?.toInt(),
             newVisit = data["newVisit"] as? Boolean ?: false,
-            perkIssued = Perk.from(data["perkIssued"])
+            perkIssued = Perk.from(data["perkIssued"]),
+            stopID = (data["stopID"] as? String)?.takeIf { it.isNotBlank() },
+            dayKey = (data["dayKey"] as? String)?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -168,7 +174,10 @@ object LandingService {
             accessCode = data["accessCode"]?.toString(),
             screenCount = (data["screens"] as? List<*>)?.size ?: 0,
             todayStats = LandingStats.from(data["todayStats"]),
-            weekStats = LandingStats.from(data["weekStats"])
+            weekStats = LandingStats.from(data["weekStats"]),
+            stopAccessCodes = (data["stopAccessCodes"] as? Map<*, *>).orEmpty().entries
+                .mapNotNull { (k, v) -> (k as? String)?.let { key -> v?.toString()?.let { key to it } } }
+                .toMap()
         )
     }
 
@@ -186,8 +195,16 @@ object LandingService {
         call("landing_moderate", mapOf("videoID" to videoID, "action" to if (approve) "approve" else "report"))
     }
 
-    suspend fun qrKitURL(landingID: String): String? =
-        call("landing_qrKit", mapOf("landingID" to landingID))["url"] as? String
+    suspend fun qrKitURL(landingID: String, stopID: String? = null): String? =
+        call(
+            "landing_qrKit",
+            if (stopID != null) mapOf("landingID" to landingID, "stopID" to stopID) else mapOf("landingID" to landingID)
+        )["url"] as? String
+
+    /** Pairs the screen showing this code at stitchsocial.me/tv. */
+    suspend fun pairScreen(landingID: String, code: String) {
+        call("screen_pair", mapOf("landingID" to landingID, "code" to code))
+    }
 
     // ---- Reads ----
 
@@ -237,6 +254,82 @@ object LandingService {
             .filter { it.isPubliclyVisible || it.creatorID == uid }
             .sortedByDescending { it.createdAt }
     }.getOrDefault(emptyList())
+
+    /** Moments tagged to a Landing inside a show's window, newest first. Same rules as [todaysMoments]. */
+    suspend fun moments(landingID: String, opensAt: Date, closesAt: Date): List<CoreVideoMetadata> = runCatching {
+        val uid = auth.currentUser?.uid
+        val snap = db.collection("videos")
+            .whereEqualTo("landingID", landingID)
+            .limit(80)
+            .get().await()
+        val docs = snap.documents.filter { TeenSafety.allows(it.data) }
+        VideoServiceImpl().convertFirebaseToVideoMetadata(docs)
+            .filter { !it.isDeleted && !it.createdAt.before(opensAt) && it.createdAt.before(closesAt) }
+            .filter { it.isPubliclyVisible || it.creatorID == uid }
+            .sortedByDescending { it.createdAt }
+    }.getOrDefault(emptyList())
+
+    /** The song's hook video. Null when it's gone, not public, or not for the teen lane. */
+    suspend fun songHook(videoID: String): CoreVideoMetadata? = runCatching {
+        val doc = db.collection("videos").document(videoID).get().await()
+        if (!doc.exists() || !TeenSafety.allows(doc.data)) return@runCatching null
+        VideoServiceImpl().convertFirebaseToVideoMetadata(listOf(doc))
+            .firstOrNull { !it.isDeleted && it.isPubliclyVisible }
+    }.getOrNull()
+
+    /** Fan replies in the song's thread, newest first, at most 50. */
+    suspend fun songReplies(hook: CoreVideoMetadata): List<CoreVideoMetadata> = runCatching {
+        val uid = auth.currentUser?.uid
+        val snap = db.collection("videos")
+            .whereEqualTo("threadID", hook.threadID ?: hook.id)
+            .limit(50)
+            .get().await()
+        val docs = snap.documents.filter { it.id != hook.id && TeenSafety.allows(it.data) }
+        VideoServiceImpl().convertFirebaseToVideoMetadata(docs)
+            .filter { !it.isDeleted && (it.isPubliclyVisible || it.creatorID == uid) }
+            .sortedByDescending { it.createdAt }
+    }.getOrDefault(emptyList())
+
+    /** Whether a teen may see this artist's page. A failed read counts as no. */
+    suspend fun accountAllowsTeens(businessID: String): Boolean = runCatching {
+        if (businessID.isBlank()) return@runCatching false
+        TeenSafety.allowsAccount(db.collection("users").document(businessID).get().await().data)
+    }.getOrDefault(false)
+
+    /** An artist's own posts. A teen gets only the ones marked safe. */
+    suspend fun artistPosts(businessID: String): List<CoreVideoMetadata> = runCatching {
+        if (businessID.isBlank()) return@runCatching emptyList()
+        if (!TeenSafety.viewerIsTeen) return@runCatching restaurantPosts(businessID)
+        val snap = db.collection("videos")
+            .whereEqualTo("creatorID", businessID)
+            .whereEqualTo("teenSafe", true)
+            .limit(24)
+            .get().await()
+        VideoServiceImpl().convertFirebaseToVideoMetadata(snap.documents)
+            .filter { !it.isDeleted && it.isPubliclyVisible && it.conversationDepth == 0 }
+            .sortedByDescending { it.createdAt }
+    }.getOrDefault(emptyList())
+
+    private var ownsArtistCache: Pair<String, Boolean>? = null
+
+    /**
+     * An artist's account can be a personal one, which wouldn't otherwise get
+     * the owner entry on its profile. Cached per account for the session.
+     */
+    suspend fun ownsArtistLanding(uid: String): Boolean {
+        if (uid.isBlank()) return false
+        ownsArtistCache?.takeIf { it.first == uid }?.let { return it.second }
+        return runCatching {
+            val owns = db.collection("landings")
+                .whereEqualTo("businessID", uid)
+                .limit(5)
+                .get().await()
+                .documents
+                .any { it.getString("kind") == "artist" && it.getString("status") != "removed" }
+            ownsArtistCache = uid to owns
+            owns
+        }.getOrDefault(false)
+    }
 
     /**
      * A business's live Landing, for the Landing tab on its profile. Landings

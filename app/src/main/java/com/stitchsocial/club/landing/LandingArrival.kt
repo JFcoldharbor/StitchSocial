@@ -158,7 +158,9 @@ fun LandingHomeBanner(landing: NearbyLanding, modifier: Modifier = Modifier) {
         Column(Modifier.weight(1f)) {
             Text(landing.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFF4F4F8), maxLines = 1)
             Text(
-                "${distanceLabel(landing.distanceM)} away · free perk when you visit",
+                if (landing.isArtist && landing.venue != null)
+                    "${landing.venue} · ${distanceLabel(landing.distanceM)} away"
+                else "${distanceLabel(landing.distanceM)} away · free perk when you visit",
                 fontSize = 12.sp, color = Color(0xFFA3A3B8), maxLines = 1
             )
         }
@@ -217,7 +219,10 @@ fun NearYouLandingsRow(modifier: Modifier = Modifier) {
                 ) {
                     LandingLogo(l.name, l.logoURL, 26.dp)
                     Text(l.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
-                    Text(distanceLabel(l.distanceM), fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+                    Text(
+                        if (l.isArtist && l.venue != null) "${l.venue} · ${distanceLabel(l.distanceM)}" else distanceLabel(l.distanceM),
+                        fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 1
+                    )
                 }
             }
         }
@@ -234,7 +239,13 @@ fun ProfileLandingEntries(isBusiness: Boolean, modifier: Modifier = Modifier) {
     val perks by remember { LandingService.myPerks() }.collectAsState(initial = emptyList())
     val activeCount = perks.count { it.isActive() }
     val readyCount = perks.count { it.effectiveStatus() == "issued" }
-    if (perks.isEmpty() && !isBusiness) return
+    var ownsArtist by remember { mutableStateOf(false) }
+    LaunchedEffect(isBusiness) {
+        if (!isBusiness) {
+            ownsArtist = LandingService.ownsArtistLanding(com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "")
+        }
+    }
+    if (perks.isEmpty() && !isBusiness && !ownsArtist) return
 
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (perks.isNotEmpty()) {
@@ -249,10 +260,10 @@ fun ProfileLandingEntries(isBusiness: Boolean, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f)
             ) { LandingPresenter.open(LandingPresenter.Screen.MyPerks) }
         }
-        if (isBusiness) {
+        if (isBusiness || ownsArtist) {
             ProfileEntryChip(
                 title = "Landing",
-                detail = "Status, numbers, TV",
+                detail = if (ownsArtist) "Status, shows, screen" else "Status, numbers, TV",
                 highlight = false,
                 modifier = Modifier.weight(1f)
             ) { LandingPresenter.open(LandingPresenter.Screen.Owner) }
@@ -272,7 +283,7 @@ fun RestaurantProfileLandingEntry(businessID: String, modifier: Modifier = Modif
     val offer = l.welcomeOffer?.takeIf { it.active }
     ProfileEntryChip(
         title = "Landing",
-        detail = offer?.let { "Free ${it.title} with any order" } ?: "See what's on tonight",
+        detail = offer?.let { if (l.isArtist) "Free ${it.title} when you follow" else "Free ${it.title} with any order" } ?: "See what's on tonight",
         highlight = offer != null,
         modifier = modifier.fillMaxWidth()
     ) {

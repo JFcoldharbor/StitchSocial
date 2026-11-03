@@ -60,6 +60,52 @@ data class VisitReward(val visits: Int, val title: String) {
     }
 }
 
+/**
+ * One stop on an artist Landing's tour. Comes from landing_resolve only: raw
+ * landings/{id} reads lack dayKey, opensAt and closesAt. The window runs 06:00
+ * to 06:00 in the venue's time zone, so a late show is one visit.
+ */
+data class TourStop(
+    val stopID: String,
+    /** "YYYY-MM-DD" in the venue's time zone. */
+    val date: String,
+    val timeZone: String = "",
+    val venue: String = "",
+    val city: String = "",
+    val country: String = "",
+    val dayKey: String = "",
+    val opensAt: Date? = null,
+    val closesAt: Date? = null
+) {
+    companion object {
+        fun from(raw: Any?): TourStop? {
+            val m = raw as? Map<*, *> ?: return null
+            return TourStop(
+                stopID = (m["stopID"] as? String)?.takeIf { it.isNotBlank() } ?: return null,
+                date = (m["date"] as? String)?.takeIf { it.isNotBlank() } ?: return null,
+                timeZone = m["timeZone"] as? String ?: "",
+                venue = m["venue"] as? String ?: "",
+                city = m["city"] as? String ?: "",
+                country = m["country"] as? String ?: "",
+                dayKey = m["dayKey"] as? String ?: "",
+                opensAt = landingDate(m["opensAt"]),
+                closesAt = landingDate(m["closesAt"])
+            )
+        }
+    }
+}
+
+/** The song an artist Landing's fans reply to. */
+data class SongThread(val videoID: String, val title: String) {
+    companion object {
+        fun from(raw: Any?): SongThread? {
+            val m = raw as? Map<*, *> ?: return null
+            val id = (m["videoID"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+            return SongThread(id, m["title"] as? String ?: "")
+        }
+    }
+}
+
 data class Landing(
     val landingID: String,
     val slug: String,
@@ -81,10 +127,20 @@ data class Landing(
     /** "draft" | "live" | "paused" | "removed" */
     val status: String = "live",
     val businessID: String = "",
-    val verified: Boolean = false
+    val verified: Boolean = false,
+    /** "artist", or null for a restaurant. */
+    val kind: String? = null,
+    val tourStops: List<TourStop> = emptyList(),
+    val songThread: SongThread? = null,
+    val spotifyURL: String? = null,
+    val appleMusicURL: String? = null,
+    /** The show open right now; both are null when none is. */
+    val currentStopID: String? = null,
+    val currentDayKey: String? = null
 ) {
     val isLive: Boolean get() = status == "live"
     val isCounter: Boolean get() = serviceStyle != "sit_down"
+    val isArtist: Boolean get() = kind == "artist"
 
     companion object {
         fun from(raw: Any?, fallbackID: String? = null): Landing? {
@@ -108,7 +164,14 @@ data class Landing(
                 visitRewards = VisitReward.list(m["visitRewards"]),
                 status = m["status"] as? String ?: "live",
                 businessID = m["businessID"] as? String ?: "",
-                verified = m["verified"] as? Boolean ?: false
+                verified = m["verified"] as? Boolean ?: false,
+                kind = (m["kind"] as? String)?.takeIf { it.isNotBlank() },
+                tourStops = (m["tourStops"] as? List<*>).orEmpty().mapNotNull { TourStop.from(it) },
+                songThread = SongThread.from(m["songThread"]),
+                spotifyURL = ((m["streamLinks"] as? Map<*, *>)?.get("spotify") as? String)?.takeIf { it.isNotBlank() },
+                appleMusicURL = ((m["streamLinks"] as? Map<*, *>)?.get("appleMusic") as? String)?.takeIf { it.isNotBlank() },
+                currentStopID = (m["currentStopID"] as? String)?.takeIf { it.isNotBlank() },
+                currentDayKey = (m["currentDayKey"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -135,8 +198,15 @@ data class Perk(
     val usedAt: Date? = null,
     val videoID: String? = null,
     /** Visit perks only: the visit number that earned it. */
-    val milestone: Int? = null
+    val milestone: Int? = null,
+    /** "artist" on an artist Landing's perks; absent on a restaurant's. */
+    val landingKind: String? = null
 ) {
+    val isArtist: Boolean get() = landingKind == "artist"
+
+    /** "Free taco". An artist's show reward can be an experience, so it stands alone. */
+    val displayTitle: String
+        get() = if (isArtist && kind == "visit") title.replaceFirstChar { it.uppercase() } else "Free $title"
     val isWelcome: Boolean get() = kind == "welcome"
     val isPost: Boolean get() = kind == "post"
     val isVisit: Boolean get() = kind == "visit"
@@ -144,7 +214,10 @@ data class Perk(
     /** "Welcome perk" / "Moment perk" / "Visit 5 reward". */
     val kindLabel: String get() = when {
         isWelcome -> "Welcome perk"
-        isVisit -> milestone?.let { "Visit $it reward" } ?: "Visit reward"
+        isVisit -> {
+            val unit = if (isArtist) "Show" else "Visit"
+            milestone?.let { "$unit $it reward" } ?: "$unit reward"
+        }
         else -> "Moment perk"
     }
 
@@ -163,13 +236,23 @@ data class Perk(
 
     /** Issued and inside its window — Use now is allowed. */
     fun isUsable(now: Date = Date()) =
-        effectiveStatus(now) == "issued" && (usableFrom == null || !now.before(usableFrom))
+        effectiveStatus(now) == "issued" && !isBeforeUsableFrom(now)
 
     /** Issued but not yet usable: a next-visit post perk on the night it was earned. */
     fun isWaiting(now: Date = Date()) =
-        effectiveStatus(now) == "issued" && usableFrom != null && now.before(usableFrom)
+        effectiveStatus(now) == "issued" && isBeforeUsableFrom(now)
+
+    /**
+     * usableFrom is the server's clock and `now` is the phone's. A phone a few
+     * seconds slow read a just-claimed perk as "not yet" and greyed out Use now,
+     * with nothing to re-check it. The server still has the final say.
+     */
+    private fun isBeforeUsableFrom(now: Date) =
+        usableFrom != null && now.time + CLOCK_SKEW_MS < usableFrom.time
 
     companion object {
+        private const val CLOCK_SKEW_MS = 5 * 60 * 1000L
+
         fun from(raw: Any?, fallbackID: String? = null): Perk? {
             val m = raw as? Map<*, *> ?: return null
             val id = (m["perkID"] as? String)?.takeIf { it.isNotBlank() }
@@ -192,7 +275,8 @@ data class Perk(
                 activeUntil = landingDate(m["activeUntil"]),
                 usedAt = landingDate(m["usedAt"]),
                 videoID = m["videoID"] as? String,
-                milestone = (m["milestone"] as? Number)?.toInt()
+                milestone = (m["milestone"] as? Number)?.toInt(),
+                landingKind = (m["landingKind"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -206,7 +290,9 @@ data class LandingMember(
     val visitDays: Int = 0,
     val checkedInToday: Boolean = false,
     val nextReward: VisitReward? = null,
-    val rewards: List<MemberReward> = emptyList()
+    val rewards: List<MemberReward> = emptyList(),
+    /** Artist Landings: the stop the guest is checked in at right now. */
+    val checkedInStopID: String? = null
 ) {
     companion object {
         fun from(raw: Map<*, *>): LandingMember = LandingMember(
@@ -217,7 +303,8 @@ data class LandingMember(
                 val m = r as? Map<*, *> ?: return@mapNotNull null
                 val v = VisitReward.from(m) ?: return@mapNotNull null
                 MemberReward(v.visits, v.title, m["earned"] as? Boolean ?: false)
-            }.sortedBy { it.visits }
+            }.sortedBy { it.visits },
+            checkedInStopID = (raw["checkedInStopID"] as? String)?.takeIf { it.isNotBlank() }
         )
     }
 }
@@ -227,7 +314,10 @@ data class CheckInResult(
     val visitID: String,
     val visitDays: Int?,
     val newVisit: Boolean,
-    val perkIssued: Perk?
+    val perkIssued: Perk?,
+    /** Artist Landings: the show this check-in counted for. */
+    val stopID: String? = null,
+    val dayKey: String? = null
 )
 
 /** One row of landing_nearby. */
@@ -237,8 +327,14 @@ data class NearbyLanding(
     val name: String,
     val logoURL: String?,
     val distanceM: Double,
-    val inside: Boolean
+    val inside: Boolean,
+    /** "artist", or null for a restaurant. Artist rows are the stop open now. */
+    val kind: String? = null,
+    val stopID: String? = null,
+    val venue: String? = null
 ) {
+    val isArtist: Boolean get() = kind == "artist"
+
     companion object {
         fun from(raw: Any?): NearbyLanding? {
             val m = raw as? Map<*, *> ?: return null
@@ -248,7 +344,10 @@ data class NearbyLanding(
                 name = m["name"] as? String ?: "",
                 logoURL = (m["logoURL"] as? String)?.takeIf { it.isNotBlank() },
                 distanceM = (m["distanceM"] as? Number)?.toDouble() ?: 0.0,
-                inside = m["inside"] as? Boolean ?: false
+                inside = m["inside"] as? Boolean ?: false,
+                kind = (m["kind"] as? String)?.takeIf { it.isNotBlank() },
+                stopID = (m["stopID"] as? String)?.takeIf { it.isNotBlank() },
+                venue = (m["venue"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -306,7 +405,9 @@ data class LandingOwnerData(
     val accessCode: String?,
     val screenCount: Int,
     val todayStats: LandingStats,
-    val weekStats: LandingStats
+    val weekStats: LandingStats,
+    /** Artist Landings: each stop's private access number, by stopID. */
+    val stopAccessCodes: Map<String, String> = emptyMap()
 )
 
 /** One row of landing_pendingMoments — the approvals queue. */
