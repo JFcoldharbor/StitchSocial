@@ -3,15 +3,12 @@ package com.stitchsocial.club.foundation
 /**
  * Media fit — when a post fills the screen and when it is shown whole.
  *
- * One decision, written identically on iOS, Android and the web
- * (MEDIA_FIT_CONTRACT):
- *   - an override of "fill" or "fit" wins;
- *   - otherwise (auto) a shape of width ÷ height <= 0.6 fills, as today,
- *     and anything wider fits.
+ * Portrait and square media fills the phone and crops what doesn't fit. Anything
+ * wider than tall fits on black, because filling a portrait screen with a 16:9
+ * clip throws away about 74% of the frame.
  *
- * Standard 9:16 phone video is 0.5625, so it keeps filling. 4:5, 3:4, 2:3,
- * square and landscape all fit — drawn as large as possible inside a box
- * (the band, or the sponsored clear area) over a blurred copy of itself.
+ * Ads are the exception: they pass [adOverride], so a paid flyer shows whole in
+ * the clear area, also on black. iOS draws the same rule (MediaFit.swift).
  *
  * Layer 1: no Android or Compose dependencies.
  */
@@ -22,19 +19,13 @@ enum class MediaFitMode(val rawValue: String) {
 
 object MediaFit {
     /** Anything up to this shape fills the screen in auto. */
-    const val FILL_CUTOFF = 0.6
+    const val FILL_CUTOFF = 1.0
 
     /** What a missing or unusable shape means: a 9:16 phone video. */
     const val DEFAULT_ASPECT = 9.0 / 16.0
 
     /** Side inset of the sponsored / brand-ad clear area, in dp. */
     const val CLEAR_AREA_SIDE_INSET_DP = 12f
-
-    /** Width the backdrop is shrunk to before it is drawn back up, in px. */
-    const val BACKDROP_WIDTH_PX = 24
-
-    /** Black drawn over the backdrop. */
-    const val BACKDROP_DIM = 0.30f
 
     /** Null, NaN, infinite or <= 0 means 9/16. */
     fun sanitizedAspect(aspect: Double?): Double =
@@ -47,6 +38,10 @@ object MediaFit {
         "fit" -> MediaFitMode.FIT
         else -> null
     }
+
+    /** An ad's stored fit: "fill" if it asked for that, otherwise shown whole. */
+    fun adOverride(fit: String?): String =
+        if (parseOverride(fit) == MediaFitMode.FILL) "fill" else "fit"
 
     /** The stored `fit` value: "auto" | "fill" | "fit", defaulting to "auto". */
     fun normalizedFit(raw: Any?): String = parseOverride(raw)?.rawValue ?: "auto"

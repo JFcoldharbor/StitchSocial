@@ -5,12 +5,10 @@
  * Layer 5: Views — the shared drawing half of media fit (MEDIA_FIT_CONTRACT).
  *
  * The decision lives in foundation/MediaFit.kt. This file draws it:
- *   - MediaFitFrame: fill as today, or place the media in its fit rect over
- *     the blurred backdrop. The player, its posters and the sponsored / brand
+ *   - MediaFitFrame: fill as today, or place the media in its fit rect on
+ *     black. The player, its posters and the sponsored / brand
  *     ad creatives all go through it, so a poster and the video it covers
  *     land in exactly the same rect and nothing jumps when playback starts.
- *   - MediaFitBackdrop: the poster shrunk to ~24 px (BlurredPosterCache),
- *     drawn back up with bilinear filtering, 30% black over it.
  *   - TabBarMetrics: the tab bar's measured height, the band's bottom edge.
  */
 
@@ -22,17 +20,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.stitchsocial.club.foundation.MediaFit
 import com.stitchsocial.club.foundation.MediaFitMode
-import com.stitchsocial.club.services.BlurredPosterCache
 import kotlin.math.roundToInt
 
 /**
@@ -91,7 +84,7 @@ fun MediaFitFrame(
     }
 
     BoxWithConstraints(modifier = modifier) {
-        MediaFitBackdrop(url = backdropURL, modifier = Modifier.fillMaxSize())
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black))
 
         if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) {
             val density = LocalDensity.current
@@ -119,36 +112,3 @@ fun MediaFitFrame(
     }
 }
 
-/**
- * The blurred, dimmed copy behind fitted media. Black until the shrunk poster
- * is ready; cached per URL, so a feed of fitted posts builds each one once.
- */
-@Composable
-fun MediaFitBackdrop(url: String?, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    var bitmap by remember(url) { mutableStateOf(url?.let { BlurredPosterCache.peek(it) }) }
-    LaunchedEffect(url) {
-        if (bitmap == null && !url.isNullOrBlank()) {
-            bitmap = BlurredPosterCache.load(context, url)
-        }
-    }
-    val image = remember(bitmap) { bitmap?.asImageBitmap() }
-
-    Box(modifier = modifier.background(Color.Black)) {
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                // Low = bilinear. The smoothing of a 24-px image IS the blur.
-                filterQuality = FilterQuality.Low,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = MediaFit.BACKDROP_DIM))
-        )
-    }
-}

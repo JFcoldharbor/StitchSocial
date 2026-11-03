@@ -284,7 +284,7 @@ fun SponsoredSwipeCard(
         var videoStarted by remember(slot.id) { mutableStateOf(false) }
         MediaFitFrame(
             aspect = slot.aspectRatio,
-            fitOverride = slot.fit,
+            fitOverride = MediaFit.adOverride(slot.fit),
             band = clearArea,
             backdropURL = slot.imageURL,
             modifier = Modifier.fillMaxSize()

@@ -2838,7 +2838,9 @@ private fun DiscoveryFullscreenCard(
         bottom = if (hosted) TabBarMetrics.clearance else 0.dp
     )
     val fitOverride: String? = if (isAdOnScreen) {
-        sponsoredSlot?.fit?.takeIf { it != "auto" } ?: currentVideo.promotion?.fit
+        com.stitchsocial.club.foundation.MediaFit.adOverride(
+            sponsoredSlot?.fit?.takeIf { it != "auto" } ?: currentVideo.promotion?.fit
+        )
     } else null
     // Media-fit band for a stitch that isn't the ad position.
     val plainBand = MediaFitBand(

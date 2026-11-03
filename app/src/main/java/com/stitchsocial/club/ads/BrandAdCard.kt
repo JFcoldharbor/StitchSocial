@@ -1,5 +1,6 @@
 package com.stitchsocial.club.ads
 
+import com.stitchsocial.club.foundation.MediaFit
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -216,7 +217,7 @@ private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, band: Me
     val context = LocalContext.current
     MediaFitFrame(
         aspect = ad.aspectRatio,
-        fitOverride = ad.fit,
+        fitOverride = MediaFit.adOverride(ad.fit),
         band = band,
         backdropURL = ad.thumbnailURL,
         modifier = modifier.background(Color.Black)
@@ -276,7 +277,7 @@ private fun BrandAdPost(
     var bottomBlockHeight by remember(post.id) { mutableStateOf(0.dp) }
     var showPoster by remember(post.id) { mutableStateOf(true) }
     val band = MediaFitBand.clearArea(top = topInset, bottom = bottomBlockHeight)
-    val fitOverride = ad.fit.takeIf { it != "auto" } ?: post.promotion?.fit
+    val fitOverride = MediaFit.adOverride(ad.fit.takeIf { it != "auto" } ?: post.promotion?.fit)
     val currentUserID = remember { com.stitchsocial.club.services.AuthService().getCurrentUserId() }
 
     Box(modifier = modifier.background(Color.Black)) {
