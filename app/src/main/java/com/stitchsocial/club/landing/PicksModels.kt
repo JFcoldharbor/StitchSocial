@@ -268,11 +268,18 @@ data class PicksPastNight(
     }
 }
 
+data class PicksCoHost(val id: String, val name: String)
+
 data class PicksPage(
     val hostName: String?,
     val hasHost: Boolean,
     val isAdmin: Boolean,
+    val isHost: Boolean,
+    val isCoHost: Boolean,
+    val coHosts: List<PicksCoHost>,
     val pendingInvite: Boolean,
+    /** "host" or "cohost". */
+    val pendingInviteRole: String,
     val recordRight: Int,
     val recordTotal: Int,
     val recentNights: List<PicksPastNight>,
@@ -286,7 +293,11 @@ data class PicksPage(
                 hostName = landing?.get("hostName") as? String,
                 hasHost = landing?.get("hostID") is String,
                 isAdmin = raw["isAdmin"] as? Boolean ?: false,
+                isHost = raw["isHost"] as? Boolean ?: false,
+                isCoHost = raw["isCoHost"] as? Boolean ?: false,
+                coHosts = raw["coHosts"].maps().map { PicksCoHost(it["id"] as? String ?: "", it["name"] as? String ?: "") },
                 pendingInvite = raw["pendingInvite"] as? Boolean ?: false,
+                pendingInviteRole = raw["pendingInviteRole"] as? String ?: "host",
                 recordRight = record?.get("right").int(),
                 recordTotal = record?.get("total").int(),
                 recentNights = raw["recentNights"].maps().map(PicksPastNight::from),
@@ -326,6 +337,8 @@ class PicksError(val code: String) : Exception(code) {
             code == "no_main_video_yet" -> "The host hasn't posted tonight's video yet."
             code == "add_picks_first" -> "Add your picks first."
             code == "no_break_right_now" -> "That break has passed. The next prompt comes when a game reaches a break."
+            code == "host_only" -> "Only the host can do that."
+            code == "already_host" -> "They're already the host."
             code == "no_games_today" -> "There are no games today."
             code == "not_for_teens" -> "Stitch Picks isn't available on this account."
             code == "too_many_reads" -> "That's enough uploads for today. Try again tomorrow."
@@ -379,6 +392,14 @@ object PicksService {
 
     suspend fun invite(landingID: String, userID: String) {
         call("picks_inviteHost", mapOf("landingID" to landingID, "userID" to userID))
+    }
+
+    suspend fun inviteCoHost(landingID: String, userID: String) {
+        call("picks_inviteCoHost", mapOf("landingID" to landingID, "userID" to userID))
+    }
+
+    suspend fun removeCoHost(landingID: String, userID: String) {
+        call("picks_removeCoHost", mapOf("landingID" to landingID, "userID" to userID))
     }
 
     suspend fun removeHost(landingID: String) {

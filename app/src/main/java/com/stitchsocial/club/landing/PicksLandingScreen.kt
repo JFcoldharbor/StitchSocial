@@ -125,12 +125,21 @@ private class PicksPageModel(val landingID: String) {
         }
     }
 
-    suspend fun invite(userID: String): Boolean = try {
-        PicksService.invite(landingID, userID)
+    suspend fun invite(userID: String, coHost: Boolean): Boolean = try {
+        if (coHost) PicksService.inviteCoHost(landingID, userID) else PicksService.invite(landingID, userID)
         true
     } catch (e: PicksError) {
         message = e.message
         false
+    }
+
+    suspend fun removeCoHost(userID: String) {
+        try {
+            PicksService.removeCoHost(landingID, userID)
+            refresh()
+        } catch (e: PicksError) {
+            message = e.message
+        }
     }
 
     suspend fun removeHost() {
@@ -195,6 +204,7 @@ internal fun PicksLandingScreen(
     var floorGame by remember { mutableStateOf<PicksGame?>(null) }
     var openCard by remember { mutableStateOf<PicksCard?>(null) }
     var showingInvite by remember { mutableStateOf(false) }
+    var showingCoHostInvite by remember { mutableStateOf(false) }
     var startingVideo by remember { mutableStateOf(false) }
     // The recorder was asked for, and hasn't come up yet.
     var recorderAsked by remember { mutableStateOf(false) }
@@ -276,6 +286,7 @@ internal fun PicksLandingScreen(
                         contentAlignment = Alignment.Center
                     ) { CircularProgressIndicator(color = LandingColors.accent) }
                     page?.pendingInvite == true -> InviteAnswer(
+                        coHost = page?.pendingInviteRole == "cohost",
                         onClose = onDismiss,
                         onAnswer = { accept -> scope.launch { model.respond(accept) } }
                     )
@@ -287,6 +298,7 @@ internal fun PicksLandingScreen(
                             videoAllowed = !covered && onScreen,
                             onClose = onDismiss,
                             onHost = { showingInvite = true },
+                            onCoHost = { showingCoHostInvite = true },
                             onMainVideo = { playingMoment = null },
                             onPlayMoment = { moment, quarter -> playingMoment = moment to quarter },
                             onFloor = { floorGame = it },
@@ -332,6 +344,17 @@ internal fun PicksLandingScreen(
                 }
             )
         }
+        if (showingCoHostInvite) {
+            PicksInviteSheet(
+                model = model,
+                currentHost = null,
+                coHost = true,
+                onDismiss = {
+                    showingCoHostInvite = false
+                    scope.launch { model.refresh() }
+                }
+            )
+        }
     }
 }
 
@@ -358,6 +381,7 @@ private fun TonightTab(
     videoAllowed: Boolean,
     onClose: () -> Unit,
     onHost: () -> Unit,
+    onCoHost: () -> Unit,
     onMainVideo: () -> Unit,
     onPlayMoment: (PicksMoment, String) -> Unit,
     onFloor: (PicksGame) -> Unit,
@@ -368,14 +392,14 @@ private fun TonightTab(
     val colors = AppTheme.colors
     val night = page?.night
     Column(Modifier.fillMaxWidth()) {
-        PicksHero(page, playingMoment, videoAllowed, onClose, onHost, onMainVideo)
+        PicksHero(page, playingMoment, videoAllowed, onClose, onHost, onCoHost, onMainVideo)
         if (night != null && night.games.isNotEmpty()) {
             SectionHeader("Tonight's games", if (night.games.size > 1) "Swipe for the next game" else null)
             GameCards(night, playingMoment, onPlayMoment, onFloor)
         }
         when {
             night != null && !night.hidden -> {
-                PromptBanner(night, myCard) { onRecordRole("moment") }
+                PromptBanner(night, page?.isCoHost == true, myCard) { onRecordRole("moment") }
                 ActionButton(night, myCard, onUpload, onRecordRole)
                 SectionHeader(
                     if (night.locked) "Most picks right" else "Tonight's picks",
@@ -415,6 +439,7 @@ private fun PicksHero(
     videoAllowed: Boolean,
     onClose: () -> Unit,
     onHost: () -> Unit,
+    onCoHost: () -> Unit,
     onMainVideo: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -449,6 +474,13 @@ private fun PicksHero(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 PicksBackButton(onClose)
                 Spacer(Modifier.weight(1f))
+                if (page?.isHost == true) {
+                    Box(
+                        modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(onClick = onCoHost),
+                        contentAlignment = Alignment.Center
+                    ) { Text("Co-host", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                    Spacer(Modifier.width(12.dp))
+                }
                 if (page?.isAdmin == true) {
                     Box(
                         modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(onClick = onHost),
@@ -457,7 +489,11 @@ private fun PicksHero(
                 }
             }
             Text(
-                if (host != null) "By Stitch Social · Hosted by $host" else "By Stitch Social",
+                when {
+                    host == null -> "By Stitch Social"
+                    page?.coHosts.isNullOrEmpty() -> "By Stitch Social · Hosted by $host"
+                    else -> "By Stitch Social · Hosted by $host · with ${page?.coHosts?.joinToString { it.name }}"
+                },
                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold
             )
             Text(
@@ -628,8 +664,8 @@ private fun QuarterChip(
 }
 
 @Composable
-private fun PromptBanner(night: PicksNight, myCard: PicksCard?, onRecord: () -> Unit) {
-    if (!night.isHostTonight || night.promptBreaks.isEmpty()) return
+private fun PromptBanner(night: PicksNight, isCoHost: Boolean, myCard: PicksCard?, onRecord: () -> Unit) {
+    if ((!night.isHostTonight && !isCoHost) || night.promptBreaks.isEmpty()) return
     val colors = AppTheme.colors
     val breaks = night.promptBreaks
     Column(
@@ -664,13 +700,16 @@ private fun ActionButton(
     onUpload: () -> Unit,
     onRecord: (String) -> Unit
 ) {
-    if (night.locked) return
+    // Picks are locked, but the host's video can still go up.
+    if (night.locked && !(night.isHostTonight && night.mainVideoID == null)) return
     val colors = AppTheme.colors
     Box(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         when {
+            night.locked ->
+                ArtistMetalButton("RECORD YOUR VIDEO · UP TO 2:00") { onRecord("main") }
             myCard == null ->
                 ArtistMetalButton(if (night.isHostTonight) "ADD YOUR MAIN CARD" else "STITCH YOUR PICKS", onUpload)
             night.isHostTonight && night.mainVideoID == null ->
@@ -818,7 +857,7 @@ private fun RecordTab(page: PicksPage?) {
 // MARK: - The host's invite
 
 @Composable
-private fun InviteAnswer(onClose: () -> Unit, onAnswer: (Boolean) -> Unit) {
+private fun InviteAnswer(coHost: Boolean, onClose: () -> Unit, onAnswer: (Boolean) -> Unit) {
     val colors = AppTheme.colors
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -826,16 +865,16 @@ private fun InviteAnswer(onClose: () -> Unit, onAnswer: (Boolean) -> Unit) {
     ) {
         PicksBackButton(onClose)
         Text(
-            "HOST STITCH PICKS?",
+            if (coHost) "CO-HOST STITCH PICKS?" else "HOST STITCH PICKS?",
             fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
         )
         Text(
-            "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them, and hide 24 hours after the night ends.",
+            if (coHost) "You're invited to join the host. Your videos post to the Stitch Picks page with your name on them, and hide 24 hours after the night ends." else "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them, and hide 24 hours after the night ends.",
             fontSize = 14.sp
         )
-        InviteLine("Before first tip", "One video, up to 2:00, on one main card with 5 picks or more")
+        if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on one main card with 5 picks or more")
         InviteLine("When a quarter ends", "One moment, up to 1:00, for every game at a break. Skip any you like.")
-        InviteLine("Your main card locks at first tip", "Right and wrong picks both stay on the record")
+        if (!coHost) InviteLine("Your main card locks at first tip", "Right and wrong picks both stay on the record")
         InviteLine("In your videos", "No app names, promo codes, screenshots or dollar talk")
         ArtistMetalButton("ACCEPT") { onAnswer(true) }
         Box(
@@ -974,7 +1013,7 @@ private fun PicksCardSheet(card: PicksCard, onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PicksInviteSheet(model: PicksPageModel, currentHost: String?, onDismiss: () -> Unit) {
+private fun PicksInviteSheet(model: PicksPageModel, currentHost: String?, coHost: Boolean = false, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
     val scope = rememberCoroutineScope()
     val search = remember { SearchService() }
@@ -1001,7 +1040,20 @@ private fun PicksInviteSheet(model: PicksPageModel, currentHost: String?, onDism
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("INVITE A HOST", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            Text(if (coHost) "INVITE A CO-HOST" else "INVITE A HOST", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            if (coHost) {
+                model.page?.coHosts.orEmpty().forEach { person ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Co-hosting: ${person.name}", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable {
+                                scope.launch { model.removeCoHost(person.id) }
+                            },
+                            contentAlignment = Alignment.Center
+                        ) { Text("Remove", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
             if (!currentHost.isNullOrEmpty()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Hosting now: $currentHost", fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -1016,7 +1068,7 @@ private fun PicksInviteSheet(model: PicksPageModel, currentHost: String?, onDism
                     ) { Text("Remove", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                 }
             }
-            Text("Any Stitch user can host", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
+            Text(if (coHost) "Any Stitch user can join you" else "Any Stitch user can host", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
             PicksField(
                 value = query,
                 onValueChange = { query = it },
@@ -1043,7 +1095,7 @@ private fun PicksInviteSheet(model: PicksPageModel, currentHost: String?, onDism
                             .heightIn(min = 44.dp)
                             .widthIn(min = 44.dp)
                             .clickable(enabled = !invited) {
-                                scope.launch { if (model.invite(user.id)) sentTo = user.id }
+                                scope.launch { if (model.invite(user.id, coHost)) sentTo = user.id }
                             },
                         contentAlignment = Alignment.Center
                     ) {
