@@ -287,6 +287,34 @@ fun DashView(
                 )
             }
 
+            // Stitch Picks, for James Fortune's account only. It works while the page
+            // is paused, which is the only way in besides its link.
+            if (userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID) {
+                DashSectionHeader("STITCH PICKS", action = null, onAction = null)
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 50.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable {
+                            com.stitchsocial.club.landing.LandingPresenter.open(
+                                com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
+                                    slug = "stitch-picks",
+                                    spot = null,
+                                    source = com.stitchsocial.club.landing.LandingSource.PROFILE,
+                                    asProfile = true
+                                )
+                            )
+                        }
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    Text("Open tonight's slate", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("›", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
             if (artists.isNotEmpty()) {
                 DashMusic(
                     artists = artists,

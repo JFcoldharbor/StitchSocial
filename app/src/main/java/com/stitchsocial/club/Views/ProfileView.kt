@@ -332,7 +332,7 @@ fun ProfileView(
             com.stitchsocial.club.landing.LandingService.liveLandingFor(userID)
         }
         val blocked = com.stitchsocial.club.services.BlockService.shared.blockedUserIds.value.contains(userID)
-        if (page?.isArtist == true && !blocked && onDismiss != null) {
+        if ((page?.isArtist == true || page?.isPicks == true) && !blocked && onDismiss != null) {
             com.stitchsocial.club.landing.LandingPresenter.open(
                 com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
                     slug = page.slug,
