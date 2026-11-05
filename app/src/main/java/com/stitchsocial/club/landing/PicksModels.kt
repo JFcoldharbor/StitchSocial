@@ -91,8 +91,14 @@ data class PicksPick(
     val actual: Double? = null,
     val result: String? = null,
     /** player_not_playing, stat_not_tracked, number_unread or side_unread. */
-    val problem: String? = null
+    val problem: String? = null,
+    /** ESPN lists the player out and the pick hasn't settled. */
+    val listedOut: Boolean = false,
+    /** Put on the card by a swap after the lock. */
+    val swappedIn: Boolean = false
 ) {
+    val isListedOut: Boolean get() = listedOut && result == null
+
     val lineText: String
         get() {
             val number = line?.let { numberText(it) } ?: "?"
@@ -106,7 +112,7 @@ data class PicksPick(
                 "right" -> value?.let { "Right · $it" } ?: "Right"
                 "wrong" -> value?.let { "Wrong · $it" } ?: "Wrong"
                 "push", "void" -> "Doesn't count"
-                else -> value ?: "Not started"
+                else -> if (listedOut) "Listed out" else value ?: "Not started"
             }
         }
 
@@ -137,7 +143,9 @@ data class PicksPick(
             athleteID = raw["athleteID"] as? String,
             actual = raw["actual"].doubleOrNull(),
             result = raw["result"] as? String,
-            problem = raw["problem"] as? String
+            problem = raw["problem"] as? String,
+            listedOut = raw["listedOut"] as? Boolean ?: false,
+            swappedIn = raw["swappedIn"] as? Boolean ?: false
         )
     }
 }
@@ -155,8 +163,18 @@ data class PicksCard(
     val wrong: Int,
     val open: Int,
     val total: Int,
-    val picks: List<PicksPick>
+    val picks: List<PicksPick>,
+    val swaps: List<Swap> = emptyList()
 ) {
+    /** A player listed out, swapped after the lock. [inPlayer] is null when nothing replaced them. */
+    data class Swap(val out: String, val outPick: String?, val inPlayer: String?, val inPick: String?) {
+        val text: String get() = inPlayer?.let { "$out out, $it in" } ?: "$out out"
+    }
+
+    /** "Swapped: Theo Osei out, Lee Grant in", or null with no swaps. */
+    val swapsText: String?
+        get() = swaps.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "Swapped: ") { it.text }
+
     companion object {
         fun from(raw: Map<*, *>) = PicksCard(
             id = raw["cardID"] as? String ?: raw["userID"] as? String ?: "",
@@ -169,7 +187,15 @@ data class PicksCard(
             wrong = raw["wrong"].int(),
             open = raw["open"].int(),
             total = raw["total"].int(),
-            picks = raw["picks"].maps().map(PicksPick::from)
+            picks = raw["picks"].maps().map(PicksPick::from),
+            swaps = raw["swaps"].maps().map {
+                Swap(
+                    out = it["out"] as? String ?: "",
+                    outPick = it["outPick"] as? String,
+                    inPlayer = it["in"] as? String,
+                    inPick = it["inPick"] as? String
+                )
+            }
         )
     }
 }
@@ -180,8 +206,15 @@ data class PicksMoment(
     val duration: Double,
     val breaks: List<Break>,
     val right: Int?,
-    val total: Int?
+    val total: Int?,
+    val hostID: String? = null,
+    val speakerName: String? = null,
+    /** Takes posted at the same break share it. Older moments don't have one. */
+    val promptID: String? = null
 ) {
+    /** Which conversation this take is part of. An old moment is its own. */
+    val conversationKey: String get() = promptID ?: "video:$id"
+
     data class Break(val gameID: String, val quarter: String, val game: String) {
         companion object {
             fun list(raw: Any?): List<Break> = raw.maps().map {
@@ -209,7 +242,10 @@ data class PicksMoment(
                 duration = raw["duration"].doubleOrNull() ?: 0.0,
                 breaks = Break.list(raw["breaks"]),
                 right = snapshot?.get("right").intOrNull(),
-                total = snapshot?.get("total").intOrNull()
+                total = snapshot?.get("total").intOrNull(),
+                hostID = raw["hostID"] as? String,
+                speakerName = (raw["speakerName"] as? String)?.takeIf { it.isNotBlank() },
+                promptID = (raw["promptID"] as? Any)?.toString()?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -217,6 +253,8 @@ data class PicksMoment(
 
 data class PicksNight(
     val id: String,
+    /** "YYYY-MM-DD". */
+    val date: String,
     val title: String,
     val status: String,
     val hidden: Boolean,
@@ -224,9 +262,11 @@ data class PicksNight(
     val hostName: String?,
     val isHostTonight: Boolean,
     val firstTipAt: Date,
-    val hideAt: Date?,
+    /** False for a listed night opened again as a recap. */
+    val isTonight: Boolean,
     val mainVideoID: String?,
     val mainVideoURL: String?,
+    val mainVideoThumb: String?,
     /** Set when the night has late games as well as early ones. */
     val lateTipAt: Date?,
     val lateLocked: Boolean,
@@ -235,8 +275,19 @@ data class PicksNight(
     val games: List<PicksGame>,
     val cards: List<PicksCard>,
     val moments: List<PicksMoment>,
-    val promptBreaks: List<PicksMoment.Break>
+    /** Only sent to the host and co-hosts, while a break is open. */
+    val openPrompt: OpenPrompt?
 ) {
+    /** A break that's open for takes. It stays open after one, so the other host can answer. */
+    data class OpenPrompt(
+        val breaks: List<PicksMoment.Break>,
+        val takes: Int,
+        val lastSpeakerID: String?,
+        val lastSpeakerName: String?
+    )
+
+    val promptBreaks: List<PicksMoment.Break> get() = openPrompt?.breaks.orEmpty()
+
     val hasLateSlate: Boolean get() = lateTipAt != null
 
     fun isLocked(slate: String): Boolean = if (slate == "late") lateLocked else locked
@@ -247,9 +298,14 @@ data class PicksNight(
     fun moment(gameID: String, quarter: String): PicksMoment? =
         moments.firstOrNull { m -> m.breaks.any { it.gameID == gameID && it.quarter == quarter } }
 
+    /** Every take in [moment]'s conversation, oldest first, as the server sorts them. */
+    fun conversation(moment: PicksMoment): List<PicksMoment> =
+        moments.filter { it.conversationKey == moment.conversationKey }.ifEmpty { listOf(moment) }
+
     companion object {
         fun from(raw: Map<*, *>) = PicksNight(
             id = raw["id"] as? String ?: "",
+            date = raw["date"] as? String ?: "",
             title = raw["title"] as? String ?: "",
             status = raw["status"] as? String ?: "upcoming",
             hidden = raw["hidden"] as? Boolean ?: false,
@@ -257,9 +313,10 @@ data class PicksNight(
             hostName = raw["hostName"] as? String,
             isHostTonight = raw["isHostTonight"] as? Boolean ?: false,
             firstTipAt = raw["firstTipAt"].dateOrNull() ?: Date(0),
-            hideAt = raw["hideAt"].dateOrNull(),
+            isTonight = raw["isTonight"] as? Boolean ?: true,
             mainVideoID = raw["mainVideoID"] as? String,
             mainVideoURL = raw["mainVideoURL"] as? String,
+            mainVideoThumb = (raw["mainVideoThumb"] as? String)?.takeIf { it.isNotBlank() },
             lateTipAt = raw["lateTipAt"].dateOrNull(),
             lateLocked = raw["lateLocked"] as? Boolean ?: false,
             lateVideoID = raw["lateVideoID"] as? String,
@@ -267,7 +324,14 @@ data class PicksNight(
             games = raw["games"].maps().map(PicksGame::from),
             cards = raw["cards"].maps().map(PicksCard::from),
             moments = raw["moments"].maps().map(PicksMoment::from),
-            promptBreaks = PicksMoment.Break.list((raw["openPrompt"] as? Map<*, *>)?.get("breaks"))
+            openPrompt = (raw["openPrompt"] as? Map<*, *>)?.let {
+                OpenPrompt(
+                    breaks = PicksMoment.Break.list(it["breaks"]),
+                    takes = it["takes"].int(),
+                    lastSpeakerID = it["lastSpeakerID"] as? String,
+                    lastSpeakerName = (it["lastSpeakerName"] as? String)?.takeIf { n -> n.isNotBlank() }
+                )
+            }
         )
     }
 }
@@ -278,7 +342,11 @@ data class PicksPastNight(
     val date: String,
     val hostName: String?,
     val right: Int,
-    val total: Int
+    val total: Int,
+    /** The main video's thumbnail. */
+    val thumb: String?,
+    /** Older entries don't have it. */
+    val games: Int?
 ) {
     companion object {
         fun from(raw: Map<*, *>) = PicksPastNight(
@@ -287,7 +355,9 @@ data class PicksPastNight(
             date = raw["date"] as? String ?: "",
             hostName = raw["hostName"] as? String,
             right = raw["right"].int(),
-            total = raw["total"].int()
+            total = raw["total"].int(),
+            thumb = (raw["thumb"] as? String)?.takeIf { it.isNotBlank() },
+            games = raw["games"].intOrNull()
         )
     }
 }
@@ -307,6 +377,8 @@ data class PicksPage(
     val recordRight: Int,
     val recordTotal: Int,
     val recentNights: List<PicksPastNight>,
+    /** The current night's ID, null with no games today. */
+    val tonightID: String?,
     val night: PicksNight?
 ) {
     companion object {
@@ -325,6 +397,7 @@ data class PicksPage(
                 recordRight = record?.get("right").int(),
                 recordTotal = record?.get("total").int(),
                 recentNights = raw["recentNights"].maps().map(PicksPastNight::from),
+                tonightID = raw["tonightID"] as? String,
                 night = (raw["night"] as? Map<*, *>)?.let(PicksNight::from)
             )
         }
@@ -355,6 +428,12 @@ class PicksError(val code: String) : Exception(code) {
     override val message: String
         get() = when {
             code == "locked" -> "Those picks locked when the first game tipped."
+            code == "swap_player_not_out" -> "That player isn't listed out, so that pick stays."
+            code == "swap_game_started" -> "A pick in a game that's started can't change."
+            code == "swap_new_game_started" -> "The new pick's game has already started."
+            code == "swap_more_added" -> "You can only swap out as many picks as you add."
+            code == "swap_no_change" -> "Nothing changed on your card."
+            code == "outs_unavailable" -> "Couldn't check who's out right now. Try again in a minute."
             code == "wrong_app" -> "Only PrizePicks and Underdog sheets work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
             code == "host_needs_five_picks" -> "The main card needs at least 5 picks."
@@ -364,6 +443,7 @@ class PicksError(val code: String) : Exception(code) {
             code == "host_only" -> "Only the host can do that."
             code == "already_host" -> "They're already the host."
             code == "no_games_today" -> "There are no games today."
+            code == "night_not_found" -> "That night isn't available."
             code == "not_for_teens" -> "Stitch Picks isn't available on this account."
             code == "too_many_reads" -> "That's enough uploads for today. Try again tomorrow."
             code.endsWith("not_in_late_slate") -> "A late card can only have picks from the late games."
@@ -387,8 +467,14 @@ object PicksService {
         throw PicksError(e.reason)
     }
 
-    suspend fun page(landingID: String): PicksPage =
-        PicksPage.from(call("picks_night", mapOf("landingID" to landingID)))
+    /** Tonight, or with [nightID] a listed night, opened again as a recap. */
+    suspend fun page(landingID: String, nightID: String? = null): PicksPage =
+        PicksPage.from(
+            call("picks_night", buildMap {
+                put("landingID", landingID)
+                nightID?.let { put("nightID", it) }
+            })
+        )
 
     /** The image is read and thrown away by the server. */
     suspend fun readSheet(landingID: String, jpegBase64: String): List<PicksPick> =
@@ -433,4 +519,27 @@ object PicksService {
 
     /** A video on the page, to play or to stitch. Null if it can't be read. */
     suspend fun video(videoID: String): CoreVideoMetadata? = VideoServiceImpl().getVideoById(videoID)
+}
+
+/**
+ * Tonight on the Stitch Picks page, for the cover on Dash. The page's ID is
+ * resolved from its slug once, and the last answer kept in memory so the cover
+ * draws straight away the next time Dash comes up.
+ *
+ * Layer 4: Core Services
+ */
+object PicksDash {
+    const val SLUG = "stitch-picks"
+
+    private var landingID: String? = null
+
+    @Volatile
+    var last: PicksPage? = null
+        private set
+
+    /** Null if the page couldn't be read. */
+    suspend fun load(): PicksPage? = runCatching {
+        val id = landingID ?: LandingService.resolve(SLUG)?.landingID?.also { landingID = it }
+        id?.let { PicksService.page(it) }?.also { last = it }
+    }.getOrNull()
 }

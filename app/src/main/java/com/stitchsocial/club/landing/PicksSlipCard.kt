@@ -169,6 +169,14 @@ internal fun PicksSlipCard(card: PicksCard, night: PicksNight, modifier: Modifie
                 SlipGroupRows(group, index)
             }
         }
+
+        card.swapsText?.let { text ->
+            Box(Modifier.fillMaxWidth().height(1.dp).background(SlipColor.line))
+            Text(
+                text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = SlipColor.textMuted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+        }
     }
 }
 
@@ -360,6 +368,7 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
         "right" -> SlipColor.right
         "wrong" -> SlipColor.wrong
         "push", "void" -> SlipColor.textMuted
+        null -> if (pick.listedOut) SlipColor.close else if (pick.side == "under" && progress >= 0.8f) SlipColor.close else SlipColor.live
         // A "less than" pick getting close to its number is the one to watch.
         else -> if (pick.side == "under" && progress >= 0.8f) SlipColor.close else SlipColor.live
     }
@@ -367,6 +376,7 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
         "right" -> "RIGHT"
         "wrong" -> "WRONG"
         "push", "void" -> "OUT"
+        null -> if (pick.listedOut) "Listed out" else if (game?.hasStarted == true) "LIVE" else "SOON"
         else -> if (game?.hasStarted == true) "LIVE" else "SOON"
     }
 
@@ -400,7 +410,11 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
                 }
             }
             .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clearAndSetSemantics { contentDescription = "${pick.player}, ${pick.lineText}, ${pick.stateText}" },
+            .clearAndSetSemantics {
+                contentDescription = listOfNotNull(
+                    pick.player, pick.lineText, pick.stateText, if (pick.swappedIn) "Swapped in" else null
+                ).joinToString(", ")
+            },
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
@@ -414,7 +428,23 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
                     pick.player, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlipColor.text,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
-                game?.let { Text(it.name, fontSize = 12.sp, color = SlipColor.textMuted) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    game?.let {
+                        Text(
+                            it.name, fontSize = 12.sp, color = SlipColor.textMuted,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+                    if (pick.swappedIn) {
+                        Text(
+                            "Swapped in", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SlipColor.text,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .background(SlipColor.track, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
             Spacer(Modifier.width(8.dp))
             SlipLinePill(pick)

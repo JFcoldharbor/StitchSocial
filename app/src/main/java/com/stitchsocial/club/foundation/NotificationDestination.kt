@@ -139,8 +139,8 @@ sealed class NotificationDestination {
                 )
             }
 
-            // Stitch Picks: a host invite or a moment that's due opens the page.
-            if (type == "picks_host_invite" || type == "picks_moment_due") {
+            // Stitch Picks: a host invite, a moment that's due, or a co-host's take to answer opens the page.
+            if (type == "picks_host_invite" || type == "picks_moment_due" || type == "picks_moment_reply") {
                 str("slug")?.let { return Landing(slug = it, spot = null, source = "profile", autoClaim = false) }
             }
 

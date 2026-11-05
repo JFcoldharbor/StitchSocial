@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -126,6 +127,17 @@ fun DashView(
         val followed = pages.filter { it.businessID in following }
         followsArtists = followed.isNotEmpty()
         artists = followed.ifEmpty { pages.take(10) }
+    }
+    // Tonight on Stitch Picks, for the cover. Read again each time Dash comes back.
+    val isPicksAccount = userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID
+    var picksPage by remember { mutableStateOf(com.stitchsocial.club.landing.PicksDash.last) }
+    var picksFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(userID, pageUp) {
+        if (!isPicksAccount || pageUp) return@LaunchedEffect
+        val loaded = com.stitchsocial.club.landing.PicksDash.load()
+        ensureActive()
+        if (loaded != null) picksPage = loaded
+        picksFailed = loaded == null && picksPage == null
     }
     var user by remember { mutableStateOf<BasicUserInfo?>(null) }
     var subscriberCount by remember { mutableStateOf(0) }
@@ -289,30 +301,12 @@ fun DashView(
 
             // Stitch Picks, for James Fortune's account only. It works while the page
             // is paused, which is the only way in besides its link.
-            if (userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID) {
-                DashSectionHeader("STITCH PICKS", action = null, onAction = null)
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 50.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .clickable {
-                            com.stitchsocial.club.landing.LandingPresenter.open(
-                                com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
-                                    slug = "stitch-picks",
-                                    spot = null,
-                                    source = com.stitchsocial.club.landing.LandingSource.PROFILE,
-                                    asProfile = true
-                                )
-                            )
-                        }
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                ) {
-                    Text("Open tonight's slate", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    Text("›", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
+            if (isPicksAccount) {
+                DashPicksCover(
+                    page = picksPage,
+                    failed = picksFailed,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
 
             if (artists.isNotEmpty()) {
@@ -1286,4 +1280,125 @@ private fun dashPlaceholderTint(name: String): Color {
     if (name.isEmpty()) return palette[0]
     val sum = name.sumOf { it.code }
     return palette[sum % palette.size]
+}
+
+/**
+ * Stitch Picks on Dash: tonight's video still, the night, and how it's going.
+ * With nothing read it's still a way in, on the page's own colors.
+ */
+@Composable
+private fun DashPicksCover(
+    page: com.stitchsocial.club.landing.PicksPage?,
+    failed: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val night = page?.night
+    val thumb = if (failed) null else night?.mainVideoThumb ?: page?.recentNights?.firstNotNullOfOrNull { it.thumb }
+    val title = when {
+        failed || page == null -> "Open tonight's slate"
+        night == null -> "Stitch Picks"
+        else -> night.title.ifBlank { "Stitch Picks" }
+    }
+    val status = if (failed || page == null) null else dashPicksStatus(night)
+    val record = page?.takeIf { !failed && it.recordTotal > 0 }?.let { "${it.recordRight} of ${it.recordTotal} right" }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(170.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(com.stitchsocial.club.landing.picksCoverGradient)
+            .clickable {
+                com.stitchsocial.club.landing.LandingPresenter.open(
+                    com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
+                        slug = com.stitchsocial.club.landing.PicksDash.SLUG,
+                        spot = null,
+                        source = com.stitchsocial.club.landing.LandingSource.PROFILE,
+                        asProfile = true
+                    )
+                )
+            }
+    ) {
+        if (thumb != null) {
+            AsyncImage(
+                model = thumb,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.35f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.8f)
+                    )
+                )
+        )
+        record?.let {
+            Text(
+                it,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            )
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                "STITCH PICKS",
+                color = Color(0xFFE8C872),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.2.sp
+            )
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            status?.let {
+                Text(
+                    it,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/** The cover's status line, from the host's main card once it's going. */
+private fun dashPicksStatus(night: com.stitchsocial.club.landing.PicksNight?): String {
+    night ?: return "No games today"
+    val host = night.hostCard("main")
+    return when (night.status) {
+        "live" -> host?.let { "LIVE · ${it.right} of ${it.total} right" } ?: "LIVE"
+        "final" -> host?.let { "Final · ${it.right} of ${it.total} right" } ?: "Final"
+        else -> {
+            val count = night.games.size
+            val tip = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(night.firstTipAt)
+            "$count ${if (count == 1) "game" else "games"} · first tip $tip"
+        }
+    }
 }

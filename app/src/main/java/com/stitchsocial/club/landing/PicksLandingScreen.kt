@@ -6,9 +6,15 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.text.format.DateFormat
 import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.SnapPosition
@@ -24,10 +30,13 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -64,6 +74,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.stitchsocial.club.birthday.pauseFeedPlayback
 import com.stitchsocial.club.foundation.BasicUserInfo
@@ -79,7 +90,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -109,6 +123,47 @@ private class PicksPageModel(val landingID: String) {
     var isLoading by mutableStateOf(true)
         private set
     var message by mutableStateOf<String?>(null)
+
+    /** A listed night opened as a recap. Null shows tonight. */
+    var recapID by mutableStateOf<String?>(null)
+        private set
+    /** The recap's page, null while it loads. */
+    var recap by mutableStateOf<PicksPage?>(null)
+        private set
+
+    /** Tonight's own night just shows tonight. */
+    fun openRecap(nightID: String) {
+        recap = null
+        recapID = nightID.takeIf { it != page?.tonightID }
+    }
+
+    fun closeRecap() {
+        recapID = null
+        recap = null
+    }
+
+    /** Read once. A finished night doesn't change, so it isn't polled. */
+    suspend fun loadRecap(nightID: String) {
+        try {
+            val loaded = PicksService.page(landingID, nightID)
+            if (recapID != nightID) return
+            // Never show a different night under this one's name. A server that
+            // doesn't know nightID yet answers with tonight.
+            if (loaded.night?.id != nightID) {
+                closeRecap()
+                message = "That night isn't available yet."
+                return
+            }
+            // It became tonight's night since the list was read.
+            if (loaded.night?.isTonight == true || loaded.night?.id == loaded.tonightID) closeRecap() else recap = loaded
+        } catch (e: PicksError) {
+            currentCoroutineContext().ensureActive()
+            if (recapID == nightID) {
+                closeRecap()
+                message = e.message
+            }
+        }
+    }
 
     suspend fun refresh() {
         try {
@@ -213,14 +268,21 @@ internal fun PicksLandingScreen(
 
     var tab by remember { mutableStateOf(PicksTab.TONIGHT) }
     var slate by remember { mutableStateOf("main") }
+    // A recap is read only. Nothing on it acts on a night, since the server's
+    // card and video calls are always for tonight.
+    val recapID = model.recapID
+    val isRecap = recapID != null
+    val shownPage = if (isRecap) model.recap else model.page
     // A new night might not have a late slate.
-    LaunchedEffect(model.page?.night?.hasLateSlate) {
-        if (model.page?.night?.hasLateSlate != true) slate = "main"
+    LaunchedEffect(shownPage?.night?.hasLateSlate) {
+        if (shownPage?.night?.hasLateSlate != true) slate = "main"
     }
     var videoPaused by remember { mutableStateOf(false) }
     var videoMuted by remember { mutableStateOf(false) }
     var playingMoment by remember { mutableStateOf<Pair<PicksMoment, String>?>(null) }
     var showingUpload by remember { mutableStateOf(false) }
+    // After the lock, an upload is a swap of a player listed out.
+    var uploadIsSwap by remember { mutableStateOf(false) }
     var floorGame by remember { mutableStateOf<PicksGame?>(null) }
     var openCard by remember { mutableStateOf<PicksCard?>(null) }
     var showingInvite by remember { mutableStateOf(false) }
@@ -230,8 +292,9 @@ internal fun PicksLandingScreen(
     var recorderAsked by remember { mutableStateOf(false) }
     var recorderUp by remember { mutableStateOf(false) }
 
-    val page = model.page
+    val page = shownPage
     val night = page?.night
+    val readOnly = isRecap || night?.isTonight == false
     val uid = FirebaseAuth.getInstance().currentUser?.uid
     val myCard = uid?.let { id -> night?.cards?.firstOrNull { it.userID == id && it.slate == slate } }
 
@@ -240,13 +303,25 @@ internal fun PicksLandingScreen(
 
     // The page reads through the server, so it asks again while it's up. Coming
     // back from the recorder or a video starts this over, which refreshes.
-    LaunchedEffect(landing.landingID, covered, onScreen) {
-        if (covered || !onScreen) return@LaunchedEffect
+    LaunchedEffect(landing.landingID, covered, onScreen, isRecap) {
+        if (covered || !onScreen || isRecap) return@LaunchedEffect
         while (true) {
             model.refresh()
             delay(30_000)
         }
     }
+
+    // Opening or leaving a recap starts the night's video and takes over.
+    LaunchedEffect(recapID) {
+        playingMoment = null
+        videoPaused = false
+        floorGame = null
+        openCard = null
+        showingUpload = false
+        recapID?.let { model.loadRecap(it) }
+    }
+    // System back from a recap goes to tonight, not off the page.
+    BackHandler(enabled = isRecap && !covered) { model.closeRecap() }
 
     LaunchedEffect(covered) {
         if (covered) {
@@ -265,7 +340,7 @@ internal fun PicksLandingScreen(
 
     fun record(role: String) {
         // Suspended: the shared sheet explains, and no video is promised to the page.
-        if (startingVideo || !AccountStanding.guardPosting()) return
+        if (readOnly || startingVideo || !AccountStanding.guardPosting()) return
         startingVideo = true
         scope.launch {
             val start = model.beginVideo(role, slate)
@@ -300,12 +375,19 @@ internal fun PicksLandingScreen(
     CompositionLocalProvider(LocalContentColor provides colors.textPrimary) {
         Column(Modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                if (isRecap) {
+                    RecapBanner(night) { model.closeRecap() }
+                }
                 when {
+                    isRecap && page == null -> Box(
+                        Modifier.fillMaxWidth().padding(top = 160.dp),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator(color = LandingColors.accent) }
                     model.isLoading && page == null -> Box(
                         Modifier.fillMaxWidth().padding(top = 200.dp),
                         contentAlignment = Alignment.Center
                     ) { CircularProgressIndicator(color = LandingColors.accent) }
-                    page?.pendingInvite == true -> InviteAnswer(
+                    !isRecap && page?.pendingInvite == true -> InviteAnswer(
                         coHost = page?.pendingInviteRole == "cohost",
                         onClose = onDismiss,
                         onAnswer = { accept -> scope.launch { model.respond(accept) } }
@@ -314,6 +396,7 @@ internal fun PicksLandingScreen(
                         PicksTab.TONIGHT -> TonightTab(
                             page = page,
                             slate = slate,
+                            readOnly = readOnly,
                             myCard = myCard,
                             playingMoment = playingMoment,
                             videoAllowed = !covered && onScreen,
@@ -331,16 +414,32 @@ internal fun PicksLandingScreen(
                             onCoHost = { showingCoHostInvite = true },
                             onMainVideo = { playingMoment = null },
                             onPlayMoment = { moment, quarter ->
-                                playingMoment = moment to quarter
+                                // The whole conversation plays, from its first take.
+                                val first = night?.conversation(moment)?.firstOrNull() ?: moment
+                                playingMoment = first to quarter
                                 videoPaused = false
                             },
+                            onTakeEnded = {
+                                playingMoment?.let { (take, quarter) ->
+                                    val takes = night?.conversation(take).orEmpty()
+                                    val next = takes.getOrNull(takes.indexOfFirst { it.id == take.id } + 1)
+                                    if (next != null) playingMoment = next to quarter
+                                }
+                            },
                             onFloor = { floorGame = it },
-                            onUpload = { showingUpload = true },
+                            onUpload = {
+                                if (readOnly) return@TonightTab
+                                uploadIsSwap = night?.isLocked(slate) == true
+                                showingUpload = true
+                            },
                             onRecordRole = { record(it) },
                             onOpenCard = { openCard = it }
                         )
                         PicksTab.STITCHES -> StitchesTab(night, onOpen = { openVideo(it.videoID) })
-                        PicksTab.RECORD -> RecordTab(page)
+                        PicksTab.RECORD -> RecordTab(model.page) { past ->
+                            model.openRecap(past.id)
+                            tab = PicksTab.TONIGHT
+                        }
                     }
                 }
             }
@@ -355,11 +454,12 @@ internal fun PicksLandingScreen(
                 confirmButton = { TextButton(onClick = { model.message = null }) { Text("OK") } }
             )
         }
-        if (showingUpload) {
+        if (showingUpload && !readOnly) {
             PicksUploadSheet(
                 landingID = landing.landingID,
                 isHost = night?.isHostTonight == true,
                 slate = slate,
+                isSwap = uploadIsSwap,
                 onDismiss = {
                     showingUpload = false
                     scope.launch { model.refresh() }
@@ -374,7 +474,7 @@ internal fun PicksLandingScreen(
                 PicksCardSheet(card, current) { openCard = null }
             }
         }
-        if (showingInvite) {
+        if (showingInvite && !readOnly) {
             PicksInviteSheet(
                 model = model,
                 currentHost = page?.hostName,
@@ -384,7 +484,7 @@ internal fun PicksLandingScreen(
                 }
             )
         }
-        if (showingCoHostInvite) {
+        if (showingCoHostInvite && !readOnly) {
             PicksInviteSheet(
                 model = model,
                 currentHost = null,
@@ -417,6 +517,8 @@ private fun PicksBackButton(onClick: () -> Unit) {
 private fun TonightTab(
     page: PicksPage?,
     slate: String,
+    /** A recap: nothing here acts on the night. */
+    readOnly: Boolean,
     myCard: PicksCard?,
     playingMoment: Pair<PicksMoment, String>?,
     videoAllowed: Boolean,
@@ -430,6 +532,7 @@ private fun TonightTab(
     onCoHost: () -> Unit,
     onMainVideo: () -> Unit,
     onPlayMoment: (PicksMoment, String) -> Unit,
+    onTakeEnded: () -> Unit,
     onFloor: (PicksGame) -> Unit,
     onUpload: () -> Unit,
     onRecordRole: (String) -> Unit,
@@ -439,25 +542,27 @@ private fun TonightTab(
     val night = page?.night
     Column(Modifier.fillMaxWidth()) {
         PicksHero(
-            page, slate, playingMoment, videoAllowed, videoPaused, videoMuted,
-            onTogglePaused, onToggleMuted, onClose, onHost, onCoHost, onMainVideo
+            page, slate, readOnly, playingMoment, videoAllowed, videoPaused, videoMuted,
+            onTogglePaused, onToggleMuted, onClose, onHost, onCoHost, onMainVideo, onTakeEnded
         )
         if (night != null && night.hasLateSlate && !night.hidden) SlatePicker(night, slate, onSlate)
         if (night != null && night.games.isNotEmpty()) {
-            SectionHeader("Tonight's games", if (night.games.size > 1) "Swipe for the next game" else null)
+            SectionHeader(if (readOnly) "Games" else "Tonight's games", if (night.games.size > 1) "Swipe for the next game" else null)
             GameCards(night, playingMoment, onPlayMoment, onFloor)
         }
         when {
             night != null && !night.hidden -> {
-                PromptBanner(night, page?.isCoHost == true, myCard) { onRecordRole("moment") }
-                ActionButton(night, slate, myCard, onUpload, onRecordRole)
+                if (!readOnly) {
+                    PromptBanner(page, night, myCard) { onRecordRole("moment") }
+                    ActionButton(night, slate, myCard, onUpload, onRecordRole)
+                    SwapButton(night, slate, myCard, onUpload)
+                }
                 night.hostCard(slate)?.let { host ->
-                    SectionHeader(if (slate == "late") "Late card" else "Main card", null)
-                    key(host.id) { PicksSlipCard(host, night, Modifier.padding(horizontal = 16.dp)) }
+                    key(night.id, slate) { HostCardSection(night, slate, host) }
                 }
                 SectionHeader(
                     if (night.isLocked(slate)) "Most picks right" else "Tonight's picks",
-                    if (night.status == "final") "Videos hide 24 hours after the last game" else "${night.cards.count { it.slate == slate }} in so far"
+                    if (readOnly || night.status == "final") null else "${night.cards.count { it.slate == slate }} in so far"
                 )
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -466,7 +571,11 @@ private fun TonightTab(
                     val others = night.cards.filter { !it.isHost && it.slate == slate }
                     if (others.isEmpty()) {
                         Text(
-                            if (night.isLocked(slate)) "No one else's picks tonight." else "No one else's picks in yet.",
+                            when {
+                                readOnly -> "No one else's picks."
+                                night.isLocked(slate) -> "No one else's picks tonight."
+                                else -> "No one else's picks in yet."
+                            },
                             fontSize = 13.sp, color = colors.textSecondary
                         )
                     }
@@ -478,7 +587,7 @@ private fun TonightTab(
                 fontSize = 14.sp, color = colors.textSecondary, modifier = Modifier.padding(16.dp)
             )
             else -> Text(
-                "Tonight's videos are hidden. The results stay in Record.",
+                "This night's videos aren't available. The results stay in Record.",
                 fontSize = 14.sp, color = colors.textSecondary, modifier = Modifier.padding(16.dp)
             )
         }
@@ -494,6 +603,7 @@ private fun TonightTab(
 private fun PicksHero(
     page: PicksPage?,
     slate: String,
+    readOnly: Boolean,
     playingMoment: Pair<PicksMoment, String>?,
     videoAllowed: Boolean,
     videoPaused: Boolean,
@@ -503,20 +613,32 @@ private fun PicksHero(
     onClose: () -> Unit,
     onHost: () -> Unit,
     onCoHost: () -> Unit,
-    onMainVideo: () -> Unit
+    onMainVideo: () -> Unit,
+    onTakeEnded: () -> Unit
 ) {
     val colors = AppTheme.colors
     val night = page?.night
     val url = (playingMoment?.first?.videoURL ?: night?.videoURL(slate))?.takeIf { it.isNotBlank() }
-    val host = night?.hostName?.takeIf { it.isNotEmpty() } ?: if (night?.hostName == null) page?.hostName?.takeIf { it.isNotEmpty() } else null
+    // A take plays through to the next one. The last take, and the main video, loop as before.
+    val takes = playingMoment?.first?.let { take -> night?.conversation(take) ?: listOf(take) }.orEmpty()
+    val takeNumber = playingMoment?.first?.let { take -> takes.indexOfFirst { it.id == take.id } + 1 } ?: 0
+    val loops = playingMoment == null || takeNumber >= takes.size
+    // A recap has that night's host. Today's host and co-hosts may not have been on it.
+    val host = night?.hostName?.takeIf { it.isNotEmpty() }
+        ?: if (night?.hostName == null && !readOnly) page?.hostName?.takeIf { it.isNotEmpty() } else null
+    val coHosts = if (readOnly) emptyList() else page?.coHosts.orEmpty()
 
     Box(Modifier.fillMaxWidth().height(300.dp).clipToBounds().background(picksHeroFallback)) {
         if (url != null) {
             // Off the page under the recorder or another video, and with the app away.
-            if (videoAllowed) PicksHeroVideo(url, videoPaused, videoMuted, Modifier.fillMaxSize())
+            if (videoAllowed) PicksHeroVideo(url, videoPaused, videoMuted, loops, onTakeEnded, Modifier.fillMaxSize())
         } else {
             Text(
-                if (night?.hidden == true) "Tonight's videos are hidden" else "The host's video shows here",
+                when {
+                    night?.hidden == true -> "This night's videos aren't available."
+                    readOnly -> "No video for this night"
+                    else -> "The host's video shows here"
+                },
                 fontSize = 13.sp, color = colors.textSecondary,
                 modifier = Modifier.align(Alignment.Center)
             )
@@ -537,14 +659,14 @@ private fun PicksHero(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 PicksBackButton(onClose)
                 Spacer(Modifier.weight(1f))
-                if (page?.isHost == true) {
+                if (!readOnly && page?.isHost == true) {
                     Box(
                         modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(onClick = onCoHost),
                         contentAlignment = Alignment.Center
                     ) { Text("Co-host", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                     Spacer(Modifier.width(12.dp))
                 }
-                if (page?.isAdmin == true) {
+                if (!readOnly && page?.isAdmin == true) {
                     Box(
                         modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(onClick = onHost),
                         contentAlignment = Alignment.Center
@@ -554,8 +676,8 @@ private fun PicksHero(
             Text(
                 when {
                     host == null -> "By Stitch Social"
-                    page?.coHosts.isNullOrEmpty() -> "By Stitch Social · Hosted by $host"
-                    else -> "By Stitch Social · Hosted by $host · with ${page?.coHosts?.joinToString { it.name }}"
+                    coHosts.isEmpty() -> "By Stitch Social · Hosted by $host"
+                    else -> "By Stitch Social · Hosted by $host · with ${coHosts.joinToString { it.name }}"
                 },
                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold
             )
@@ -564,6 +686,15 @@ private fun PicksHero(
                 fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
             )
             Spacer(Modifier.weight(1f))
+            playingMoment?.first?.let { take ->
+                val speaker = listOfNotNull(
+                    take.speakerName,
+                    if (takes.size > 1) "Take $takeNumber of ${takes.size}" else null
+                ).joinToString(" · ")
+                if (speaker.isNotEmpty()) {
+                    Text(speaker, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -626,24 +757,40 @@ private fun HeroControl(icon: ImageVector, label: String, onClick: () -> Unit) {
  * hero can pause and mute, and BirthdayLoopingVideo can't.
  */
 @Composable
-private fun PicksHeroVideo(url: String, paused: Boolean, muted: Boolean, modifier: Modifier) {
+private fun PicksHeroVideo(
+    url: String,
+    paused: Boolean,
+    muted: Boolean,
+    loops: Boolean,
+    onEnded: () -> Unit,
+    modifier: Modifier
+) {
     val context = LocalContext.current
+    val ended by rememberUpdatedState(onEnded)
     val player = remember(url) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(url))
-            repeatMode = Player.REPEAT_MODE_ONE
+            repeatMode = if (loops) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             volume = if (muted) 0f else 1f
             playWhenReady = !paused
             prepare()
         }
     }
     DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) ended()
+            }
+        }
+        player.addListener(listener)
         onDispose {
+            player.removeListener(listener)
             player.stop()
             player.release()
         }
     }
     SideEffect {
+        player.repeatMode = if (loops) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         player.volume = if (muted) 0f else 1f
         player.playWhenReady = !paused
     }
@@ -819,7 +966,8 @@ private fun QuarterChip(
 ) {
     val colors = AppTheme.colors
     val moment = night.moment(game.id, quarter)
-    val isOn = moment != null && playingMoment?.first?.id == moment.id && playingMoment.second == quarter
+    val takes = moment?.let { night.conversation(it).size } ?: 0
+    val isOn = moment != null && playingMoment?.first?.conversationKey == moment.conversationKey && playingMoment.second == quarter
     val tint = when {
         isOn -> picksOnAccent
         moment == null -> colors.textSecondary
@@ -837,15 +985,33 @@ private fun QuarterChip(
         verticalArrangement = Arrangement.Center
     ) {
         Text(quarter, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = tint)
-        Text(moment?.lengthText ?: "None", fontSize = 11.sp, color = tint)
+        Text(
+            when {
+                moment == null -> "None"
+                takes > 1 -> "$takes takes"
+                else -> moment.lengthText
+            },
+            fontSize = 11.sp, color = tint
+        )
     }
 }
 
 @Composable
-private fun PromptBanner(night: PicksNight, isCoHost: Boolean, myCard: PicksCard?, onRecord: () -> Unit) {
-    if ((!night.isHostTonight && !isCoHost) || night.promptBreaks.isEmpty()) return
+private fun PromptBanner(page: PicksPage?, night: PicksNight, myCard: PicksCard?, onRecord: () -> Unit) {
+    val isCoHost = page?.isCoHost == true
+    val prompt = night.openPrompt
+    if ((!night.isHostTonight && !isCoHost) || prompt == null || prompt.breaks.isEmpty()) return
     val colors = AppTheme.colors
-    val breaks = night.promptBreaks
+    val breaks = prompt.breaks
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    val hasTakes = prompt.takes > 0
+    val lastWasMine = hasTakes && uid != null && prompt.lastSpeakerID == uid
+    // Whoever can answer my take: a co-host for the host, the host for a co-host.
+    val otherHost = if (night.isHostTonight) {
+        page?.coHosts?.singleOrNull()?.name?.takeIf { it.isNotBlank() }
+    } else {
+        night.hostName?.takeIf { it.isNotBlank() }
+    } ?: "Your co-host"
     Column(
         modifier = Modifier
             .padding(start = 16.dp, end = 16.dp, top = 12.dp)
@@ -866,8 +1032,23 @@ private fun PromptBanner(night: PicksNight, isCoHost: Boolean, myCard: PicksCard
         myCard?.let {
             Text("Your ${it.slate} card: ${it.right} of ${it.total} right so far", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
-        ArtistMetalButton("RECORD A MOMENT · UP TO 1:00", onRecord)
-        Text("Or skip it. Nothing shows for this break.", fontSize = 12.sp, color = colors.textSecondary)
+        when {
+            !hasTakes -> {
+                ArtistMetalButton("RECORD A MOMENT · UP TO 1:00", onRecord)
+                Text("Or skip it. Nothing shows for this break.", fontSize = 12.sp, color = colors.textSecondary)
+            }
+            lastWasMine -> {
+                Text("Your take is up. $otherHost can answer.", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                ArtistMetalButton("ADD A TAKE · UP TO 1:00", onRecord)
+            }
+            else -> {
+                Text(
+                    "${prompt.lastSpeakerName ?: "Your co-host"} posted a moment. Answer it.",
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                )
+                ArtistMetalButton("REPLY · UP TO 1:00", onRecord)
+            }
+        }
     }
 }
 
@@ -917,6 +1098,84 @@ private fun ActionButton(
                 fontSize = 13.sp, color = colors.textSecondary
             )
         }
+    }
+}
+
+/**
+ * After the lock, a card with a player listed out, in a game that hasn't started,
+ * can swap that pick by uploading the updated sheet.
+ */
+@Composable
+private fun SwapButton(night: PicksNight, slate: String, myCard: PicksCard?, onUpload: () -> Unit) {
+    if (!night.isLocked(slate) || myCard == null) return
+    val canSwap = myCard.picks.any { pick ->
+        pick.isListedOut && night.games.firstOrNull { it.id == pick.gameID }?.hasStarted == false
+    }
+    if (!canSwap) return
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ArtistMetalButton("SWAP AN OUT PLAYER", onUpload)
+        Text(
+            "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started.",
+            fontSize = 12.sp, color = AppTheme.colors.textSecondary
+        )
+    }
+}
+
+private fun picksPrefs(context: Context) = context.getSharedPreferences("stitch_picks", Context.MODE_PRIVATE)
+
+/** The host's main or late card, which folds down to one line. Remembered per night and slate. */
+@Composable
+private fun HostCardSection(night: PicksNight, slate: String, host: PicksCard) {
+    val colors = AppTheme.colors
+    val context = LocalContext.current
+    val prefKey = "picksCollapsed_${night.id}_$slate"
+    var collapsed by remember(prefKey) {
+        mutableStateOf(runCatching { picksPrefs(context).getBoolean(prefKey, false) }.getOrDefault(false))
+    }
+    val title = if (slate == "late") "Late card" else "Main card"
+    val name = night.hostName?.takeIf { it.isNotBlank() } ?: host.username
+    val summary = buildString {
+        // Before anything settles, "0 of 5 right" reads like a bad night.
+        if (host.right + host.wrong == 0) append("$name · ${host.picks.size} picks")
+        else {
+            append("$name · ${host.right} of ${host.total} right")
+            if (host.open > 0) append(" · ${host.open} still going")
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clickable {
+                collapsed = !collapsed
+                runCatching { picksPrefs(context).edit().putBoolean(prefKey, collapsed).apply() }
+            }
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (collapsed) "$title, $summary. Show card" else "$title. Hide card"
+            },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            if (collapsed) summary else title,
+            fontSize = 15.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            if (collapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+            contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(22.dp)
+        )
+    }
+    AnimatedVisibility(
+        visible = !collapsed,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut()
+    ) {
+        key(host.id) { PicksSlipCard(host, night, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
     }
 }
 
@@ -990,7 +1249,7 @@ private fun StitchesTab(night: PicksNight?, onOpen: (PicksCard) -> Unit) {
     ) {
         Text("STITCHES", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
         if (night?.hidden == true) {
-            Text("Tonight's videos are hidden.", fontSize = 14.sp, color = colors.textSecondary)
+            Text("This night's videos aren't available.", fontSize = 14.sp, color = colors.textSecondary)
         } else if (cards.isEmpty()) {
             Text("No stitches yet.", fontSize = 14.sp, color = colors.textSecondary)
         }
@@ -1001,7 +1260,7 @@ private fun StitchesTab(night: PicksNight?, onOpen: (PicksCard) -> Unit) {
 // MARK: - Record
 
 @Composable
-private fun RecordTab(page: PicksPage?) {
+private fun RecordTab(page: PicksPage?, onOpenNight: (PicksPastNight) -> Unit) {
     val colors = AppTheme.colors
     Column(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 56.dp),
@@ -1016,30 +1275,111 @@ private fun RecordTab(page: PicksPage?) {
             fontSize = 50.sp, lineHeight = 54.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
         )
         Text("main card picks right, none hidden", fontSize = 14.sp)
-        Text("Videos hide 24 hours after each night. Results stay.", fontSize = 12.sp, color = colors.textSecondary)
         Text("Past nights", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp))
         if (page?.recentNights.isNullOrEmpty()) {
             Text("Finished nights show here.", fontSize = 13.sp, color = colors.textSecondary)
         }
         page?.recentNights.orEmpty().forEach { past ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 58.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.surface)
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(past.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        past.hostName?.let { "${past.date} · $it" } ?: past.date,
-                        fontSize = 12.sp, color = colors.textSecondary
-                    )
-                }
-                Text("${past.right} OF ${past.total}", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
+            key(past.id) { PastNightRow(past) { onOpenNight(past) } }
+        }
+    }
+}
+
+/** A finished night. Tapping it opens the night as a recap. */
+@Composable
+private fun PastNightRow(past: PicksPastNight, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val date = picksDate(past.date, "EEE, MMM d") ?: past.date
+    val result = listOfNotNull(
+        "${past.right} of ${past.total} right",
+        past.games?.takeIf { it > 0 }?.let { if (it == 1) "1 game" else "$it games" }
+    ).joinToString(" · ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 76.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .clickable(onClick = onClick)
+            .padding(10.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${past.title}, $date, $result. Open recap"
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        PicksThumb(past.thumb, Modifier.width(48.dp).height(64.dp).clip(RoundedCornerShape(8.dp)))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(past.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                past.hostName?.takeIf { it.isNotBlank() }?.let { "$date · $it" } ?: date,
+                fontSize = 12.sp, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Text(result, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = picksGold)
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+            tint = colors.textSecondary, modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+/** A night's video thumbnail, or a drawn stand-in in the page's colors. */
+@Composable
+internal fun PicksThumb(url: String?, modifier: Modifier) {
+    Box(modifier.background(picksCoverGradient), contentAlignment = Alignment.Center) {
+        Icon(
+            Icons.Default.PlayArrow, contentDescription = null,
+            tint = picksGold.copy(alpha = 0.7f), modifier = Modifier.size(20.dp)
+        )
+        if (url != null) {
+            AsyncImage(
+                model = url, contentDescription = null,
+                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+/** The page's own colors, for a night with no thumbnail. */
+internal val picksCoverGradient = Brush.linearGradient(
+    listOf(Color(0xFF0E3A47), picksHeroFallback, Color(0xFF3A2F12))
+)
+
+/** "2026-11-04" in [pattern], in the phone's language. Null if it can't be read. */
+internal fun picksDate(date: String, pattern: String): String? = runCatching {
+    LocalDate.parse(date).format(DateTimeFormatter.ofPattern(pattern, Locale.getDefault()))
+}.getOrNull()
+
+/** Over a recap: which night it is, and the way back. */
+@Composable
+private fun RecapBanner(night: PicksNight?, onBack: () -> Unit) {
+    val colors = AppTheme.colors
+    val text = listOfNotNull(
+        "Recap",
+        night?.date?.let { picksDate(it, "EEEE, MMM d") },
+        if (night?.status == "final") "Final" else null
+    ).joinToString(" · ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface)
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .heightIn(min = 44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onBack)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Back to tonight", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LandingColors.accent)
         }
     }
 }
@@ -1059,7 +1399,7 @@ private fun InviteAnswer(coHost: Boolean, onClose: () -> Unit, onAnswer: (Boolea
             fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
         )
         Text(
-            if (coHost) "You're invited to join the host. Your videos post to the Stitch Picks page with your name on them, and hide 24 hours after the night ends." else "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them, and hide 24 hours after the night ends.",
+            if (coHost) "You're invited to join the host. Your videos post to the Stitch Picks page with your name on them." else "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them.",
             fontSize = 14.sp
         )
         if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on one main card with 5 picks or more")
@@ -1315,14 +1655,15 @@ private fun PicksField(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, onDismiss: () -> Unit) {
+private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, isSwap: Boolean, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picks by remember { mutableStateOf<List<PicksPick>>(emptyList()) }
     var isWorking by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    val canSave = picks.isNotEmpty() && (!isHost || picks.size >= 5) && !isWorking
+    // The host's 5-pick minimum is for the card before the lock, not a swap.
+    val canSave = picks.isNotEmpty() && (!isHost || isSwap || picks.size >= 5) && !isWorking
 
     fun read(uri: Uri) {
         errorText = null
@@ -1371,15 +1712,23 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, 
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                if (picks.isEmpty()) "UPLOAD YOUR SHEET" else "CHECK YOUR PICKS",
+                when {
+                    picks.isNotEmpty() -> "CHECK YOUR PICKS"
+                    isSwap -> "UPLOAD YOUR UPDATED SHEET"
+                    else -> "UPLOAD YOUR SHEET"
+                },
                 fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.ExtraBold
             )
             Text(
-                "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
-                    if (slate == "late") "This card is for the late games, and locks when the first one tips." else "Your picks lock when the first game tips.",
+                if (isSwap) {
+                    "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started."
+                } else {
+                    "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
+                        if (slate == "late") "This card is for the late games, and locks when the first one tips." else "Your picks lock when the first game tips."
+                },
                 fontSize = 13.sp, color = colors.textSecondary
             )
-            if (isHost) {
+            if (isHost && !isSwap) {
                 Text("Your card needs at least 5 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             ArtistMetalButton(if (picks.isEmpty()) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
