@@ -48,6 +48,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -300,6 +301,16 @@ internal fun PicksLandingScreen(
 
     // Sound from here on, so nothing else plays underneath.
     LaunchedEffect(Unit) { pauseFeedPlayback(context) }
+    // A host video is claimed by the server a moment after it posts. Look again
+    // then, so it's on the page without waiting for the next poll.
+    val lastPosted by com.stitchsocial.club.services.BackgroundPostManager.lastCreatedVideoID.collectAsState()
+    LaunchedEffect(lastPosted) {
+        if (lastPosted == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(2_000)
+        model.refresh()
+        kotlinx.coroutines.delay(5_000)
+        model.refresh()
+    }
 
     // The page reads through the server, so it asks again while it's up. Coming
     // back from the recorder or a video starts this over, which refreshes.
@@ -554,6 +565,7 @@ private fun TonightTab(
             night != null && !night.hidden -> {
                 if (!readOnly) {
                     PromptBanner(page, night, myCard) { onRecordRole("moment") }
+                    SplitBanner(night)
                     ActionButton(night, slate, myCard, onUpload, onRecordRole)
                     SwapButton(night, slate, myCard, onUpload)
                 }
@@ -628,10 +640,20 @@ private fun PicksHero(
         ?: if (night?.hostName == null && !readOnly) page?.hostName?.takeIf { it.isNotEmpty() } else null
     val coHosts = if (readOnly) emptyList() else page?.coHosts.orEmpty()
 
-    Box(Modifier.fillMaxWidth().height(300.dp).clipToBounds().background(picksHeroFallback)) {
+    Box(Modifier.fillMaxWidth().height(PICKS_HERO_HEIGHT).clipToBounds().background(picksHeroFallback)) {
         if (url != null) {
             // Off the page under the recorder or another video, and with the app away.
-            if (videoAllowed) PicksHeroVideo(url, videoPaused, videoMuted, loops, onTakeEnded, Modifier.fillMaxSize())
+            // Host videos are vertical and a face sits in the top third, so the
+            // video is laid out at full 9:16 and slid up, not centre-cropped.
+            if (videoAllowed) BoxWithConstraints(Modifier.fillMaxSize()) {
+                val videoHeight = maxWidth * (16f / 9f)
+                val shift = ((videoHeight - maxHeight) * PICKS_HERO_FACE_BIAS).coerceAtLeast(0.dp)
+                PicksHeroVideo(
+                    url, videoPaused, videoMuted, loops, onTakeEnded,
+                    Modifier.fillMaxWidth().requiredHeight(videoHeight.coerceAtLeast(maxHeight))
+                        .align(Alignment.TopCenter).offset(y = -shift + (videoHeight.coerceAtLeast(maxHeight) - maxHeight) / 2)
+                )
+            }
         } else {
             Text(
                 when {
@@ -756,6 +778,11 @@ private fun HeroControl(icon: ImageVector, label: String, onClick: () -> Unit) {
  * The hero's video on a loop, with sound unless muted. Its own player because the
  * hero can pause and mute, and BirthdayLoopingVideo can't.
  */
+/** Tall enough for a head and shoulders out of a vertical video. */
+private val PICKS_HERO_HEIGHT = 440.dp
+/** How far down a tall video the window sits: 0 is the top, 0.5 the centre. */
+private const val PICKS_HERO_FACE_BIAS = 0.2f
+
 @Composable
 private fun PicksHeroVideo(
     url: String,
@@ -993,6 +1020,38 @@ private fun QuarterChip(
             },
             fontSize = 11.sp, color = tint
         )
+    }
+}
+
+/** Where you and the other host disagree, before either of you talks about it. */
+@Composable
+private fun SplitBanner(night: PicksNight) {
+    if (night.splits.isEmpty()) return
+    val colors = AppTheme.colors
+    val amber = Color(0xFFF5B84A)
+    Column(
+        modifier = Modifier
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(amber.copy(alpha = 0.10f))
+            .border(1.dp, amber.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .padding(14.dp)
+            .semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            if (night.splits.size == 1) "YOU SPLIT ON 1 PICK" else "YOU SPLIT ON ${night.splits.size} PICKS",
+            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = amber
+        )
+        night.splits.forEach { split ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(split.player, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("${split.who}: ${split.theirs}", fontSize = 12.5.sp, color = colors.textSecondary)
+                Text("You: ${split.mine}", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Text("Your script brings it up.", fontSize = 11.5.sp, color = colors.textSecondary)
     }
 }
 

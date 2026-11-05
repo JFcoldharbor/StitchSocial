@@ -276,7 +276,9 @@ data class PicksNight(
     val cards: List<PicksCard>,
     val moments: List<PicksMoment>,
     /** Only sent to the host and co-hosts, while a break is open. */
-    val openPrompt: OpenPrompt?
+    val openPrompt: OpenPrompt?,
+    /** For the hosts: picks where your card takes the other side from the other host's. */
+    val splits: List<PicksSplit> = emptyList()
 ) {
     /** A break that's open for takes. It stays open after one, so the other host can answer. */
     data class OpenPrompt(
@@ -331,6 +333,12 @@ data class PicksNight(
                     lastSpeakerID = it["lastSpeakerID"] as? String,
                     lastSpeakerName = (it["lastSpeakerName"] as? String)?.takeIf { n -> n.isNotBlank() }
                 )
+            },
+            splits = raw["splits"].maps().map {
+                PicksSplit(
+                    player = it["player"] as? String ?: "", who = it["who"] as? String ?: "",
+                    mine = it["mine"] as? String ?: "", theirs = it["theirs"] as? String ?: ""
+                )
             }
         )
     }
@@ -361,6 +369,9 @@ data class PicksPastNight(
         )
     }
 }
+
+/** One pick two hosts see differently: same player and stat, opposite sides. */
+data class PicksSplit(val player: String, val who: String, val mine: String, val theirs: String)
 
 data class PicksCoHost(val id: String, val name: String)
 

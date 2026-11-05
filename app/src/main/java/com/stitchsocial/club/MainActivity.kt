@@ -1652,6 +1652,14 @@ fun MainScreen() {
                 }
 
                 // ModalOverlay — recording, video review, thread composer, etc.
+                // A Landing covers the tab bar, where the upload ring lives, so a
+                // post made from one shows its progress and "Posted!" here.
+                if (com.stitchsocial.club.landing.LandingPresenter.screen.value != null) {
+                    Box(modifier = Modifier.fillMaxSize().zIndex(60f), contentAlignment = Alignment.BottomCenter) {
+                        com.stitchsocial.club.landing.LandingPostStatus(modifier = Modifier.padding(bottom = 24.dp))
+                    }
+                }
+
                 Box(modifier = Modifier.fillMaxSize().zIndex(500f)) {
                     ModalOverlay(currentModal, modalData, navigationCoordinator, videoCoordinator) { tab -> selectedTab = tab }
                 }
