@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
+import android.text.format.DateFormat
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -23,9 +24,13 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,10 +41,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,10 +56,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.google.firebase.auth.FirebaseAuth
-import com.stitchsocial.club.birthday.BirthdayLoopingVideo
 import com.stitchsocial.club.birthday.pauseFeedPlayback
 import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
@@ -67,6 +79,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.Date
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -109,8 +122,8 @@ private class PicksPageModel(val landingID: String) {
     }
 
     /** Null when the server refused, and then the reason is in [message]. */
-    suspend fun beginVideo(role: String): PicksVideoStart? = try {
-        PicksService.beginVideo(landingID, role).also { PicksRecordingLimit.set(it.seconds) }
+    suspend fun beginVideo(role: String, slate: String): PicksVideoStart? = try {
+        PicksService.beginVideo(landingID, role, slate).also { PicksRecordingLimit.set(it.seconds) }
     } catch (e: PicksError) {
         message = e.message
         null
@@ -199,6 +212,13 @@ internal fun PicksLandingScreen(
     val onScreen = rememberAppIsOnScreen()
 
     var tab by remember { mutableStateOf(PicksTab.TONIGHT) }
+    var slate by remember { mutableStateOf("main") }
+    // A new night might not have a late slate.
+    LaunchedEffect(model.page?.night?.hasLateSlate) {
+        if (model.page?.night?.hasLateSlate != true) slate = "main"
+    }
+    var videoPaused by remember { mutableStateOf(false) }
+    var videoMuted by remember { mutableStateOf(false) }
     var playingMoment by remember { mutableStateOf<Pair<PicksMoment, String>?>(null) }
     var showingUpload by remember { mutableStateOf(false) }
     var floorGame by remember { mutableStateOf<PicksGame?>(null) }
@@ -213,7 +233,7 @@ internal fun PicksLandingScreen(
     val page = model.page
     val night = page?.night
     val uid = FirebaseAuth.getInstance().currentUser?.uid
-    val myCard = uid?.let { id -> night?.cards?.firstOrNull { it.id == id } }
+    val myCard = uid?.let { id -> night?.cards?.firstOrNull { it.userID == id && it.slate == slate } }
 
     // Sound from here on, so nothing else plays underneath.
     LaunchedEffect(Unit) { pauseFeedPlayback(context) }
@@ -248,7 +268,7 @@ internal fun PicksLandingScreen(
         if (startingVideo || !AccountStanding.guardPosting()) return
         startingVideo = true
         scope.launch {
-            val start = model.beginVideo(role)
+            val start = model.beginVideo(role, slate)
             val replyTo = start?.replyToVideoID
             when {
                 start == null -> Unit
@@ -293,14 +313,27 @@ internal fun PicksLandingScreen(
                     else -> when (tab) {
                         PicksTab.TONIGHT -> TonightTab(
                             page = page,
+                            slate = slate,
                             myCard = myCard,
                             playingMoment = playingMoment,
                             videoAllowed = !covered && onScreen,
+                            videoPaused = videoPaused,
+                            videoMuted = videoMuted,
+                            onTogglePaused = { videoPaused = !videoPaused },
+                            onToggleMuted = { videoMuted = !videoMuted },
+                            onSlate = {
+                                slate = it
+                                playingMoment = null
+                                videoPaused = false
+                            },
                             onClose = onDismiss,
                             onHost = { showingInvite = true },
                             onCoHost = { showingCoHostInvite = true },
                             onMainVideo = { playingMoment = null },
-                            onPlayMoment = { moment, quarter -> playingMoment = moment to quarter },
+                            onPlayMoment = { moment, quarter ->
+                                playingMoment = moment to quarter
+                                videoPaused = false
+                            },
                             onFloor = { floorGame = it },
                             onUpload = { showingUpload = true },
                             onRecordRole = { record(it) },
@@ -326,6 +359,7 @@ internal fun PicksLandingScreen(
             PicksUploadSheet(
                 landingID = landing.landingID,
                 isHost = night?.isHostTonight == true,
+                slate = slate,
                 onDismiss = {
                     showingUpload = false
                     scope.launch { model.refresh() }
@@ -333,7 +367,13 @@ internal fun PicksLandingScreen(
             )
         }
         floorGame?.let { game -> PicksFloorSheet(game) { floorGame = null } }
-        openCard?.let { card -> PicksCardSheet(card) { openCard = null } }
+        openCard?.let { opened ->
+            night?.let { current ->
+                // The tapped card is from an earlier poll. The open slip follows the night.
+                val card = current.cards.firstOrNull { it.id == opened.id } ?: opened
+                PicksCardSheet(card, current) { openCard = null }
+            }
+        }
         if (showingInvite) {
             PicksInviteSheet(
                 model = model,
@@ -376,9 +416,15 @@ private fun PicksBackButton(onClick: () -> Unit) {
 @Composable
 private fun TonightTab(
     page: PicksPage?,
+    slate: String,
     myCard: PicksCard?,
     playingMoment: Pair<PicksMoment, String>?,
     videoAllowed: Boolean,
+    videoPaused: Boolean,
+    videoMuted: Boolean,
+    onTogglePaused: () -> Unit,
+    onToggleMuted: () -> Unit,
+    onSlate: (String) -> Unit,
     onClose: () -> Unit,
     onHost: () -> Unit,
     onCoHost: () -> Unit,
@@ -392,7 +438,11 @@ private fun TonightTab(
     val colors = AppTheme.colors
     val night = page?.night
     Column(Modifier.fillMaxWidth()) {
-        PicksHero(page, playingMoment, videoAllowed, onClose, onHost, onCoHost, onMainVideo)
+        PicksHero(
+            page, slate, playingMoment, videoAllowed, videoPaused, videoMuted,
+            onTogglePaused, onToggleMuted, onClose, onHost, onCoHost, onMainVideo
+        )
+        if (night != null && night.hasLateSlate && !night.hidden) SlatePicker(night, slate, onSlate)
         if (night != null && night.games.isNotEmpty()) {
             SectionHeader("Tonight's games", if (night.games.size > 1) "Swipe for the next game" else null)
             GameCards(night, playingMoment, onPlayMoment, onFloor)
@@ -400,19 +450,27 @@ private fun TonightTab(
         when {
             night != null && !night.hidden -> {
                 PromptBanner(night, page?.isCoHost == true, myCard) { onRecordRole("moment") }
-                ActionButton(night, myCard, onUpload, onRecordRole)
+                ActionButton(night, slate, myCard, onUpload, onRecordRole)
+                night.hostCard(slate)?.let { host ->
+                    SectionHeader(if (slate == "late") "Late card" else "Main card", null)
+                    key(host.id) { PicksSlipCard(host, night, Modifier.padding(horizontal = 16.dp)) }
+                }
                 SectionHeader(
-                    if (night.locked) "Most picks right" else "Tonight's picks",
-                    if (night.status == "final") "Videos hide 24 hours after the last game" else "${night.cards.size} in so far"
+                    if (night.isLocked(slate)) "Most picks right" else "Tonight's picks",
+                    if (night.status == "final") "Videos hide 24 hours after the last game" else "${night.cards.count { it.slate == slate }} in so far"
                 )
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (night.cards.isEmpty()) {
-                        Text("No picks in yet.", fontSize = 13.sp, color = colors.textSecondary)
+                    val others = night.cards.filter { !it.isHost && it.slate == slate }
+                    if (others.isEmpty()) {
+                        Text(
+                            if (night.isLocked(slate)) "No one else's picks tonight." else "No one else's picks in yet.",
+                            fontSize = 13.sp, color = colors.textSecondary
+                        )
                     }
-                    night.cards.forEach { card -> CardRow(card, night) { onOpenCard(card) } }
+                    others.forEach { card -> key(card.id) { CardRow(card, night) { onOpenCard(card) } } }
                 }
             }
             night == null -> Text(
@@ -435,8 +493,13 @@ private fun TonightTab(
 @Composable
 private fun PicksHero(
     page: PicksPage?,
+    slate: String,
     playingMoment: Pair<PicksMoment, String>?,
     videoAllowed: Boolean,
+    videoPaused: Boolean,
+    videoMuted: Boolean,
+    onTogglePaused: () -> Unit,
+    onToggleMuted: () -> Unit,
     onClose: () -> Unit,
     onHost: () -> Unit,
     onCoHost: () -> Unit,
@@ -444,13 +507,13 @@ private fun PicksHero(
 ) {
     val colors = AppTheme.colors
     val night = page?.night
-    val url = (playingMoment?.first?.videoURL ?: night?.mainVideoURL)?.takeIf { it.isNotBlank() }
+    val url = (playingMoment?.first?.videoURL ?: night?.videoURL(slate))?.takeIf { it.isNotBlank() }
     val host = night?.hostName?.takeIf { it.isNotEmpty() } ?: if (night?.hostName == null) page?.hostName?.takeIf { it.isNotEmpty() } else null
 
     Box(Modifier.fillMaxWidth().height(300.dp).clipToBounds().background(picksHeroFallback)) {
         if (url != null) {
             // Off the page under the recorder or another video, and with the app away.
-            if (videoAllowed) BirthdayLoopingVideo(url, Modifier.fillMaxSize())
+            if (videoAllowed) PicksHeroVideo(url, videoPaused, videoMuted, Modifier.fillMaxSize())
         } else {
             Text(
                 if (night?.hidden == true) "Tonight's videos are hidden" else "The host's video shows here",
@@ -501,18 +564,24 @@ private fun PicksHero(
                 fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
             )
             Spacer(Modifier.weight(1f))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                heroBadge(night, playingMoment)?.let { badge ->
-                    Text(
-                        badge,
-                        fontSize = 15.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.bg)
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
-                    )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Measured after the buttons, so a long badge wraps and can't squeeze them out.
+                Box(Modifier.weight(1f)) {
+                    heroBadge(night, slate, playingMoment)?.let { badge ->
+                        Text(
+                            badge,
+                            fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(colors.bg)
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        )
+                    }
                 }
-                Spacer(Modifier.weight(1f))
                 if (playingMoment != null) {
                     Box(
                         modifier = Modifier
@@ -524,12 +593,121 @@ private fun PicksHero(
                         contentAlignment = Alignment.Center
                     ) { Text("Main video", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                 }
+                if (url != null) {
+                    HeroControl(
+                        if (videoPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        if (videoPaused) "Play" else "Pause",
+                        onTogglePaused
+                    )
+                    HeroControl(
+                        if (videoMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        if (videoMuted) "Turn sound on" else "Mute",
+                        onToggleMuted
+                    )
+                }
             }
         }
     }
 }
 
-private fun heroBadge(night: PicksNight?, playingMoment: Pair<PicksMoment, String>?): String? {
+@Composable
+private fun HeroControl(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    Box(
+        modifier = Modifier.size(44.dp).clip(CircleShape).background(colors.bg).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = label, tint = colors.textPrimary, modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * The hero's video on a loop, with sound unless muted. Its own player because the
+ * hero can pause and mute, and BirthdayLoopingVideo can't.
+ */
+@Composable
+private fun PicksHeroVideo(url: String, paused: Boolean, muted: Boolean, modifier: Modifier) {
+    val context = LocalContext.current
+    val player = remember(url) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(url))
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = if (muted) 0f else 1f
+            playWhenReady = !paused
+            prepare()
+        }
+    }
+    DisposableEffect(player) {
+        onDispose {
+            player.stop()
+            player.release()
+        }
+    }
+    SideEffect {
+        player.volume = if (muted) 0f else 1f
+        player.playWhenReady = !paused
+    }
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                this.player = player
+            }
+        },
+        update = { it.player = player },
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun SlatePicker(night: PicksNight, slate: String, onSlate: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SlateButton("Main slate", night.locked, null, slate == "main", Modifier.weight(1f)) { onSlate("main") }
+        SlateButton("Late slate", night.lateLocked, night.lateTipAt, slate == "late", Modifier.weight(1f)) { onSlate("late") }
+    }
+}
+
+@Composable
+private fun SlateButton(
+    title: String,
+    locked: Boolean,
+    tip: Date?,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    val colors = AppTheme.colors
+    val context = LocalContext.current
+    val tint = if (selected) picksOnAccent else colors.textPrimary
+    Column(
+        modifier = modifier
+            .heightIn(min = 50.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) LandingColors.accent else colors.surface)
+            .clickable(onClick = onClick)
+            .semantics { this.selected = selected },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tint)
+        Text(
+            when {
+                locked -> "Locked"
+                // The phone's own 12 or 24 hour setting.
+                tip != null -> "Locks ${DateFormat.getTimeFormat(context).format(tip)}"
+                else -> "Locks at first tip"
+            },
+            fontSize = 11.sp, color = tint
+        )
+    }
+}
+
+private fun heroBadge(night: PicksNight?, slate: String, playingMoment: Pair<PicksMoment, String>?): String? {
     if (playingMoment != null) {
         val (moment, quarter) = playingMoment
         val right = moment.right ?: return null
@@ -537,8 +715,8 @@ private fun heroBadge(night: PicksNight?, playingMoment: Pair<PicksMoment, Strin
         return "$right OF $total AT END OF $quarter"
     }
     night ?: return null
-    if (!night.locked) return "LOCKS AT FIRST TIP"
-    val host = night.cards.firstOrNull { it.isHost } ?: return null
+    if (!night.isLocked(slate)) return if (slate == "late") "LOCKS AT LATE TIP" else "LOCKS AT FIRST TIP"
+    val host = night.hostCard(slate) ?: return null
     return if (night.status == "final") "${host.right} OF ${host.total} RIGHT" else "${host.right} OF ${host.total} RIGHT SO FAR"
 }
 
@@ -574,7 +752,7 @@ private fun GameCard(
     modifier: Modifier
 ) {
     val colors = AppTheme.colors
-    val hasPicks = night.cards.firstOrNull { it.isHost }?.picks?.any { it.gameID == game.id } == true
+    val hasPicks = night.cards.any { card -> card.isHost && card.picks.any { it.gameID == game.id } }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
@@ -686,7 +864,7 @@ private fun PromptBanner(night: PicksNight, isCoHost: Boolean, myCard: PicksCard
             fontSize = 13.sp, color = colors.textSecondary
         )
         myCard?.let {
-            Text("Your main card: ${it.right} of ${it.total} right so far", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("Your ${it.slate} card: ${it.right} of ${it.total} right so far", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         ArtistMetalButton("RECORD A MOMENT · UP TO 1:00", onRecord)
         Text("Or skip it. Nothing shows for this break.", fontSize = 12.sp, color = colors.textSecondary)
@@ -696,26 +874,37 @@ private fun PromptBanner(night: PicksNight, isCoHost: Boolean, myCard: PicksCard
 @Composable
 private fun ActionButton(
     night: PicksNight,
+    slate: String,
     myCard: PicksCard?,
     onUpload: () -> Unit,
     onRecord: (String) -> Unit
 ) {
     // Picks are locked, but the host's video can still go up.
-    if (night.locked && !(night.isHostTonight && night.mainVideoID == null)) return
+    val locked = night.isLocked(slate)
+    val slateVideoID = night.videoID(slate)
+    if (locked && !(night.isHostTonight && slateVideoID == null)) return
     val colors = AppTheme.colors
     Box(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         when {
-            night.locked ->
+            locked ->
                 ArtistMetalButton("RECORD YOUR VIDEO · UP TO 2:00") { onRecord("main") }
             myCard == null ->
-                ArtistMetalButton(if (night.isHostTonight) "ADD YOUR MAIN CARD" else "STITCH YOUR PICKS", onUpload)
-            night.isHostTonight && night.mainVideoID == null ->
+                ArtistMetalButton(
+                    when {
+                        !night.isHostTonight -> "STITCH YOUR PICKS"
+                        slate == "late" -> "ADD YOUR LATE CARD"
+                        else -> "ADD YOUR MAIN CARD"
+                    },
+                    onUpload
+                )
+            night.isHostTonight && slateVideoID == null ->
                 ArtistMetalButton("RECORD YOUR VIDEO · UP TO 2:00") { onRecord("main") }
             !night.isHostTonight && myCard.videoID == null ->
-                if (night.mainVideoID == null) {
+                // A late stitch goes on the main video until there's a late one.
+                if (slateVideoID == null && night.mainVideoID == null) {
                     Text(
                         "You're in. You can record once the host posts tonight's video.",
                         fontSize = 13.sp, color = colors.textSecondary
@@ -724,7 +913,7 @@ private fun ActionButton(
                     ArtistMetalButton("RECORD YOUR VIDEO") { onRecord("card") }
                 }
             else -> Text(
-                "You're all set. Picks lock when the first game tips.",
+                if (slate == "late") "You're all set. Late picks lock when the first late game tips." else "You're all set. Picks lock when the first game tips.",
                 fontSize = 13.sp, color = colors.textSecondary
             )
         }
@@ -747,14 +936,15 @@ private fun SectionHeader(title: String, note: String?) {
 @Composable
 private fun CardRow(card: PicksCard, night: PicksNight, onClick: () -> Unit) {
     val colors = AppTheme.colors
+    val locked = night.isLocked(card.slate)
     val detail = when {
-        !night.locked -> "${card.picks.size} picks"
+        !locked -> "${card.picks.size} picks"
         card.open > 0 -> "${card.open} ${if (card.open == 1) "pick" else "picks"} still to play"
         card.wrong == 0 -> "All ${card.right} right"
         else -> "${card.wrong} wrong"
     }
     val statusColor = when {
-        !night.locked -> colors.textSecondary
+        !locked -> colors.textSecondary
         card.open > 0 -> LandingColors.accent
         card.wrong == 0 && card.total > 0 -> picksGold
         else -> colors.textPrimary
@@ -776,13 +966,13 @@ private fun CardRow(card: PicksCard, night: PicksNight, onClick: () -> Unit) {
         ) { Text(card.username.take(2).uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                if (card.isHost) "${card.username}'s main card" else "@${card.username}",
+                if (card.isHost) "${card.username}'s ${card.slate} card" else "@${card.username}",
                 fontSize = 14.sp, fontWeight = FontWeight.SemiBold
             )
             Text(detail, fontSize = 12.sp, color = colors.textSecondary)
         }
         Text(
-            if (night.locked) "${card.right} OF ${card.total}" else "NOT STARTED",
+            if (locked) "${card.right} OF ${card.total}" else "NOT STARTED",
             fontSize = 15.sp, fontWeight = FontWeight.Bold, color = statusColor
         )
     }
@@ -804,7 +994,7 @@ private fun StitchesTab(night: PicksNight?, onOpen: (PicksCard) -> Unit) {
         } else if (cards.isEmpty()) {
             Text("No stitches yet.", fontSize = 14.sp, color = colors.textSecondary)
         }
-        if (night != null) cards.forEach { card -> CardRow(card, night) { onOpen(card) } }
+        if (night != null) cards.forEach { card -> key(card.id) { CardRow(card, night) { onOpen(card) } } }
     }
 }
 
@@ -976,35 +1166,11 @@ private fun FloorTeam(code: String, floor: List<PicksGame.Player>, modifier: Mod
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PicksCardSheet(card: PicksCard, onDismiss: () -> Unit) {
+private fun PicksCardSheet(card: PicksCard, night: PicksNight, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.bg, contentColor = colors.textPrimary) {
-        Column(
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("@${card.username}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("${card.right} of ${card.total} right", fontSize = 14.sp, color = LandingColors.accent)
-            card.picks.forEach { pick ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colors.surface)
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(Modifier.fillMaxWidth()) {
-                        Text(pick.player, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        Text(
-                            pick.stateText,
-                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            color = if (pick.result == "right") LandingColors.accent else colors.textSecondary
-                        )
-                    }
-                    Text(pick.lineText, fontSize = 12.sp, color = colors.textSecondary)
-                }
-            }
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            PicksSlipCard(card, night)
         }
     }
 }
@@ -1149,7 +1315,7 @@ private fun PicksField(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PicksUploadSheet(landingID: String, isHost: Boolean, onDismiss: () -> Unit) {
+private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1181,7 +1347,7 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, onDismiss: () -
         isWorking = true
         scope.launch {
             try {
-                PicksService.submit(landingID, picks)
+                PicksService.submit(landingID, slate, picks)
                 onDismiss()
             } catch (e: PicksError) {
                 errorText = e.message
@@ -1209,11 +1375,12 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, onDismiss: () -
                 fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.ExtraBold
             )
             Text(
-                "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. Your picks lock when the first game tips.",
+                "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
+                    if (slate == "late") "This card is for the late games, and locks when the first one tips." else "Your picks lock when the first game tips.",
                 fontSize = 13.sp, color = colors.textSecondary
             )
             if (isHost) {
-                Text("Your main card needs at least 5 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Your card needs at least 5 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             ArtistMetalButton(if (picks.isEmpty()) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

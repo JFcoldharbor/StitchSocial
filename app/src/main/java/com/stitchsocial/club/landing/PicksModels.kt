@@ -26,7 +26,7 @@ private fun Any?.dateOrNull(): Date? = (this as? Number)?.toLong()?.let { Date(i
 private fun Any?.maps(): List<Map<*, *>> = (this as? List<*>).orEmpty().filterIsInstance<Map<*, *>>()
 
 /** 24 reads "24", and 24.5 reads "24.5". */
-private fun numberText(value: Double): String =
+internal fun numberText(value: Double): String =
     if (value == Math.rint(value)) value.toLong().toString() else value.toString()
 
 data class PicksGame(
@@ -87,6 +87,7 @@ data class PicksPick(
     val line: Double?,
     val statText: String,
     val gameID: String? = null,
+    val athleteID: String? = null,
     val actual: Double? = null,
     val result: String? = null,
     /** player_not_playing, stat_not_tracked, number_unread or side_unread. */
@@ -133,6 +134,7 @@ data class PicksPick(
             line = raw["line"].doubleOrNull(),
             statText = raw["statText"] as? String ?: "",
             gameID = raw["gameID"] as? String,
+            athleteID = raw["athleteID"] as? String,
             actual = raw["actual"].doubleOrNull(),
             result = raw["result"] as? String,
             problem = raw["problem"] as? String
@@ -141,7 +143,11 @@ data class PicksPick(
 }
 
 data class PicksCard(
+    /** A person can have one card per slate, so this isn't their user ID. */
     val id: String,
+    val userID: String,
+    /** "main" or "late". */
+    val slate: String,
     val username: String,
     val isHost: Boolean,
     val videoID: String?,
@@ -153,7 +159,9 @@ data class PicksCard(
 ) {
     companion object {
         fun from(raw: Map<*, *>) = PicksCard(
-            id = raw["userID"] as? String ?: "",
+            id = raw["cardID"] as? String ?: raw["userID"] as? String ?: "",
+            userID = raw["userID"] as? String ?: "",
+            slate = if (raw["slate"] == "late") "late" else "main",
             username = raw["username"] as? String ?: "",
             isHost = raw["isHost"] as? Boolean ?: false,
             videoID = raw["videoID"] as? String,
@@ -219,11 +227,23 @@ data class PicksNight(
     val hideAt: Date?,
     val mainVideoID: String?,
     val mainVideoURL: String?,
+    /** Set when the night has late games as well as early ones. */
+    val lateTipAt: Date?,
+    val lateLocked: Boolean,
+    val lateVideoID: String?,
+    val lateVideoURL: String?,
     val games: List<PicksGame>,
     val cards: List<PicksCard>,
     val moments: List<PicksMoment>,
     val promptBreaks: List<PicksMoment.Break>
 ) {
+    val hasLateSlate: Boolean get() = lateTipAt != null
+
+    fun isLocked(slate: String): Boolean = if (slate == "late") lateLocked else locked
+    fun videoID(slate: String): String? = if (slate == "late") lateVideoID else mainVideoID
+    fun videoURL(slate: String): String? = if (slate == "late") lateVideoURL ?: mainVideoURL else mainVideoURL
+    fun hostCard(slate: String): PicksCard? = cards.firstOrNull { it.isHost && it.slate == slate }
+
     fun moment(gameID: String, quarter: String): PicksMoment? =
         moments.firstOrNull { m -> m.breaks.any { it.gameID == gameID && it.quarter == quarter } }
 
@@ -240,6 +260,10 @@ data class PicksNight(
             hideAt = raw["hideAt"].dateOrNull(),
             mainVideoID = raw["mainVideoID"] as? String,
             mainVideoURL = raw["mainVideoURL"] as? String,
+            lateTipAt = raw["lateTipAt"].dateOrNull(),
+            lateLocked = raw["lateLocked"] as? Boolean ?: false,
+            lateVideoID = raw["lateVideoID"] as? String,
+            lateVideoURL = raw["lateVideoURL"] as? String,
             games = raw["games"].maps().map(PicksGame::from),
             cards = raw["cards"].maps().map(PicksCard::from),
             moments = raw["moments"].maps().map(PicksMoment::from),
@@ -330,7 +354,7 @@ object PicksRecordingLimit {
 class PicksError(val code: String) : Exception(code) {
     override val message: String
         get() = when {
-            code == "locked" -> "Picks locked when the first game tipped."
+            code == "locked" -> "Those picks locked when the first game tipped."
             code == "wrong_app" -> "Only PrizePicks and Underdog sheets work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
             code == "host_needs_five_picks" -> "The main card needs at least 5 picks."
@@ -342,6 +366,7 @@ class PicksError(val code: String) : Exception(code) {
             code == "no_games_today" -> "There are no games today."
             code == "not_for_teens" -> "Stitch Picks isn't available on this account."
             code == "too_many_reads" -> "That's enough uploads for today. Try again tomorrow."
+            code.endsWith("not_in_late_slate") -> "A late card can only have picks from the late games."
             code.startsWith("pick_") -> "One of your picks needs fixing."
             else -> "Something went wrong. Please try again."
         }
@@ -370,16 +395,16 @@ object PicksService {
         call("picks_readSheet", mapOf("landingID" to landingID, "imageBase64" to jpegBase64))["picks"]
             .maps().map(PicksPick::from)
 
-    suspend fun submit(landingID: String, picks: List<PicksPick>) {
-        call("picks_submitCard", mapOf("landingID" to landingID, "picks" to picks.map { it.payload }))
+    suspend fun submit(landingID: String, slate: String, picks: List<PicksPick>) {
+        call("picks_submitCard", mapOf("landingID" to landingID, "slate" to slate, "picks" to picks.map { it.payload }))
     }
 
     /**
      * Says what the next video is for. Returns the recording limit, if there is
      * one, and the video a fan's stitch replies to.
      */
-    suspend fun beginVideo(landingID: String, role: String): PicksVideoStart {
-        val data = call("picks_beginVideo", mapOf("landingID" to landingID, "role" to role))
+    suspend fun beginVideo(landingID: String, role: String, slate: String): PicksVideoStart {
+        val data = call("picks_beginVideo", mapOf("landingID" to landingID, "role" to role, "slate" to slate))
         return PicksVideoStart(
             seconds = (data["seconds"] as? Number)?.toLong(),
             replyToVideoID = data["replyToVideoID"] as? String
