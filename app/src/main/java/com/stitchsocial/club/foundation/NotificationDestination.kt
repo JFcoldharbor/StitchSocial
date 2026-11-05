@@ -139,6 +139,11 @@ sealed class NotificationDestination {
                 )
             }
 
+            // Stitch Picks: a host invite or a moment that's due opens the page.
+            if (type == "picks_host_invite" || type == "picks_moment_due") {
+                str("slug")?.let { return Landing(slug = it, spot = null, source = "profile", autoClaim = false) }
+            }
+
             // 3. Events: invites are written as SYSTEM (notificationType
             //    "event_invite", or "eventInvite" from older iOS builds), so the
             //    eventID is the only dependable signal. Reminders/updates too.

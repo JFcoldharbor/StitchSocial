@@ -108,6 +108,10 @@ data class StitchEventEntity(
     // see `lifecycle` below.
     val startedAt: Date? = null,
     val endedAt: Date? = null,
+    // A row that opens a Landing instead of an event room. Stitch Picks lists
+    // each night this way.
+    val landingSlug: String? = null,
+    val landingKind: String? = null,
     val goingCount: Int = 0,
     val postCount: Int = 0,
     val createdAt: Date = Date(),
@@ -198,6 +202,8 @@ data class StitchEventEntity(
                 attendeeAnchorsAllowed = map["attendeeAnchorsAllowed"] as? Boolean ?: false,
                 startedAt = (map["startedAt"] as? Timestamp)?.toDate(),
                 endedAt = (map["endedAt"] as? Timestamp)?.toDate(),
+                landingSlug = (map["landingSlug"] as? String)?.takeIf { it.isNotBlank() },
+                landingKind = (map["landingKind"] as? String)?.takeIf { it.isNotBlank() },
                 goingCount = (map["goingCount"] as? Number)?.toInt() ?: 0,
                 postCount = (map["postCount"] as? Number)?.toInt() ?: 0,
                 createdAt = (map["createdAt"] as? Timestamp)?.toDate() ?: Date(),

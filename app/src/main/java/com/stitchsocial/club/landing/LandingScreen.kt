@@ -122,12 +122,29 @@ fun LandingScreen(
     }
 
     val l = landing
+    if (l?.isPicks == true) {
+        com.stitchsocial.club.ui.theme.AlwaysDark {
+            PicksLandingScreen(
+                landing = l, onDismiss = onDismiss, onRecord = onRecord,
+                onStitch = onStitch, onOpenVideo = onOpenVideo
+            )
+        }
+        return
+    }
     if (l?.isArtist == true) {
         com.stitchsocial.club.ui.theme.AlwaysDark {
             ArtistLandingScreen(
                 initial = l, spot = spot, source = source, autoClaim = autoClaim,
-                onDismiss = onDismiss, onRecord = onRecord, onStitch = onStitch, onOpenVideo = onOpenVideo
+                onDismiss = onDismiss, onRecord = onRecord, onStitch = onStitch, onOpenVideo = onOpenVideo,
+                onOpenThread = onOpenThread, asProfile = asProfile
             )
+        }
+        return
+    }
+    // Only artists open as a profile, and their page is always dark: no white flash first.
+    if (asProfile && loading) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = LandingColors.accent)
         }
         return
     }

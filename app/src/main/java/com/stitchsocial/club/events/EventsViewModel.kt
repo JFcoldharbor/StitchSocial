@@ -134,7 +134,10 @@ class EventsViewModel : ViewModel() {
     /** Split by lifecycle, hiding anything the user marked Not Interested. */
     private fun applyRows(rows: List<StitchEventEntity>) {
         val hidden = _myRSVPs.value
-        val visible = rows.filter { hidden[it.id] != EventRSVPStatus.NOT_INTERESTED }
+        val visible = rows.filter {
+            hidden[it.id] != EventRSVPStatus.NOT_INTERESTED &&
+                !(it.landingKind == "picks" && com.stitchsocial.club.services.TeenSafety.viewerIsTeen)
+        }
         _liveEvents.value = visible.filter { it.isLive }
         _upcomingEvents.value = visible.filter { it.isUpcoming }
     }

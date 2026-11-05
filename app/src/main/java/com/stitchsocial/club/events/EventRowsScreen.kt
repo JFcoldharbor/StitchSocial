@@ -52,6 +52,15 @@ fun EventRowsScreen(
      */
     onClose: (() -> Unit)? = null,
 ) {
+    // A row for a Landing opens the page. Everything else opens its room.
+    val openRow: (StitchEventEntity) -> Unit = { event ->
+        val slug = event.landingSlug
+        if (slug != null) {
+            LandingPresenter.open(LandingPresenter.Screen.Guest(slug, null, LandingSource.PROFILE, asProfile = true))
+        } else {
+            onOpenEvent(event)
+        }
+    }
     val blue = StitchColors.primary  // events accent = brand magenta (was blue #3399FF)
 
     val live by vm.liveEvents.collectAsState()
@@ -135,7 +144,7 @@ fun EventRowsScreen(
                                         event = ev,
                                         accent = blue,
                                         isGoing = myRSVPs[ev.id] == EventRSVPStatus.GOING,
-                                        onTap = { onOpenEvent(ev) },
+                                        onTap = { openRow(ev) },
                                         onToggleGoing = { vm.toggleGoing(ev) },
                                     )
                                 }
@@ -147,7 +156,7 @@ fun EventRowsScreen(
                             dayGroups(featured).forEach { (title, events) ->
                                 item { sectionHeader(title) }
                                 items(events, key = { "list_" + it.id }) {
-                                    EventListRow(it, blue, onOpen = { onOpenEvent(it) })
+                                    EventListRow(it, blue, onOpen = { openRow(it) })
                                 }
                             }
                         }
@@ -174,28 +183,28 @@ fun EventRowsScreen(
                             if (now.isNotEmpty()) {
                                 item { sectionHeader("Happening now") }
                                 items(now, key = { "now_" + it.id }) {
-                                    EventListRow(it, blue, onOpen = { onOpenEvent(it) })
+                                    EventListRow(it, blue, onOpen = { openRow(it) })
                                 }
                             }
                             if (going.isNotEmpty()) {
                                 item { sectionHeader("Going") }
                                 items(going, key = { "going_" + it.id }) {
-                                    EventListRow(it, blue, onOpen = { onOpenEvent(it) })
+                                    EventListRow(it, blue, onOpen = { openRow(it) })
                                 }
                             }
                             if (hosting.isNotEmpty()) {
                                 item { sectionHeader("Hosting") }
                                 items(hosting, key = { "host_" + it.id }) { ev ->
-                                    MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
+                                    MyEventRow(ev, blue, onOpen = { openRow(ev) }, onLongPress = { pendingDelete = ev })
                                 }
                             }
                             if (past.isNotEmpty()) {
                                 item { sectionHeader("Past") }
                                 items(past, key = { "past_" + it.id }) { ev ->
                                     if (vm.isHost(ev)) {
-                                        MyEventRow(ev, blue, onOpen = { onOpenEvent(ev) }, onLongPress = { pendingDelete = ev })
+                                        MyEventRow(ev, blue, onOpen = { openRow(ev) }, onLongPress = { pendingDelete = ev })
                                     } else {
-                                        EventListRow(ev, blue, onOpen = { onOpenEvent(ev) })
+                                        EventListRow(ev, blue, onOpen = { openRow(ev) })
                                     }
                                 }
                             }
@@ -337,7 +346,7 @@ private fun HeroEventCard(
                 )
                 Spacer(Modifier.weight(1f))
                 // Live -> "Answer this" (opens the room); otherwise RSVP toggle.
-                val title = if (event.isLive) "Answer this" else if (isGoing) "✓ Going" else "I'm going"
+                val title = if (event.landingSlug != null) "Open" else if (event.isLive) "Answer this" else if (isGoing) "✓ Going" else "I'm going"
                 val filled = event.isLive || !isGoing
                 Text(
                     title,

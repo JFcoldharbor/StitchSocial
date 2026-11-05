@@ -182,6 +182,7 @@ data class Landing(
     val isLive: Boolean get() = status == "live"
     val isCounter: Boolean get() = serviceStyle != "sit_down"
     val isArtist: Boolean get() = kind == "artist"
+    val isPicks: Boolean get() = kind == "picks"
 
     companion object {
         fun from(raw: Any?, fallbackID: String? = null): Landing? {

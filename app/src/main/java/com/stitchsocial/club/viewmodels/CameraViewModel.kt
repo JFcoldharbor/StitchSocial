@@ -58,7 +58,8 @@ class CameraViewModel : ViewModel() {
     // MARK: - Tier-Based Recording Methods (NEW)
 
     fun updateRecordingLimits(userTier: UserTier) {
-        val maxDuration = when (userTier) {
+        // A Stitch Picks video has its own length, whatever the tier allows.
+        val maxDuration = com.stitchsocial.club.landing.PicksRecordingLimit.current ?: when (userTier) {
             UserTier.FOUNDER, UserTier.CO_FOUNDER -> 0L // Unlimited
             UserTier.PARTNER, UserTier.LEGENDARY, UserTier.TOP_CREATOR -> 120L
             else -> 30L
