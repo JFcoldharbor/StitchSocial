@@ -322,6 +322,31 @@ fun ProfileView(
     val currentAuthUserID = authService.currentUser.collectAsState().value?.uid
     val isOwnProfile = viewingUserID == null || viewingUserID == userID || currentAuthUserID == userID
 
+    // An artist's page IS their profile, however a fan got here. It opens at the
+    // Landing layer, which survives the recorder and a fullscreen video. The
+    // spinner holds until the lookup answers, so the plain profile never flashes.
+    // Paused, or blocked by this viewer, it's the plain profile. Slow lookup, too.
+    var lookingUpArtistPage by remember(userID) { mutableStateOf(!isOwnProfile) }
+    LaunchedEffect(userID, isOwnProfile) {
+        val page = if (isOwnProfile) null else kotlinx.coroutines.withTimeoutOrNull(3_000) {
+            com.stitchsocial.club.landing.LandingService.liveLandingFor(userID)
+        }
+        val blocked = com.stitchsocial.club.services.BlockService.shared.blockedUserIds.value.contains(userID)
+        if (page?.isArtist == true && !blocked && onDismiss != null) {
+            com.stitchsocial.club.landing.LandingPresenter.open(
+                com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
+                    slug = page.slug,
+                    spot = null,
+                    source = com.stitchsocial.club.landing.LandingSource.PROFILE,
+                    asProfile = true
+                )
+            )
+            onDismiss()
+        } else {
+            lookingUpArtistPage = false
+        }
+    }
+
     // Follow states
     val followingStates by followManager.followingStates.collectAsState()
     val loadingStates by followManager.loadingStates.collectAsState()
@@ -625,7 +650,7 @@ fun ProfileView(
             }
     ) {
         when {
-            isLoading -> ProfileLoadingView()
+            isLoading || lookingUpArtistPage -> ProfileLoadingView()
             errorMessage != null -> ProfileErrorView(errorMessage!!) { scope.launch { loadUser(); loadVideos() } }
             currentUser == null -> NoUserView()
             currentUser != null -> {
@@ -1974,7 +1999,7 @@ private fun ActionButtonsRow(
 // What is left is the two surfaces those items open, hosted once and driven
 // by state in ProfileView.
 @Composable
-private fun ProfileModerationSheets(
+internal fun ProfileModerationSheets(
     targetUserID: String,
     targetUsername: String,
     showReport: Boolean,

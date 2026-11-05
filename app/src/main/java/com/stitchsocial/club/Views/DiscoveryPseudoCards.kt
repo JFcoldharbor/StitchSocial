@@ -270,8 +270,10 @@ fun SponsoredSwipeCard(
     // Small phones (SE-class) lose a lot of clear area to a two-line title.
     val titleMaxLines = if (LocalConfiguration.current.screenHeightDp < 700) 1 else 2
     var bottomBlockHeight by remember(slot.id) { mutableStateOf(0.dp) }
-    val isFit = MediaFit.mode(slot.aspectRatio, slot.fit) == MediaFitMode.FIT
-    val clearArea = MediaFitBand.clearArea(top = topInset, bottom = bottomInset + bottomBlockHeight)
+    // Full screen. A video follows the normal rule; a flyer shows whole.
+    val fitOverride = if (slot.hasVideo) MediaFit.adVideoOverride(slot.fit) else MediaFit.adStillOverride(slot.fit)
+    val isFit = MediaFit.mode(slot.aspectRatio, fitOverride) == MediaFitMode.FIT
+    if (slot.hasVideo) com.stitchsocial.club.landing.AdTakesTheSound(slot.id, isActive)
 
     Box(
         modifier = modifier
@@ -284,8 +286,8 @@ fun SponsoredSwipeCard(
         var videoStarted by remember(slot.id) { mutableStateOf(false) }
         MediaFitFrame(
             aspect = slot.aspectRatio,
-            fitOverride = MediaFit.adOverride(slot.fit),
-            band = clearArea,
+            fitOverride = fitOverride,
+            band = MediaFitBand(),
             backdropURL = slot.imageURL,
             modifier = Modifier.fillMaxSize()
         ) { fitted ->
@@ -325,8 +327,8 @@ fun SponsoredSwipeCard(
                 )
         )
 
-        // Bottom block: SPONSORED, advertiser, title, CTA. Its measured top is
-        // the clear area's bottom edge.
+        // Bottom block: SPONSORED, advertiser, title, CTA. The gradient is sized
+        // to it.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)

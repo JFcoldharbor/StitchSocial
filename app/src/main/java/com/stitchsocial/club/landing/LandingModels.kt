@@ -106,6 +106,46 @@ data class SongThread(val videoID: String, val title: String) {
     }
 }
 
+/** What an artist is putting out, top of the page. Comes from landing_resolve. */
+data class LandingRelease(
+    val title: String,
+    /** "YYYY-MM-DD" */
+    val releasedOn: String? = null,
+    val tracks: List<Track> = emptyList()
+) {
+    /** `videoID` is the artist's own video of this song, if it has one. */
+    data class Track(val title: String, val videoID: String? = null) {
+        companion object {
+            fun from(raw: Any?): Track? {
+                val m = raw as? Map<*, *> ?: return null
+                val title = (m["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+                return Track(title, (m["videoID"] as? String)?.takeIf { it.isNotBlank() })
+            }
+        }
+    }
+
+    /** "Nov 3, 2026" */
+    val dateLabel: String?
+        get() = releasedOn?.let { day ->
+            runCatching {
+                java.time.LocalDate.parse(day)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", java.util.Locale.US))
+            }.getOrNull()
+        }
+
+    companion object {
+        fun from(raw: Any?): LandingRelease? {
+            val m = raw as? Map<*, *> ?: return null
+            val title = (m["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+            return LandingRelease(
+                title = title,
+                releasedOn = (m["releasedOn"] as? String)?.takeIf { it.isNotBlank() },
+                tracks = (m["tracks"] as? List<*>).orEmpty().mapNotNull { Track.from(it) }
+            )
+        }
+    }
+}
+
 data class Landing(
     val landingID: String,
     val slug: String,
@@ -128,10 +168,11 @@ data class Landing(
     val status: String = "live",
     val businessID: String = "",
     val verified: Boolean = false,
-    /** "artist", or null for a restaurant. */
+    /** "artist" or "picks", or null for a restaurant. */
     val kind: String? = null,
     val tourStops: List<TourStop> = emptyList(),
     val songThread: SongThread? = null,
+    val release: LandingRelease? = null,
     val spotifyURL: String? = null,
     val appleMusicURL: String? = null,
     /** The show open right now; both are null when none is. */
@@ -168,6 +209,7 @@ data class Landing(
                 kind = (m["kind"] as? String)?.takeIf { it.isNotBlank() },
                 tourStops = (m["tourStops"] as? List<*>).orEmpty().mapNotNull { TourStop.from(it) },
                 songThread = SongThread.from(m["songThread"]),
+                release = LandingRelease.from(m["release"]),
                 spotifyURL = ((m["streamLinks"] as? Map<*, *>)?.get("spotify") as? String)?.takeIf { it.isNotBlank() },
                 appleMusicURL = ((m["streamLinks"] as? Map<*, *>)?.get("appleMusic") as? String)?.takeIf { it.isNotBlank() },
                 currentStopID = (m["currentStopID"] as? String)?.takeIf { it.isNotBlank() },

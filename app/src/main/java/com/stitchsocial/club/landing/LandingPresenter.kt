@@ -48,7 +48,9 @@ object LandingPresenter {
             val slug: String,
             val spot: String?,
             val source: String = LandingSource.forLink(spot),
-            val autoClaim: Boolean = false
+            val autoClaim: Boolean = false,
+            /** Standing in for the artist's profile, so Report and Block live on it. */
+            val asProfile: Boolean = false
         ) : Screen()
         /** Profile → Perks: every ticket, grouped Active / Ready / Used & expired. */
         object MyPerks : Screen()
@@ -57,6 +59,12 @@ object LandingPresenter {
     }
 
     val screen: MutableState<Screen?> = mutableStateOf(null)
+
+    /**
+     * Something full-screen is over the Landing: the recorder, thread view, a
+     * video or a ticket. An artist's hero holds its song until it clears.
+     */
+    val covered: MutableState<Boolean> = mutableStateOf(false)
 
     /** The full-screen active ticket — above whichever screen opened it. */
     val activePerk: MutableState<Perk?> = mutableStateOf(null)

@@ -104,7 +104,8 @@ internal fun StitchChainRail(
     chain: List<StitchChainRailLink>,
     currentID: String,
     onTapLink: (StitchChainRailLink) -> Unit,
-    onTapOpenSlot: () -> Unit,
+    /** Null hides the slot: the artist doesn't drop on their own song. */
+    onTapOpenSlot: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
     val currentIndex = chain.indexOfFirst { it.id == currentID }.let { if (it < 0) maxOf(0, chain.size - 1) else it }
@@ -155,7 +156,7 @@ internal fun StitchChainRail(
                     if (link.id == currentID) CurrentTile(link) else Tile(link) { onTapLink(link) }
                 }
             }
-            OpenSlot(onTapOpenSlot)
+            onTapOpenSlot?.let { OpenSlot(it) }
             Spacer(Modifier.height(halfRail - RailStyle.gap))
         }
         Text(

@@ -2,22 +2,26 @@ package com.stitchsocial.club.landing
 
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowBackIosNew
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
@@ -25,24 +29,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.stitchsocial.club.FollowManager
+import com.stitchsocial.club.birthday.pauseFeedPlayback
+import com.stitchsocial.club.challenge.GiveawayResultsView
 import com.stitchsocial.club.events.LocationService
 import com.stitchsocial.club.foundation.CoreVideoMetadata
 import com.stitchsocial.club.services.AccountStanding
+import com.stitchsocial.club.services.BackgroundPostManager
+import com.stitchsocial.club.services.BlockService
 import com.stitchsocial.club.services.TeenSafety
 import com.stitchsocial.club.ui.theme.AppTheme
+import com.stitchsocial.club.views.ProfileModerationSheets
 import com.stitchsocial.club.views.TipButton
+import com.stitchsocial.club.views.buildStitchChain
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -52,9 +59,11 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * An artist's Landing, as the fan sees it: one permanent page whose place moves
- * with the tour. Header, date row, show card (check in), the two perks, the
- * song thread, the shows ladder, the big-screen note, then moments.
+ * An artist's Landing, as the fan sees it. Five tabs under a hero that plays like
+ * a music app: picking a track changes the song where it stands, and at the end
+ * of a song the next one starts. The song's thread is the fan mail, and its
+ * challenge, if any, is the giveaway. Tour holds the dates, show card, perks,
+ * rewards and moments.
  *
  * The server decides which show is open. currentStopID and currentDayKey are
  * null between shows, and check-in stays closed then. The post perk's id uses
@@ -72,7 +81,9 @@ internal fun ArtistLandingScreen(
     onDismiss: () -> Unit,
     onRecord: () -> Unit,
     onStitch: (CoreVideoMetadata) -> Unit,
-    onOpenVideo: (CoreVideoMetadata) -> Unit
+    onOpenVideo: (CoreVideoMetadata) -> Unit,
+    onOpenThread: (threadID: String, videoID: String) -> Unit,
+    asProfile: Boolean
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -106,7 +117,24 @@ internal fun ArtistLandingScreen(
     val isSelectedOpen = selected != null && selected.stopID == currentStop?.stopID
 
     var hook by remember(l.landingID) { mutableStateOf<CoreVideoMetadata?>(null) }
-    var replies by remember(l.landingID) { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
+    var trackVideos by remember(l.landingID) { mutableStateOf<Map<String, CoreVideoMetadata>>(emptyMap()) }
+    /** Drops on each song, by the song's video id. */
+    var replies by remember(l.landingID) { mutableStateOf<Map<String, List<CoreVideoMetadata>>>(emptyMap()) }
+    // Someone who scanned a code at the venue came for the show.
+    var tab by remember(l.landingID) { mutableStateOf(if (spot != null) ArtistTab.TOUR else ArtistTab.MUSIC) }
+    /** The song in the hero. Null is the lead song, songThread. */
+    var nowPlayingID by remember(l.landingID) { mutableStateOf<String?>(null) }
+    val songPaused = MusicSession.current != null && !MusicSession.isAudible
+    val song = remember { MusicSession.start(context); MusicSession.song!! }
+    /** The saved place on this device has been read, once per visit. */
+    var placeRestored by remember(l.landingID) { mutableStateOf(false) }
+    var startingGiveaway by remember { mutableStateOf(false) }
+    var showingWinners by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showingReport by remember { mutableStateOf(false) }
+    var showingBlock by remember { mutableStateOf(false) }
+    val scroll = remember(tab) { ScrollState(0) }
+    val covered by LandingPresenter.covered
     var moments by remember(l.landingID) { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
     var ownPosts by remember(l.landingID) { mutableStateOf<List<CoreVideoMetadata>>(emptyList()) }
     var member by remember(l.landingID) { mutableStateOf<LandingMember?>(null) }
@@ -135,13 +163,91 @@ internal fun ArtistLandingScreen(
     val isSelf = uid == l.businessID
     val following = followStates[l.businessID] == true
 
-    LaunchedEffect(l.landingID, l.songThread?.videoID, teenBlocked) {
-        if (teenBlocked) return@LaunchedEffect
-        val song = l.songThread ?: return@LaunchedEffect
-        val video = LandingService.songHook(song.videoID) ?: return@LaunchedEffect
+    suspend fun loadSong() {
+        val found = LinkedHashMap<String, CoreVideoMetadata>()
+        l.release?.tracks.orEmpty().mapNotNull { it.videoID }.distinct().forEach { id ->
+            LandingService.songHook(id)?.let { found[id] = it }
+        }
+        trackVideos = found
+        val song = l.songThread ?: return
+        val video = found[song.videoID] ?: LandingService.songHook(song.videoID)
         hook = video
-        replies = LandingService.songReplies(video)
+        if (video != null) replies = replies + (video.id to LandingService.songReplies(video))
     }
+
+    /** What the hero shows: the song picked from the list, else the lead song. */
+    val heroVideo = nowPlayingID?.let { trackVideos[it] } ?: hook
+    val heroReplies = heroVideo?.let { replies[it.id] }.orEmpty()
+    val songTitle = l.release?.title ?: l.songThread?.title?.takeIf { it.isNotBlank() } ?: l.name
+    val heroTitle = l.release?.tracks?.firstOrNull { it.videoID != null && it.videoID == nowPlayingID }?.title ?: songTitle
+
+    LaunchedEffect(l.landingID, l.songThread?.videoID, l.release, teenBlocked) {
+        if (!teenBlocked) loadSong()
+    }
+    fun nowPlaying(video: CoreVideoMetadata) = MusicSession.Song(
+        landingID = l.landingID,
+        artistName = l.name,
+        slug = l.slug,
+        videoID = video.id,
+        title = l.release?.tracks?.firstOrNull { it.videoID == video.id }?.title
+            ?: if (video.id == l.songThread?.videoID) songTitle else video.title,
+        artworkURL = video.thumbnailURL.ifBlank { l.coverURL ?: "" }.ifBlank { null },
+        videoURL = video.playbackURL
+    )
+    LaunchedEffect(heroVideo?.id) {
+        val video = heroVideo ?: return@LaunchedEffect
+        var startMs = 0L
+        if (!placeRestored) {
+            placeRestored = true
+            val playing = MusicSession.current
+            if (playing != null && playing.landingID == l.landingID) {
+                // Back from the bar: this page's song is already going.
+                if (playing.videoID != video.id && trackVideos.containsKey(playing.videoID)) {
+                    nowPlayingID = playing.videoID
+                    return@LaunchedEffect
+                }
+            } else {
+                song.savedPlace(l.landingID)?.let { (savedID, ms) ->
+                    if (savedID == video.id) {
+                        startMs = ms
+                    } else if (trackVideos.containsKey(savedID)) {
+                        // Back to the song that was playing. This runs again for it.
+                        placeRestored = false
+                        nowPlayingID = savedID
+                        return@LaunchedEffect
+                    }
+                }
+            }
+        }
+        if (!teenBlocked && video.videoURL.isNotBlank()) {
+            // In tracklist order, for when a song ends after the viewer has left the page.
+            val queue = l.release?.tracks.orEmpty().mapNotNull { it.videoID }.mapNotNull { trackVideos[it] }.map { nowPlaying(it) }
+            MusicSession.play(nowPlaying(video), queue, startMs)
+        }
+        replies = replies + (video.id to LandingService.songReplies(video))
+    }
+    // The next song came up on its own.
+    val playingID = MusicSession.current?.takeIf { it.landingID == l.landingID }?.videoID
+    LaunchedEffect(playingID) {
+        if (playingID != null && playingID != heroVideo?.id && trackVideos.containsKey(playingID)) nowPlayingID = playingID
+    }
+    DisposableEffect(Unit) {
+        MusicSession.isOnArtistPage = true
+        onDispose { MusicSession.isOnArtistPage = false }
+    }
+    // Something picked from this page takes over until it closes.
+    if (covered) HoldsMusic()
+
+    // A drop lands in the background after the recorder closes.
+    val lastPosted by BackgroundPostManager.lastCreatedVideoID.collectAsState()
+    LaunchedEffect(lastPosted) {
+        if (lastPosted == null || teenBlocked) return@LaunchedEffect
+        loadSong()
+        heroVideo?.let { replies = replies + (it.id to LandingService.songReplies(it)) }
+    }
+    // Sound from here on, so nothing else plays underneath.
+    LaunchedEffect(Unit) { pauseFeedPlayback(context) }
+
     LaunchedEffect(l.landingID, currentStop?.stopID, postedVideoID, teenBlocked) {
         if (teenBlocked) return@LaunchedEffect
         val opensAt = currentStop?.opensAt
@@ -263,12 +369,6 @@ internal fun ArtistLandingScreen(
         else beginCheckIn(recordAfter = true)
     }
 
-    fun openLink(url: String) {
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
-        if (uri.scheme != "https" || uri.host !in setOf("open.spotify.com", "music.apple.com")) return
-        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-    }
-
     fun share() {
         runCatching {
             context.startActivity(
@@ -287,153 +387,356 @@ internal fun ArtistLandingScreen(
         if (perk.isActive()) LandingPresenter.activePerk.value = perk else confirmPerk = perk
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
+    /** Picking the song already playing pauses or resumes it. Picking another changes the hero where it stands. */
+    fun select(track: LandingRelease.Track) {
+        val id = track.videoID?.takeIf { trackVideos.containsKey(it) } ?: return
+        if (id == heroVideo?.id) {
+            MusicSession.togglePlay()
+            return
+        }
+        nowPlayingID = id
+        scope.launch { scroll.animateScrollTo(0) }
+    }
+
+    /** Opens the recorder on the song. While a giveaway runs, the drop is also the entry. */
+    fun drop(on: CoreVideoMetadata) {
+        nowPlayingID = on.id
+        tab = ArtistTab.FAN_MAIL
+        val challenge = on.challenge
+        if (challenge != null && challenge.isActive) PendingEntryHashtag.arm(challenge.hashtag, on.threadID ?: on.id)
+        else PendingEntryHashtag.clear()
+        onStitch(on)
+    }
+
+    @Composable
+    fun Hero() {
+        val line = l.release?.let { release ->
+            val songs = release.tracks.size
+            listOfNotNull(
+                release.dateLabel,
+                if (songs > 0) "$songs ${if (songs == 1) "song" else "songs"}" else null
+            ).joinToString(" · ").takeIf { it.isNotEmpty() }
+        } ?: if (l.release == null && stops.isNotEmpty()) "${stops.size} ${if (stops.size == 1) "date" else "dates"} left on tour" else null
+        val tabsOpen = l.isLive && !teenBlocked
+        ArtistHero(
+            landing = l,
+            video = heroVideo?.takeUnless { teenBlocked },
+            title = heroTitle,
+            line = line,
+            song = song.takeUnless { teenBlocked },
+            showsBar = tabsOpen,
+            chain = if (tabsOpen) buildStitchChain(heroVideo, heroReplies) else emptyList(),
+            onTapLink = { link -> heroVideo?.let { onOpenThread(it.threadID ?: it.id, link.id) } },
+            onOpenSlot = heroVideo?.takeUnless { isSelf }?.let { song -> { drop(song) } }
+        )
+    }
+
+    @Composable
+    fun MusicTab() {
+        Hero()
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            if (isSelf) {
+                ArtistNotice("This is your page as fans see it.", Icons.Default.Person)
+            } else {
+                val song = heroVideo
+                when {
+                    !following -> ArtistMetalButton("GET IN") { followManager.toggleFollow(l.businessID) }
+                    song != null -> {
+                        ArtistMetalButton("DROP YOUR VIDEO") { drop(song) }
+                        Text(
+                            "Your video lands on $heroTitle's thread.",
+                            fontSize = 12.sp, color = colors.textSecondary, textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    else -> ArtistMetalButton("FOLLOWING") { followManager.toggleFollow(l.businessID) }
+                }
+            }
+            hook?.challenge?.takeIf { it.isActive }?.let { ArtistGiveawayStrip(it) { tab = ArtistTab.GIVEAWAY } }
+            l.release?.tracks?.takeIf { it.isNotEmpty() }?.let { tracks ->
+                ArtistTrackList(
+                    tracks = tracks,
+                    isPlayable = { it.videoID != null && trackVideos.containsKey(it.videoID) },
+                    isCurrent = { it.videoID != null && it.videoID == heroVideo?.id },
+                    paused = songPaused,
+                    onSelect = { select(it) }
+                )
+            }
+            // A tip is always on a video: the song's hook, else the newest post.
+            if (!isSelf) (hook ?: ownPosts.firstOrNull())?.let { video ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .border(1.dp, colors.hairline, RoundedCornerShape(14.dp)),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TipButton(
+                        videoID = video.id,
+                        creatorID = video.creatorID,
+                        currentUserID = uid,
+                        coinTotal = video.coinTotal + sessionTips,
+                        isSelfTip = video.creatorID == uid,
+                        onAction = null,
+                        onTipSent = { sessionTips += it }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun FanMailTab() {
+        val song = heroVideo
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            ArtistTabTitle(
+                "Fan Mail",
+                when {
+                    song == null -> "Fan mail opens when ${l.name} drops a video."
+                    isSelf -> "Videos fans dropped on $heroTitle."
+                    else -> "Drop a video on $heroTitle. Fans and ${l.name} can see it."
+                }
+            )
+            if (song != null) {
+                ArtistHookCard(song, heroTitle, heroReplies.size) { onOpenVideo(song) }
+                if (!isSelf) LandingButton("Drop your video", onClick = { drop(song) })
+                if (heroReplies.isEmpty()) Text("No drops yet. Be the first.", fontSize = 13.sp, color = colors.textSecondary)
+                else ArtistVideoGrid(heroReplies, onOpenVideo)
+            }
+        }
+    }
+
+    @Composable
+    fun GiveawayTab() {
+        val lead = hook
+        val challenge = lead?.challenge
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            ArtistTabTitle("Giveaway")
+            when {
+                lead != null && challenge != null -> ArtistGiveawayCard(
+                    challenge = challenge,
+                    artistName = l.name,
+                    songTitle = songTitle,
+                    myStatus = replies[lead.id]?.firstOrNull { it.creatorID == uid && it.challengeStatus != null }?.challengeStatus,
+                    canEnter = !isSelf,
+                    onEnter = { drop(lead) },
+                    onSeeWinners = { showingWinners = true }
+                )
+                isSelf && lead != null -> {
+                    ArtistNotice("No giveaway running. Start one and fans enter by dropping a video on $songTitle.", Icons.Default.ConfirmationNumber)
+                    LandingButton("Start a giveaway", onClick = { startingGiveaway = true })
+                }
+                else -> ArtistNotice("No giveaway running right now. Follow ${l.name} to hear about the next one.", Icons.Default.ConfirmationNumber)
+            }
+        }
+    }
+
+    @Composable
+    fun VideosTab() {
+        val song = heroVideo
+        val videos = ownPosts.filter { it.id != song?.id }
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            ArtistTabTitle("Videos")
+            if (song != null) ArtistHookCard(song, heroTitle, heroReplies.size) { onOpenVideo(song) }
+            if (videos.isNotEmpty()) ArtistVideoGrid(videos, onOpenVideo)
+            else if (song == null) Text("Nothing posted yet.", fontSize = 13.sp, color = colors.textSecondary)
+        }
+    }
+
+    @Composable
+    fun TourTab() {
+        Box(Modifier.padding(horizontal = 16.dp)) { ArtistTabTitle("Tour") }
+        if (stops.isNotEmpty()) {
+            StopRow(stops = stops, selectedID = selected?.stopID, onSelect = { selectedID = it })
+        }
+        if (selected != null) {
+            ShowCard(
+                stop = selected,
+                isOpen = isSelectedOpen,
+                // The artist has nothing to check in to or claim: it's their page.
+                isOwner = isSelf,
+                checkedIn = isSelectedOpen && checkedIn,
+                checkingIn = checkingIn && !recordAfterCheckIn,
+                onCheckIn = { beginCheckIn(recordAfter = false) },
+                onAccessNumber = {
+                    recordAfterCheckIn = false
+                    showAccessEntry = true
+                }
+            )
+        } else {
+            NotActive("No upcoming shows right now.")
+        }
+
+        if (!isSelf) ArtistPerks(
+            landing = l,
+            isOpen = currentStop != null,
+            welcome = welcome,
+            postPerk = postPerk,
+            unlocking = unlocking,
+            claiming = claiming,
+            recording = checkingIn && recordAfterCheckIn,
+            onClaim = { claim() },
+            onUse = { use(it) },
+            onRecord = { record() }
+        )
+        rewardTickets.forEach { perk ->
+            PerkTicket(
+                label = "Show ${perk.milestone ?: ""} reward",
+                perk = perk,
+                detail = perk.expiresAt?.let { "Use by ${shortDate(it)}" } ?: "",
+                useLabel = "Use now",
+                footnote = "Tap when you pick it up. It stays active for 15 minutes.",
+                onUse = { use(it) }
+            )
+        }
+
+        if (l.visitRewards.isNotEmpty()) {
+            val shows = member?.visitDays ?: 0
+            VisitCard(
+                landing = l,
+                member = member,
+                checkingIn = false,
+                onCheckIn = {},
+                title = "Keep coming back · $shows ${if (shows == 1) "show" else "shows"}",
+                unit = "show",
+                showCheckIn = false
+            )
+        }
+
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(bottom = 32.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.surface)
+                .border(1.dp, colors.hairline, RoundedCornerShape(20.dp))
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            ArtistHeader(
-                landing = l,
-                stopsLeft = stops.size,
-                onBack = onDismiss,
-                onShare = { share() },
-                actions = {
-                    if (teenBlocked) {
-                        Spacer(Modifier.weight(1f))
-                    } else if (!isSelf) {
-                        LandingButton(
-                            text = if (following) "Following" else "Follow",
-                            onClick = { followManager.toggleFollow(l.businessID) },
-                            container = if (following) colors.surfaceStrong else LandingColors.accent,
-                            content = if (following) colors.textPrimary else LandingColors.onAccent,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        Spacer(Modifier.weight(1f))
+            Text("On the big screen", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
+            Text(
+                "Approved moments may play on the screen at ${selected?.venue?.takeIf { it.isNotBlank() } ?: "the show"}. Moments posted for a perk are labeled.",
+                fontSize = 13.sp, color = colors.textSecondary
+            )
+        }
+
+        if (moments.isNotEmpty()) {
+            MomentStrip(
+                title = "Tonight at ${currentStop?.venue ?: l.name}",
+                count = "${moments.size} ${if (moments.size == 1) "moment" else "moments"}",
+                videos = moments,
+                onOpen = onOpenVideo,
+                showSpots = false
+            )
+        }
+    }
+
+    val showsTabs = l.isLive && !teenBlocked
+    Box(modifier = Modifier.fillMaxSize().background(colors.bg)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(scroll)
+                    .then(if (!showsTabs || tab == ArtistTab.MUSIC) Modifier else Modifier.statusBarsPadding())
+                    .padding(bottom = 24.dp)
+            ) {
+                if (!showsTabs) {
+                    Hero()
+                    Column(
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp).navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (teenBlocked) ArtistNotice("This artist isn't available on your account.", Icons.Default.Lock)
+                        else ArtistNotice("This Landing isn't active right now.", Icons.Default.PauseCircle)
                     }
-                    // A tip is always on a video: the song's hook, else the newest post.
-                    (hook ?: ownPosts.firstOrNull())?.takeUnless { teenBlocked }?.let { video ->
-                        TipButton(
-                            videoID = video.id,
-                            creatorID = video.creatorID,
-                            currentUserID = uid,
-                            coinTotal = video.coinTotal + sessionTips,
-                            isSelfTip = isSelf || video.creatorID == uid,
-                            onAction = null,
-                            onTipSent = { sessionTips += it }
+                } else when (tab) {
+                    ArtistTab.MUSIC -> MusicTab()
+                    ArtistTab.FAN_MAIL -> FanMailTab()
+                    ArtistTab.GIVEAWAY -> GiveawayTab()
+                    ArtistTab.VIDEOS -> VideosTab()
+                    ArtistTab.TOUR -> TourTab()
+                }
+            }
+            if (showsTabs) ArtistTabBar(tab) { tab = it }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            ArtistCircleButton(
+                content = { Icon(Icons.Default.ArrowBackIosNew, contentDescription = "Back", tint = colors.textPrimary, modifier = Modifier.size(18.dp)) },
+                onClick = onDismiss
+            )
+            Spacer(Modifier.weight(1f))
+            if (tab == ArtistTab.MUSIC && hook != null && showsTabs) {
+                ArtistCircleButton(
+                    content = {
+                        Icon(
+                            if (MusicSession.heroMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (MusicSession.heroMuted) "Turn sound on" else "Turn sound off",
+                            tint = colors.textPrimary, modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    onClick = { MusicSession.setMuted(!MusicSession.heroMuted) }
+                )
+            }
+            ArtistCircleButton(
+                content = { Icon(Icons.Default.Share, contentDescription = "Share", tint = colors.textPrimary, modifier = Modifier.size(18.dp)) },
+                onClick = { share() }
+            )
+            if (asProfile) {
+                Box {
+                    ArtistCircleButton(
+                        content = { Icon(Icons.Default.MoreHoriz, contentDescription = "More", tint = colors.textPrimary, modifier = Modifier.size(22.dp)) },
+                        onClick = { menuOpen = true }
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Report") }, onClick = { menuOpen = false; showingReport = true })
+                        DropdownMenuItem(
+                            text = { Text("Block", color = colors.destructive) },
+                            onClick = { menuOpen = false; showingBlock = true }
                         )
                     }
                 }
+            }
+        }
+
+        if (asProfile) {
+            ProfileModerationSheets(
+                targetUserID = l.businessID,
+                targetUsername = hook?.creatorName ?: l.name,
+                showReport = showingReport,
+                showBlockConfirm = showingBlock,
+                onDismissReport = { showingReport = false },
+                onDismissBlock = { showingBlock = false }
             )
+            // Blocked from here: the page has nothing left to show this viewer.
+            val blockedIDs by BlockService.shared.blockedUserIds.collectAsState()
+            LaunchedEffect(blockedIDs) { if (l.businessID in blockedIDs) onDismiss() }
+        }
 
-            if (teenBlocked) {
-                NotActive("This artist isn't available on your account.")
-                return@Column
-            }
-
-            if (!l.isLive) {
-                NotActive("This Landing isn't active right now.")
-                return@Column
-            }
-
-            if (stops.isNotEmpty()) {
-                StopRow(stops = stops, selectedID = selected?.stopID, onSelect = { selectedID = it })
-            }
-            if (selected != null) {
-                ShowCard(
-                    stop = selected,
-                    isOpen = isSelectedOpen,
-                    // The artist has nothing to check in to or claim: it's their page.
-                    isOwner = isSelf,
-                    checkedIn = isSelectedOpen && checkedIn,
-                    checkingIn = checkingIn && !recordAfterCheckIn,
-                    onCheckIn = { beginCheckIn(recordAfter = false) },
-                    onAccessNumber = {
-                        recordAfterCheckIn = false
-                        showAccessEntry = true
-                    }
-                )
-            } else {
-                NotActive("No upcoming shows right now.")
-            }
-
-            if (!isSelf) ArtistPerks(
-                landing = l,
-                isOpen = currentStop != null,
-                welcome = welcome,
-                postPerk = postPerk,
-                unlocking = unlocking,
-                claiming = claiming,
-                recording = checkingIn && recordAfterCheckIn,
-                onClaim = { claim() },
-                onUse = { use(it) },
-                onRecord = { record() }
-            )
-            rewardTickets.forEach { perk ->
-                PerkTicket(
-                    label = "Show ${perk.milestone ?: ""} reward",
-                    perk = perk,
-                    detail = perk.expiresAt?.let { "Use by ${shortDate(it)}" } ?: "",
-                    useLabel = "Use now",
-                    footnote = "Tap when you pick it up. It stays active for 15 minutes.",
-                    onUse = { use(it) }
-                )
-            }
-
-            SongThreadCard(
-                landing = l,
-                hook = hook,
-                replies = replies,
-                onOpen = onOpenVideo,
-                onReply = onStitch,
-                onLink = { openLink(it) }
-            )
-
-            if (l.visitRewards.isNotEmpty()) {
-                val shows = member?.visitDays ?: 0
-                VisitCard(
-                    landing = l,
-                    member = member,
-                    checkingIn = false,
-                    onCheckIn = {},
-                    title = "Keep coming back · $shows ${if (shows == 1) "show" else "shows"}",
-                    unit = "show",
-                    showCheckIn = false
-                )
-            }
-
-            Column(
-                modifier = Modifier
-                    .padding(start = 16.dp, end = 16.dp, top = 14.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.surface)
-                    .border(1.dp, colors.hairline, RoundedCornerShape(20.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("On the big screen", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
-                Text(
-                    "Approved moments may play on the screen at ${selected?.venue?.takeIf { it.isNotBlank() } ?: "the show"}. Moments posted for a perk are labeled.",
-                    fontSize = 13.sp, color = colors.textSecondary
-                )
-            }
-
-            if (moments.isNotEmpty()) {
-                MomentStrip(
-                    title = "Tonight at ${currentStop?.venue ?: l.name}",
-                    count = "${moments.size} ${if (moments.size == 1) "moment" else "moments"}",
-                    videos = moments,
-                    onOpen = onOpenVideo,
-                    showSpots = false
-                )
-            }
-            if (ownPosts.isNotEmpty()) {
-                MomentStrip(title = "From ${l.name}", count = null, videos = ownPosts, onOpen = onOpenVideo, showSpots = false)
-            }
+        if (startingGiveaway) hook?.let { lead ->
+            ArtistStartGiveawaySheet(hook = lead, onStarted = { loadSong() }, onDismiss = { startingGiveaway = false })
+        }
+        if (showingWinners) hook?.let { lead ->
+            lead.challenge?.let { GiveawayResultsView(lead.id, it) { showingWinners = false } }
         }
 
         message?.let { text ->
@@ -514,70 +817,6 @@ internal fun ArtistLandingScreen(
 private fun shortDate(date: Date): String = SimpleDateFormat("MMM d, h:mm a", Locale.US).format(date)
 
 private fun stopDate(stop: TourStop): LocalDate? = runCatching { LocalDate.parse(stop.date) }.getOrNull()
-
-// MARK: - Header
-
-@Composable
-private fun ArtistHeader(
-    landing: Landing,
-    stopsLeft: Int,
-    onBack: () -> Unit,
-    onShare: () -> Unit,
-    actions: @Composable RowScope.() -> Unit
-) {
-    val colors = AppTheme.colors
-    Box(modifier = Modifier.fillMaxWidth().height(440.dp).background(LandingColors.coverFallback)) {
-        (landing.coverURL ?: landing.logoURL)?.let { image ->
-            AsyncImage(
-                model = image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.55f),
-                    0.2f to Color.Transparent,
-                    0.45f to Color.Transparent,
-                    0.72f to colors.bg.copy(alpha = 0.92f),
-                    0.82f to colors.bg
-                )
-            )
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBackIosNew, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onShare) {
-                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(20.dp))
-            }
-        }
-        Column(
-            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (stopsLeft > 0) {
-                Text(
-                    "ARTIST · $stopsLeft ${if (stopsLeft == 1) "DATE" else "DATES"} LEFT ON TOUR",
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = colors.textSecondary
-                )
-            }
-            Text(
-                landing.name.uppercase(),
-                fontSize = 44.sp, lineHeight = 46.sp, fontWeight = FontWeight.Black,
-                color = colors.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), content = actions)
-        }
-    }
-}
 
 // MARK: - Dates
 
@@ -780,103 +1019,6 @@ private fun ArtistPerks(
                 isOpen -> LandingButton("Post a moment", onClick = onRecord, busy = recording)
                 else -> LandingButton("Opens on show day", onClick = {}, enabled = false)
             }
-        }
-    }
-}
-
-// MARK: - Song thread
-
-@Composable
-private fun SongThreadCard(
-    landing: Landing,
-    hook: CoreVideoMetadata?,
-    replies: List<CoreVideoMetadata>,
-    onOpen: (CoreVideoMetadata) -> Unit,
-    onReply: (CoreVideoMetadata) -> Unit,
-    onLink: (String) -> Unit
-) {
-    val colors = AppTheme.colors
-    val hasLinks = landing.spotifyURL != null || landing.appleMusicURL != null
-    if (hook == null && !hasLinks) return
-    Column(modifier = Modifier.padding(top = 14.dp)) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.surface)
-                .border(1.dp, colors.hairline, RoundedCornerShape(20.dp))
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(if (hook != null) "The song thread" else "Listen", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = colors.textPrimary)
-                if (hook != null) Text("Hear the hook. Reply with your own video.", fontSize = 13.sp, color = colors.textSecondary)
-            }
-            if (hook != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(210.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(LandingColors.coverFallback)
-                        .clickable { onOpen(hook) }
-                ) {
-                    if (hook.thumbnailURL.isNotBlank()) {
-                        AsyncImage(
-                            model = hook.thumbnailURL,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
-                    Box(
-                        modifier = Modifier.align(Alignment.Center).size(58.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.7f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Play the hook", tint = Color.White, modifier = Modifier.size(30.dp))
-                    }
-                    Row(
-                        modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(14.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Text(
-                            landing.songThread?.title?.takeIf { it.isNotBlank() } ?: hook.title,
-                            fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.White,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
-                        )
-                        if (replies.isNotEmpty()) {
-                            LandingPill(
-                                when {
-                                    replies.size >= 50 -> "50+ replies"
-                                    replies.size == 1 -> "1 reply"
-                                    else -> "${replies.size} replies"
-                                },
-                                Color.Black.copy(alpha = 0.7f), Color.White
-                            )
-                        }
-                    }
-                }
-                LandingButton("Reply with video", onClick = { onReply(hook) })
-            }
-            if (hasLinks) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    landing.spotifyURL?.let { url ->
-                        OutlinedButton(onClick = { onLink(url) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
-                            Text("Spotify", color = colors.textPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    landing.appleMusicURL?.let { url ->
-                        OutlinedButton(onClick = { onLink(url) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
-                            Text("Apple Music", color = colors.textPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-        if (replies.isNotEmpty()) {
-            MomentStrip(title = "Fan replies", count = null, videos = replies, onOpen = onOpen, showSpots = false)
         }
     }
 }

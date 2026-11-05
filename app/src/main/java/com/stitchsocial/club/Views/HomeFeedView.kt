@@ -816,7 +816,8 @@ private fun HomeSurfaceTabs(
             // respect, so it uses a fixed offset (LoginView's 22.dp) and pads the
             // cutout explicitly.
             .displayCutoutPadding()
-            .padding(top = 22.dp)
+            // Below the music bar when it's up.
+            .padding(top = 22.dp + com.stitchsocial.club.landing.MusicSession.homeTabsShift())
             .zIndex(50f),
         // Centred: two tabs left-aligned read as a longer row that got cut off.
         horizontalArrangement = Arrangement.spacedBy(19.dp)

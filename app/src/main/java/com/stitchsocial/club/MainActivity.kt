@@ -1148,7 +1148,9 @@ fun MainScreen() {
                             // The Birthday sheet covers the feed the way an
                             // announcement does: Discovery stops under it and
                             // picks up again when it closes (iOS coversFeed).
-                            isAnnouncementShowing = isShowingAnnouncement || BirthdayCenter.isPresenting,
+                            // A guest Landing can play a song, so the feed holds under it too.
+                            isAnnouncementShowing = isShowingAnnouncement || BirthdayCenter.isPresenting ||
+                                landingScreen is com.stitchsocial.club.landing.LandingPresenter.Screen.Guest,
                             onShowThreadView = { threadID, targetVideoID ->
                                 threadViewThreadID = threadID
                                 threadViewTargetVideoID = targetVideoID
@@ -1557,6 +1559,33 @@ fun MainScreen() {
                 // Landing screens — same layer as the notification screens. The
                 // recorder (500) opens over a guest Landing and closes back
                 // onto it, which is where "Unlocking…" is waiting.
+                // Thread view takes over; recording and creating hold the music
+                // and bring it back paused.
+                if (isShowingThreadView) com.stitchsocial.club.landing.HoldsMusic()
+                if (isShowingAnnouncement || BirthdayCenter.isPresenting) com.stitchsocial.club.landing.HoldsMusic()
+                if (currentModal == ModalState.RECORDING || currentModal == ModalState.REACTION ||
+                    currentModal == ModalState.VIDEO_REVIEW || currentModal == ModalState.PARALLEL_PROCESSING ||
+                    currentModal == ModalState.THREAD_COMPOSER || currentModal == ModalState.UPLOADING_VIDEO
+                ) com.stitchsocial.club.landing.HoldsMusic(comesBackPaused = true)
+                // Leaving a feed, or closing the video, gives the sound back to the music.
+                LaunchedEffect(selectedTab, notificationVideo) { com.stitchsocial.club.landing.MusicSession.leftVideo() }
+                LaunchedEffect(currentUser?.id) { if (currentUser == null) com.stitchsocial.club.landing.MusicSession.dismiss() }
+                val musicLifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+                DisposableEffect(musicLifecycle) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) com.stitchsocial.club.landing.MusicSession.wentAway()
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_START) com.stitchsocial.club.landing.MusicSession.cameBack()
+                    }
+                    musicLifecycle.addObserver(observer)
+                    onDispose { musicLifecycle.removeObserver(observer) }
+                }
+                Box(Modifier.fillMaxSize().zIndex(1100f), contentAlignment = Alignment.TopStart) {
+                    com.stitchsocial.club.landing.MusicBar()
+                }
+
+                com.stitchsocial.club.landing.LandingPresenter.covered.value =
+                    isShowingThreadView || notificationVideo != null || currentModal != ModalState.NONE ||
+                        com.stitchsocial.club.landing.LandingPresenter.activePerk.value != null
                 com.stitchsocial.club.landing.LandingPresenter.screen.value?.let { screen ->
                     val closeLanding = { com.stitchsocial.club.landing.LandingPresenter.close() }
                     Box(
@@ -1580,6 +1609,12 @@ fun MainScreen() {
                                         )
                                     },
                                     onOpenVideo = { video -> notificationVideo = video },
+                                    onOpenThread = { threadID, videoID ->
+                                        threadViewThreadID = threadID
+                                        threadViewTargetVideoID = videoID
+                                        isShowingThreadView = true
+                                    },
+                                    asProfile = screen.asProfile,
                                     onStitch = { hook ->
                                         // Suspended: the shared sheet explains instead.
                                         if (com.stitchsocial.club.services.AccountStanding.guardPosting()) {
@@ -1677,6 +1712,12 @@ fun MainScreen() {
                                     detectTapGestures { /* consume */ }
                                 }
                         ) {
+                            // Back closes this, not whatever it's standing on.
+                            androidx.activity.compose.BackHandler {
+                                isShowingThreadView = false
+                                threadViewThreadID = null
+                                threadViewTargetVideoID = null
+                            }
                             ThreadView(
                                 threadID = threadViewThreadID ?: "",
                                 videoService = videoService,
@@ -2088,7 +2129,8 @@ private fun TabContent(
                 isAnnouncementShowing = isAnnouncementShowing,
                 onNavigateToProfile = onShowProfileView,
                 onShowThreadView = onShowThreadView,
-                modifier = Modifier.fillMaxSize()
+                // Its filters are top left, where the music bar sits.
+                modifier = Modifier.fillMaxSize().padding(top = com.stitchsocial.club.landing.MusicSession.topRoom)
             )
         }
     }

@@ -145,6 +145,7 @@ enum class DiscoveryCategory(
     // Shows, not Collections (iOS parity): a viewer is looking for something
     // to watch, and what they are watching is a show.
     COLLECTIONS("Shows", Icons.Default.VideoLibrary),
+    MUSIC("Music", Icons.Default.MusicNote),
     TRENDING("Trending", Icons.Default.LocalFireDepartment);
 
     companion object {
@@ -154,7 +155,7 @@ enum class DiscoveryCategory(
          * has left: Community is Dash's, Events has its own tab, and Trending was
          * a filter over the videos For You ranks anyway.
          */
-        val visibleTabs = listOf(FOR_YOU, COLLECTIONS)
+        val visibleTabs = listOf(FOR_YOU, COLLECTIONS, MUSIC)
     }
 }
 
@@ -663,6 +664,7 @@ class DiscoveryViewModel(
                 it.temperature == Temperature.HOT || it.temperature == Temperature.BLAZING
             }
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
+            DiscoveryCategory.MUSIC -> emptyList() // Handled by MusicBrowseView
         }
 
         // For You keeps its tiers (see watchedLast); diversifying the whole
@@ -1179,7 +1181,8 @@ fun DiscoveryView(
     // Keying off the category covers every screen within each surface.
     val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
         selectedCategory == DiscoveryCategory.EVENTS ||
-        selectedCategory == DiscoveryCategory.COLLECTIONS
+        selectedCategory == DiscoveryCategory.COLLECTIONS ||
+        selectedCategory == DiscoveryCategory.MUSIC
     val anyFullScreenUp = showVideoPlayer || showCollectionPlayer || fullScreenCategoryUp
     LaunchedEffect(anyFullScreenUp) {
         onTabBarVisibilityChange?.invoke(!anyFullScreenUp)
@@ -1194,7 +1197,6 @@ fun DiscoveryView(
         onDispose { com.stitchsocial.club.foundation.FullScreenSurfaceState.clear() }
     }
 
-    // Reshuffle when user reaches the last video — mirrors iOS reshuffleAndRestart
     LaunchedEffect(currentSwipeIndex, videos.size) {
         // Sponsored impression: fires when the ad card becomes the active/top card.
         // Service dedupes per app session, so reshuffles never double-count.
@@ -1202,12 +1204,6 @@ fun DiscoveryView(
             viewModel.sponsoredSlotMap[active.id]?.let { slot ->
                 sponsoredSlotService.recordImpression(slot.id)
             }
-        }
-        if (videos.isNotEmpty() && currentSwipeIndex >= videos.size - 1) {
-            // The end of the whole catalogue: a new order, from the top (iOS
-            // reshuffleAndRestart sets swipeIndex = 0).
-            viewModel.reshuffleAndRestart()
-            currentSwipeIndex = 0
         }
         // Prefetch next 3 videos ahead of current swipe position
         if (videos.isNotEmpty()) {
@@ -1276,8 +1272,19 @@ fun DiscoveryView(
         // rule as Community/Events. Rendered BEFORE the collection player block
         // below so a tap on a card puts the player on top of the takeover
         // (equal zIndex → later sibling wins), which is what makes play instant.
-        if (selectedCategory == DiscoveryCategory.COLLECTIONS) {
+        if (selectedCategory == DiscoveryCategory.MUSIC) {
             Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                com.stitchsocial.club.landing.MusicBrowseView(
+                    onClose = {
+                        selectedCategory = DiscoveryCategory.FOR_YOU
+                        viewModel.filterBy(DiscoveryCategory.FOR_YOU)
+                    }
+                )
+            }
+        }
+        if (selectedCategory == DiscoveryCategory.COLLECTIONS) {
+            // Music keeps playing while browsing Shows, and its bar needs the room.
+            Box(modifier = Modifier.fillMaxSize().zIndex(200f).background(Color.Black).padding(top = com.stitchsocial.club.landing.MusicSession.topRoom)) {
                 CollectionsBrowseView(
                     collections = discoveryCollections,
                     userID = currentUserID ?: "",
@@ -1434,7 +1441,8 @@ fun DiscoveryView(
                         com.stitchsocial.club.foundation.FullScreenSurfaceState.set(
                             category == DiscoveryCategory.COMMUNITIES ||
                                 category == DiscoveryCategory.EVENTS ||
-                                category == DiscoveryCategory.COLLECTIONS
+                                category == DiscoveryCategory.COLLECTIONS ||
+                                category == DiscoveryCategory.MUSIC
                         )
                         viewModel.filterBy(category)
                         currentSwipeIndex = 0 // Reset swipe position
@@ -1495,6 +1503,7 @@ fun DiscoveryView(
                             }
                         }
                     }
+                    selectedCategory == DiscoveryCategory.MUSIC -> {}
                     selectedCategory == DiscoveryCategory.COLLECTIONS -> {
                         // Rendered as a full-screen takeover overlay above the
                         // chrome (see the Collections overlay near the Community
@@ -1768,7 +1777,11 @@ private fun DiscoveryHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        // Hidden, not removed, under the music bar that takes its spot, so the row
+        // beside it doesn't move.
+        Column(
+            Modifier.graphicsLayer { alpha = if (com.stitchsocial.club.landing.MusicSession.barIsVisible) 0f else 1f }
+        ) {
             // Brand wordmark — logo glyph + "StitchSocial" (iOS parity; "Social"
             // takes the magenta Discovery accent, matching the rest of the header).
             Row(
@@ -2522,6 +2535,29 @@ private fun DiscoveryHashtagChip(
 // Sponsored / collection pseudo-cards carry a blank videoURL. They are pages
 // here rather than being filtered out: dropping them is what kept ads and
 // collections out of the fullscreen feed entirely.
+/** Pages left before another round is dealt onto the feed. */
+private const val DECK_REFILL_AT = 5
+
+/**
+ * The next time around the feed: a new order with what's been watched at the back,
+ * and sponsored and show cards staying in their spots so the spacing holds. Doesn't
+ * open on the video it follows.
+ */
+private fun nextRound(
+    feed: List<CoreVideoMetadata>,
+    followsID: String?,
+    isCard: (String) -> Boolean
+): List<String> {
+    val (cards, videos) = feed.map { it.id }.partition(isCard)
+    if (videos.isEmpty()) return cards
+    val watched = com.stitchsocial.club.watchhistory.WatchHistory.watchedIDs
+    val (seen, unseen) = videos.partition { it in watched }
+    val order = (unseen.shuffled() + seen.shuffled()).toMutableList()
+    if (order.size > 1 && order.first() == followsID) order.add(order.removeAt(0))
+    val next = order.iterator()
+    return feed.map { if (isCard(it.id)) it.id else next.next() }
+}
+
 @Composable
 private fun DiscoveryFullscreenDeck(
     rootVideos: List<CoreVideoMetadata>,
@@ -2571,19 +2607,34 @@ private fun DiscoveryFullscreenDeck(
             ?.takeIf { it >= 0 }
         byIndex ?: playable.indexOfFirst { it.id == initialVideoID }.coerceAtLeast(0)
     }
-    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { playable.size })
+    // There is no last video. The deck starts as the feed, and another round is
+    // dealt on before the viewer gets near the end of it. The feed itself is never
+    // touched, so nothing moves under the video on screen.
+    val byID = remember(playable) { playable.associateBy { it.id } }
+    val deck = remember(playable.map { it.id }) { mutableStateListOf(*playable.map { it.id }.toTypedArray()) }
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { deck.size })
+    fun videoOnPage(page: Int): CoreVideoMetadata? = deck.getOrNull(page)?.let(byID::get)
+    LaunchedEffect(pagerState.currentPage, deck.size) {
+        if (deck.size - pagerState.currentPage <= DECK_REFILL_AT) {
+            deck.addAll(nextRound(playable, deck.lastOrNull()) { sponsoredSlotMap.containsKey(it) || collectionCardMap.containsKey(it) })
+        }
+    }
+    // A new feed (refresh, coming back to the tab) is a shorter deck.
+    LaunchedEffect(deck) {
+        if (pagerState.currentPage > deck.lastIndex) pagerState.scrollToPage(0)
+    }
     var horizontalSwipeActive by remember { mutableStateOf(false) }
 
     // The caller sends the cursor back to 0 when the end of the catalogue
     // reshuffles it (iOS reshuffleAndRestart): follow it to the top. Only 0 —
-    // every other index the caller holds is one this pager reported.
-    LaunchedEffect(initialIndex) {
-        if (initialIndex == 0 && pagerState.currentPage != 0) pagerState.scrollToPage(0)
-    }
-
+    // every other index the caller holds is one this pager reported. A later round
+    // reports 0 too when it reaches that video, and that isn't a reason to move.
     fun currentFullIndex(): Int {
-        val settled = playable.getOrNull(pagerState.currentPage) ?: return 0
+        val settled = videoOnPage(pagerState.currentPage) ?: return 0
         return rootVideos.indexOfFirst { it.id == settled.id }.coerceAtLeast(0)
+    }
+    LaunchedEffect(initialIndex) {
+        if (initialIndex == 0 && pagerState.currentPage != 0 && currentFullIndex() != 0) pagerState.scrollToPage(0)
     }
 
     // Discovery's signal tracker used to live on the card deck. The deck is gone,
@@ -2599,7 +2650,7 @@ private fun DiscoveryFullscreenDeck(
     LaunchedEffect(pagerState.currentPage, playable) {
         onSettledIndexChange(currentFullIndex())
         if (hosted) {
-            val settled = playable.getOrNull(pagerState.currentPage)
+            val settled = videoOnPage(pagerState.currentPage)
             if (settled != null && pagerState.currentPage != lastTrackedPage) {
                 // The first page of a session was never swiped away from anything.
                 if (lastTrackedPage >= 0) {
@@ -2611,14 +2662,14 @@ private fun DiscoveryFullscreenDeck(
         }
         // Session de-duplication: a post seen here organically is not used for
         // the ad position later (the ad pages mark themselves below).
-        playable.getOrNull(pagerState.currentPage)?.let { settled ->
+        videoOnPage(pagerState.currentPage)?.let { settled ->
             if (!sponsoredSlotMap.containsKey(settled.id) && !collectionCardMap.containsKey(settled.id)) {
                 PromotedSessionDedupe.markOrganic(settled.id)
             }
         }
         val warm = listOfNotNull(
-            playable.getOrNull(pagerState.currentPage + 1)?.videoURL,
-            playable.getOrNull(pagerState.currentPage - 1)?.videoURL
+            videoOnPage(pagerState.currentPage + 1)?.videoURL,
+            videoOnPage(pagerState.currentPage - 1)?.videoURL
         ).filter { it.isNotBlank() }
         if (warm.isNotEmpty()) {
             runCatching { com.stitchsocial.club.services.VideoDiskCache.prefetchVideos(warm) }
@@ -2634,7 +2685,7 @@ private fun DiscoveryFullscreenDeck(
             userScrollEnabled = !horizontalSwipeActive,
             modifier = Modifier.fillMaxSize()
         ) { page ->
-            val root = playable[page]
+            val root = videoOnPage(page) ?: return@VerticalPager
             val isCurrentPage = pagerState.currentPage == page
             val sponsored = sponsoredSlotMap[root.id]
             val sponsoredPost = sponsored?.let { sponsoredPostMap[it.id] }
@@ -2823,27 +2874,16 @@ private fun DiscoveryFullscreenCard(
     val isActive = isCurrentPage && !isAnnouncementShowing
 
     // Media fit band: below Discovery's floating chrome and above the tab bar
-    // when hosted; a cover has neither, so it is the whole screen.
-    //
-    // The ad position uses the clear area instead: from the chrome down to
-    // the top of the overlay's bottom block (CTA + caption + actions),
-    // measured at runtime, 12dp in from the sides.
+    // when hosted; a cover has neither, so it is the whole screen. The ad position
+    // is full screen like any post.
     val isAdOnScreen = sponsoredSlot != null && isOnParent
-    var adBottomBlockHeight by remember(root.id) { mutableStateOf(0.dp) }
-    val fitBand = if (isAdOnScreen) MediaFitBand.clearArea(
-        top = if (hosted) topInset else 0.dp,
-        bottom = adBottomBlockHeight
-    ) else MediaFitBand(
-        top = if (hosted) topInset else 0.dp,
-        bottom = if (hosted) TabBarMetrics.clearance else 0.dp
-    )
+    com.stitchsocial.club.landing.AdTakesTheSound(root.id, isAdOnScreen && isActive)
     val fitOverride: String? = if (isAdOnScreen) {
-        com.stitchsocial.club.foundation.MediaFit.adOverride(
+        com.stitchsocial.club.foundation.MediaFit.adVideoOverride(
             sponsoredSlot?.fit?.takeIf { it != "auto" } ?: currentVideo.promotion?.fit
         )
     } else null
-    // Media-fit band for a stitch that isn't the ad position.
-    val plainBand = MediaFitBand(
+    val fitBand = MediaFitBand(
         top = if (hosted) topInset else 0.dp,
         bottom = if (hosted) TabBarMetrics.clearance else 0.dp
     )
@@ -2855,7 +2895,7 @@ private fun DiscoveryFullscreenCard(
             onIndexChange = { currentIndex = it },
             isOnScreen = isCurrentPage,
             isPaused = isAnnouncementShowing,
-            fitBandFor = { page -> if (page == 0 && isAdOnScreen) fitBand else plainBand },
+            fitBandFor = { fitBand },
             fitOverrideFor = { page -> if (page == 0 && isAdOnScreen) fitOverride else null },
             onScrollingChange = { isDragging = it; onHorizontalDragChange(it) }
         )
@@ -2903,9 +2943,6 @@ private fun DiscoveryFullscreenCard(
                     SponsoredCta(sponsoredSlot.ctaText) { onSponsoredCta() }
                 } else null,
                 viewSource = if (isAdOnScreen) "sponsored" else null,
-                onBottomBlockHeight = if (isAdOnScreen) ({ h ->
-                    if (h != adBottomBlockHeight) adBottomBlockHeight = h
-                }) else null,
                 // A tile in the thread rail (iOS onSelectStitch): slide this
                 // deck's strip to it; a clip the strip doesn't hold opens in
                 // the thread player, focused on it.

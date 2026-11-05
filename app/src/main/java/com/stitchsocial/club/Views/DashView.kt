@@ -113,6 +113,20 @@ fun DashView(
 
     var communities by remember { mutableStateOf<List<CommunityListItem>>(emptyList()) }
     var suggested by remember { mutableStateOf<List<CommunityListItem>>(emptyList()) }
+    // Artist pages you follow; when there are none, the ones you could.
+    var artists by remember { mutableStateOf<List<com.stitchsocial.club.landing.Landing>>(emptyList()) }
+    var followsArtists by remember { mutableStateOf(false) }
+    var showingMusic by remember { mutableStateOf(false) }
+    // Following from an artist's page should show up here on the way back.
+    val pageUp = com.stitchsocial.club.landing.LandingPresenter.screen.value != null
+    LaunchedEffect(userID, pageUp) {
+        if (pageUp) return@LaunchedEffect
+        val pages = com.stitchsocial.club.landing.LandingService.artistPages()
+        val following = UserService(context).getFollowingIDs(userID).toSet()
+        val followed = pages.filter { it.businessID in following }
+        followsArtists = followed.isNotEmpty()
+        artists = followed.ifEmpty { pages.take(10) }
+    }
     var user by remember { mutableStateOf<BasicUserInfo?>(null) }
     var subscriberCount by remember { mutableStateOf(0) }
 
@@ -211,7 +225,7 @@ fun DashView(
                 // Clears the FRIENDS / DASH tabs layered above this. Dash scrolls
                 // under them, so the first card starts below where they sit:
                 // 22dp offset + the label and its underline, plus breathing room.
-                .padding(top = 74.dp),
+                .padding(top = 74.dp + com.stitchsocial.club.landing.MusicSession.homeTabsShift()),
             verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
             DashHeader(
@@ -273,6 +287,14 @@ fun DashView(
                 )
             }
 
+            if (artists.isNotEmpty()) {
+                DashMusic(
+                    artists = artists,
+                    title = if (followsArtists) "MUSIC" else "ARTISTS TO FOLLOW",
+                    onSeeAll = { showingMusic = true }
+                )
+            }
+
             // A new account is in no communities, has no streak and has no next
             // event, so every other section is hidden and Dash renders as a
             // greeting over empty space. Suggestions aren't a nicety here — on
@@ -306,6 +328,12 @@ fun DashView(
             // section that can only ever be empty is worse than no section.
 
             Spacer(Modifier.height(90.dp))   // clear the dipped tab bar
+        }
+    }
+
+    if (showingMusic) {
+        Box(Modifier.fillMaxSize()) {
+            com.stitchsocial.club.landing.MusicBrowseView(onClose = { showingMusic = false })
         }
     }
 
@@ -972,6 +1000,52 @@ private fun DashCommunities(
  * join button, because a one-tap join from a card you haven't read is a decision
  * nobody asked to make.
  */
+@Composable
+private fun DashMusic(
+    artists: List<com.stitchsocial.club.landing.Landing>,
+    title: String,
+    onSeeAll: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        DashSectionHeader(title, action = "See all", onAction = onSeeAll)
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            artists.forEach { artist ->
+                Column(
+                    modifier = Modifier
+                        .width(86.dp)
+                        .clickable { com.stitchsocial.club.landing.openArtistPage(artist) },
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(86.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(14.dp))
+                    ) {
+                        DashCoverArt(artist.coverURL ?: artist.logoURL, artist.name, Modifier.fillMaxSize())
+                    }
+                    Text(
+                        artist.name,
+                        color = Color.White,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    artist.release?.title?.let {
+                        Text(it, color = Color.White.copy(alpha = 0.45f), fontSize = 9.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DashSuggested(
     suggested: List<CommunityListItem>,

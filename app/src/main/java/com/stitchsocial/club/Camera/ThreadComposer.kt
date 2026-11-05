@@ -227,7 +227,7 @@ fun ThreadComposer(
                                 videoCoordinator = videoCoordinator,
                                 userTitle = title.trim(),
                                 userDescription = description.trim(),
-                                userHashtags = hashtags,
+                                userHashtags = com.stitchsocial.club.landing.PendingEntryHashtag.applied(hashtags, recordingContext),
                                 taggedUserIDs = taggedUserIds,
                                 onCompleted = { createdVideo ->
                                     // Attach the Challenge config onto the real
@@ -1597,7 +1597,7 @@ private fun AddOnSheet(
 // ============================================================================
 
 @Composable
-private fun ChallengeConfigSection(
+internal fun ChallengeConfigSection(
     draft: ChallengeDraft,
     onDraftChange: (ChallengeDraft) -> Unit
 ) {

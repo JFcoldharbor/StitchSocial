@@ -318,7 +318,6 @@ fun ContextualVideoOverlay(
     // Height from the bottom edge to the top of the bottom block (caption +
     // CTA + actions). The ad position uses it as the media-fit clear area's
     // bottom edge.
-    onBottomBlockHeight: ((Dp) -> Unit)? = null,
     // A tile in the thread rail was tapped (iOS onSelectStitch): the host
     // switches playback to that clip — pages its pager to it, or loads it in
     // place. Return false when the host can't play it here; the overlay then
@@ -810,7 +809,6 @@ fun ContextualVideoOverlay(
                 isSponsored = isSponsored,
                 isUnderReview = isUnderReview,
                 sponsoredCta = effectiveCta,
-                onBottomBlockHeight = onBottomBlockHeight,
                 stitchChain = stitchChain,
                 detailExpanded = detailExpanded,
                 onDetailExpandedChange = { detailExpanded = it },
@@ -1340,7 +1338,6 @@ private fun FullContextualOverlay(
     isSponsored: Boolean = false,
     isUnderReview: Boolean = false,
     sponsoredCta: SponsoredCta? = null,
-    onBottomBlockHeight: ((Dp) -> Unit)? = null,
     stitchChain: List<StitchChainRailLink> = emptyList(),
     detailExpanded: Boolean = false,
     onDetailExpandedChange: (Boolean) -> Unit = {},
@@ -1444,7 +1441,6 @@ private fun FullContextualOverlay(
             isSponsored = isSponsored,
             isUnderReview = isUnderReview,
             sponsoredCta = sponsoredCta,
-            onBottomBlockHeight = onBottomBlockHeight,
             // The rail's column (58) + its 16 edge margin + a gap, less the
             // block's own 12 side padding: everything above the action rail
             // stops short of the rail, on every host.
@@ -1510,7 +1506,6 @@ private fun BottomSection(
     isSponsored: Boolean,
     isUnderReview: Boolean,
     sponsoredCta: SponsoredCta? = null,
-    onBottomBlockHeight: ((Dp) -> Unit)? = null,
     railReserve: Dp = 0.dp,
     detailExpanded: Boolean = false,
     onDetailExpandedChange: (Boolean) -> Unit = {},
@@ -1524,13 +1519,6 @@ private fun BottomSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            // Measured before the padding, so the height runs from the bottom
-            // edge to the top of the block — the clear area's bottom edge.
-            .then(
-                if (onBottomBlockHeight != null) Modifier.onSizeChanged { size ->
-                    onBottomBlockHeight(with(density) { size.height.toDp() })
-                } else Modifier
-            )
             .padding(bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {

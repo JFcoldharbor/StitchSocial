@@ -42,12 +42,7 @@ data class MediaFitBand(
     val top: Dp = 0.dp,
     val bottom: Dp = 0.dp,
     val horizontal: Dp = 0.dp
-) {
-    companion object {
-        fun clearArea(top: Dp, bottom: Dp): MediaFitBand =
-            MediaFitBand(top = top, bottom = bottom, horizontal = MediaFit.CLEAR_AREA_SIDE_INSET_DP.dp)
-    }
-}
+)
 
 /**
  * The tab bar's measured height while it is on screen, 0 when it isn't.

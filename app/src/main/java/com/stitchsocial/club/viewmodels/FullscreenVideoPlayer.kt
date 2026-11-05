@@ -275,6 +275,10 @@ fun FullscreenVideoPlayer(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Closing the video gives the sound back to the music.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { com.stitchsocial.club.landing.MusicSession.leftVideo() }
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     val authService = remember { com.stitchsocial.club.services.AuthService() }
     val videoService = remember { com.stitchsocial.club.services.VideoServiceImpl() }

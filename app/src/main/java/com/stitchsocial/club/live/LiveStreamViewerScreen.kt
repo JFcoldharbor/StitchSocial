@@ -58,6 +58,7 @@ fun LiveStreamViewerScreen(
     userDisplayName: String,
     onDismiss: () -> Unit,
 ) {
+    com.stitchsocial.club.landing.HoldsMusic()
     val context = LocalContext.current
 
     val streamService = remember { LiveStreamService.getInstance() }

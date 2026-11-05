@@ -18,9 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -62,11 +60,9 @@ import kotlinx.coroutines.launch
  * [fullScreen] is the collection-break layout (full-bleed creative, sound on);
  * otherwise it is the in-feed card (muted, plays only while visible).
  *
- * Media fit (MEDIA_FIT_CONTRACT): a 9:16 creative fills as before; anything
- * wider — or ad.fit == "fit" — is shown whole over a blurred copy of itself.
- * Full screen, it sits in the clear area: below [topInset] (the host's chrome),
- * above the measured bottom block, 12dp in from the sides. In the feed card it
- * fits the media box.
+ * Media fit (see MediaFit): full screen, a portrait video fills the phone, and
+ * a landscape video or a flyer shows whole on black. In the feed card it fits
+ * the media box.
  */
 @Composable
 fun BrandAdCard(
@@ -127,25 +123,18 @@ fun BrandAdCard(
             modifier = modifier.fillMaxSize().then(tracking)
         )
     } else if (fullScreen) {
-        val density = LocalDensity.current
-        var bottomBlockHeight by remember(ad.token) { mutableStateOf(0.dp) }
         Box(modifier = modifier.fillMaxSize().background(Color.Black).then(tracking)) {
             BrandAdMedia(
                 ad,
                 playing = halfVisible,
                 muted = false,
-                band = MediaFitBand.clearArea(top = topInset, bottom = bottomBlockHeight),
+                band = MediaFitBand(),
                 modifier = Modifier.fillMaxSize()
             )
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    // The clear area ends where this block begins.
-                    .onSizeChanged { size ->
-                        val h = with(density) { size.height.toDp() }
-                        if (h != bottomBlockHeight) bottomBlockHeight = h
-                    }
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))))
                     .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -217,7 +206,7 @@ private fun BrandAdMedia(ad: BrandAd, playing: Boolean, muted: Boolean, band: Me
     val context = LocalContext.current
     MediaFitFrame(
         aspect = ad.aspectRatio,
-        fitOverride = MediaFit.adOverride(ad.fit),
+        fitOverride = if (ad.videoURL != null) MediaFit.adVideoOverride(ad.fit) else MediaFit.adStillOverride(ad.fit),
         band = band,
         backdropURL = ad.thumbnailURL,
         modifier = modifier.background(Color.Black)
@@ -274,10 +263,10 @@ private fun BrandAdPost(
     onOpenPost: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var bottomBlockHeight by remember(post.id) { mutableStateOf(0.dp) }
     var showPoster by remember(post.id) { mutableStateOf(true) }
-    val band = MediaFitBand.clearArea(top = topInset, bottom = bottomBlockHeight)
-    val fitOverride = MediaFit.adOverride(ad.fit.takeIf { it != "auto" } ?: post.promotion?.fit)
+    val band = MediaFitBand(top = topInset)
+    val fitOverride = MediaFit.adVideoOverride(ad.fit.takeIf { it != "auto" } ?: post.promotion?.fit)
+    com.stitchsocial.club.landing.AdTakesTheSound(ad.token, playing)
     val currentUserID = remember { com.stitchsocial.club.services.AuthService().getCurrentUserId() }
 
     Box(modifier = modifier.background(Color.Black)) {
@@ -308,8 +297,7 @@ private fun BrandAdPost(
                     }
                 },
                 sponsoredCta = SponsoredCta(ad.ctaText, onCta),
-                viewSource = "sponsored",
-                onBottomBlockHeight = { h -> if (h != bottomBlockHeight) bottomBlockHeight = h }
+                viewSource = "sponsored"
             )
         }
     }

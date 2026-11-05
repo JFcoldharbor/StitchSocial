@@ -73,7 +73,7 @@ object LandingService {
     // ---- Calls ----
 
     @Suppress("UNCHECKED_CAST")
-    private suspend fun call(name: String, payload: Map<String, Any?> = emptyMap()): Map<String, Any?> {
+    internal suspend fun call(name: String, payload: Map<String, Any?> = emptyMap()): Map<String, Any?> {
         try {
             val result = functions.getHttpsCallable(name)
                 .call(payload.filterValues { it != null })
@@ -345,6 +345,24 @@ object LandingService {
             .mapNotNull { Landing.from(it.data, it.id) }
             .firstOrNull { it.isLive && it.slug.isNotBlank() }
     }.getOrNull()
+
+    /**
+     * Every live artist page a viewer may see, by name. Artists are few, so one
+     * query covers Music and the followed list on Dash.
+     */
+    suspend fun artistPages(): List<Landing> = runCatching {
+        val blocked = com.stitchsocial.club.services.BlockService.shared.blockedUserIds.value
+        db.collection("landings")
+            .whereEqualTo("kind", "artist")
+            .whereEqualTo("status", "live")
+            .limit(200)
+            .get().await()
+            .documents
+            .mapNotNull { Landing.from(it.data, it.id) }
+            .filter { it.isArtist && it.isLive && it.slug.isNotBlank() && it.businessID.isNotBlank() && it.businessID !in blocked }
+            .filter { !TeenSafety.viewerIsTeen || accountAllowsTeens(it.businessID) }
+            .sortedBy { it.name.lowercase() }
+    }.getOrDefault(emptyList())
 
     /** The restaurant's own posts, under the strip. */
     suspend fun restaurantPosts(businessID: String): List<CoreVideoMetadata> =

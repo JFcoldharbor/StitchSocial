@@ -73,7 +73,11 @@ fun LandingScreen(
     onRecord: () -> Unit,
     onOpenVideo: (CoreVideoMetadata) -> Unit,
     /** Artist Landings: opens the recorder stitching onto the song's hook. */
-    onStitch: (CoreVideoMetadata) -> Unit = {}
+    onStitch: (CoreVideoMetadata) -> Unit = {},
+    /** Artist Landings: a reply on the hero's rail opens here. */
+    onOpenThread: (threadID: String, videoID: String) -> Unit = { _, _ -> },
+    /** Artist Landings: this page is the artist's profile. */
+    asProfile: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -104,7 +108,9 @@ fun LandingScreen(
     var activating by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
-    BackHandler(onBack = onDismiss)
+    // With the recorder on top, back does nothing: it must neither close this page
+    // under it nor leave the app. The recorder's own X closes it.
+    BackHandler { if (!LandingPresenter.covered.value) onDismiss() }
 
     LaunchedEffect(slug) {
         loading = true
@@ -988,11 +994,14 @@ internal fun MomentStrip(
 }
 
 @Composable
-private fun MomentCard(video: CoreVideoMetadata, showSpot: Boolean, onTap: () -> Unit) {
+internal fun MomentCard(
+    video: CoreVideoMetadata,
+    showSpot: Boolean,
+    modifier: Modifier = Modifier.width(112.dp).height(168.dp),
+    onTap: () -> Unit
+) {
     Box(
-        modifier = Modifier
-            .width(112.dp)
-            .height(168.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF24324A))
             .clickable(onClick = onTap)

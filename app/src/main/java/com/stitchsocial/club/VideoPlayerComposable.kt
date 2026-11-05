@@ -323,6 +323,24 @@ fun VideoPlayerComposable(
         isError = false
     }
 
+    // Under music a video stays silent until it's tapped (MusicSession).
+    val musicSilences = com.stitchsocial.club.landing.MusicSession.videosMustBeSilent
+    LaunchedEffect(muted, musicSilences, exoPlayer) {
+        exoPlayer.volume = if (muted || musicSilences) 0f else 1f
+    }
+    // The viewer stopped the music: the video on screen carries on, with its
+    // sound, even if a tap had paused it.
+    val musicStopped = com.stitchsocial.club.landing.MusicSession.stoppedCount
+    val musicStoppedSeen = remember(videoId) { mutableStateOf(musicStopped) }
+    LaunchedEffect(musicStopped) {
+        if (musicStopped == musicStoppedSeen.value) return@LaunchedEffect
+        musicStoppedSeen.value = musicStopped
+        if (isActive && !isError) {
+            userPaused = false
+            exoPlayer.play()
+        }
+    }
+
     // Video Manager control - play when active.
     // Keyed on exoPlayer too: a recovery rebuilds the instance, and without that key
     // the new player would sit there never told to start.
@@ -330,7 +348,6 @@ fun VideoPlayerComposable(
         Log.d("VIDEO_PLAYER", "🎯 Video $videoId isActive changed to: $isActive (tap-paused=$userPaused)")
         if (shouldPlay && !isError) {
             if (managed) VideoManager.setActivePlayer(exoPlayer, videoId)
-            exoPlayer.volume = if (muted) 0f else 1f
             exoPlayer.play()
             Log.i("VIDEO_PLAYER", "▶️ PLAYING $videoId (now active via VideoManager)")
         } else {
@@ -371,11 +388,20 @@ fun VideoPlayerComposable(
                 // long-press handlers, so taps aren't delayed and drags/swipes
                 // (pager, horizontal reply swipe) cancel it past touch slop.
                 when {
-                    onVideoClick != null -> Modifier.pointerInput(onVideoClick) {
-                        detectTapGestures(onTap = { onVideoClick() })
+                    onVideoClick != null -> Modifier.pointerInput(onVideoClick, muted) {
+                        detectTapGestures(onTap = {
+                            if (muted || !com.stitchsocial.club.landing.MusicSession.takeTapForVideo()) onVideoClick()
+                        })
                     }
-                    tapToPause -> Modifier.pointerInput(videoId) {
-                        detectTapGestures(onTap = { userPaused = !userPaused })
+                    tapToPause -> Modifier.pointerInput(videoId, muted) {
+                        detectTapGestures(onTap = {
+                            // A tap asking for this video's sound also starts it if it was paused.
+                            if (muted || !com.stitchsocial.club.landing.MusicSession.takeTapForVideo()) userPaused = !userPaused
+                            else userPaused = false
+                        })
+                    }
+                    !muted && musicSilences -> Modifier.pointerInput(videoId) {
+                        detectTapGestures(onTap = { com.stitchsocial.club.landing.MusicSession.takeTapForVideo() })
                     }
                     else -> Modifier
                 }

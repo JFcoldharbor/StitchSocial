@@ -7,8 +7,10 @@ package com.stitchsocial.club.foundation
  * wider than tall fits on black, because filling a portrait screen with a 16:9
  * clip throws away about 74% of the frame.
  *
- * Ads are the exception: they pass [adOverride], so a paid flyer shows whole in
- * the clear area, also on black. iOS draws the same rule (MediaFit.swift).
+ * Sponsored video follows the same rule, full screen like any post. A flyer (a
+ * still) is never cropped, so its words survive: it shows whole, as large as the
+ * screen allows. Google's ads don't come through here. iOS draws the same rule
+ * (MediaFit.swift).
  *
  * Layer 1: no Android or Compose dependencies.
  */
@@ -24,9 +26,6 @@ object MediaFit {
     /** What a missing or unusable shape means: a 9:16 phone video. */
     const val DEFAULT_ASPECT = 9.0 / 16.0
 
-    /** Side inset of the sponsored / brand-ad clear area, in dp. */
-    const val CLEAR_AREA_SIDE_INSET_DP = 12f
-
     /** Null, NaN, infinite or <= 0 means 9/16. */
     fun sanitizedAspect(aspect: Double?): Double =
         if (aspect == null || aspect.isNaN() || aspect.isInfinite() || aspect <= 0.0) DEFAULT_ASPECT
@@ -39,8 +38,11 @@ object MediaFit {
         else -> null
     }
 
-    /** An ad's stored fit: "fill" if it asked for that, otherwise shown whole. */
-    fun adOverride(fit: String?): String =
+    /** A sponsored video's stored fit, if it picked one. Otherwise null, the normal rule. */
+    fun adVideoOverride(fit: String?): String? = parseOverride(fit)?.rawValue
+
+    /** A flyer shows whole unless the ad asked to fill. */
+    fun adStillOverride(fit: String?): String =
         if (parseOverride(fit) == MediaFitMode.FILL) "fill" else "fit"
 
     /** The stored `fit` value: "auto" | "fill" | "fit", defaulting to "auto". */

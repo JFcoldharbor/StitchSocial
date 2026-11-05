@@ -75,6 +75,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun BirthdayPreviewPlayer(videoURL: String, onClose: () -> Unit) {
+    com.stitchsocial.club.landing.HoldsMusic()
     val context = LocalContext.current
     LaunchedEffect(Unit) { pauseFeedPlayback(context) }
     BackHandler(onBack = onClose)

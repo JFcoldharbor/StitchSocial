@@ -117,6 +117,7 @@ fun CollectionPlayerView(
         factory = CollectionPlayerViewModelFactory(CollectionService())
     )
 ) {
+    com.stitchsocial.club.landing.HoldsMusic()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
