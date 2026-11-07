@@ -10,6 +10,18 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.customActions
+import com.stitchsocial.club.views.StitchChainRail
+import com.stitchsocial.club.views.StitchChainRailLink
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -34,6 +46,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowBackIosNew
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -77,6 +90,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.stitchsocial.club.FollowManager
 import com.stitchsocial.club.birthday.pauseFeedPlayback
 import com.stitchsocial.club.foundation.BasicUserInfo
 import com.stitchsocial.club.foundation.CoreVideoMetadata
@@ -280,10 +294,17 @@ internal fun PicksLandingScreen(
     }
     var videoPaused by remember { mutableStateOf(false) }
     var videoMuted by remember { mutableStateOf(false) }
-    var playingMoment by remember { mutableStateOf<Pair<PicksMoment, String>?>(null) }
+    // The hero's reel item, by video ID so a new take on a poll doesn't move it.
+    var reelVideoID by remember { mutableStateOf<String?>(null) }
+    // Which way the last move went, so the next video slides in from that side.
+    var reelForward by remember { mutableStateOf(true) }
+    // The quarter tapped for a conversation, for its badge when it covers more than one.
+    var tappedQuarter by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showingUpload by remember { mutableStateOf(false) }
     // After the lock, an upload is a swap of a player listed out.
     var uploadIsSwap by remember { mutableStateOf(false) }
+    // Which of your cards the upload is for: 1, or the host's 2 or 3.
+    var uploadCard by remember { mutableStateOf(1) }
     var floorGame by remember { mutableStateOf<PicksGame?>(null) }
     var openCard by remember { mutableStateOf<PicksCard?>(null) }
     var showingInvite by remember { mutableStateOf(false) }
@@ -297,7 +318,51 @@ internal fun PicksLandingScreen(
     val night = page?.night
     val readOnly = isRecap || night?.isTonight == false
     val uid = FirebaseAuth.getInstance().currentUser?.uid
-    val myCard = uid?.let { id -> night?.cards?.firstOrNull { it.userID == id && it.slate == slate } }
+    // Following the show is following its account, the page's businessID. The
+    // account itself gets no button.
+    val showAccount = landing.businessID.ifBlank { PicksDash.accountID }
+    val followManager = remember { FollowManager(context) }
+    val followStates by followManager.followingStates.collectAsState()
+    val followLoading by followManager.loadingStates.collectAsState()
+    LaunchedEffect(landing.businessID) { PicksDash.noteAccount(landing.businessID) }
+    LaunchedEffect(showAccount, uid) {
+        if (uid != null && uid != showAccount) followManager.refreshFollowState(showAccount)
+    }
+    // FollowManager flips the pill first and puts it back if the write fails.
+    DisposableEffect(followManager, showAccount) {
+        followManager.onFollowStateChanged = { id, _ -> if (id == showAccount) PicksDash.followChanged() }
+        followManager.onFollowError = { id, _ ->
+            if (id == showAccount) model.message = "Couldn't update Following. Try again."
+        }
+        onDispose {
+            followManager.onFollowStateChanged = null
+            followManager.onFollowError = null
+        }
+    }
+    // Null hides the pill: signed out, the show's own account, or not read yet.
+    val followingShow = if (uid == null || uid == showAccount) null else followStates[showAccount]
+    val toggleFollow: () -> Unit = {
+        if (showAccount !in followLoading) followManager.toggleFollow(showAccount)
+    }
+    // The host can have up to 3 cards on a slate. This is card 1, or the lowest there is.
+    val myCard = uid?.let { id -> night?.cards?.filter { it.userID == id && it.slate == slate }?.minByOrNull { it.cardIndex } }
+
+    val reel = remember(night, slate) { night?.reel(slate).orEmpty() }
+    val reelIndex = reel.indexOfFirst { it.videoID == reelVideoID }.coerceAtLeast(0)
+    val reelItem = reel.getOrNull(reelIndex)
+    // A new slate or night starts at its first video.
+    LaunchedEffect(night?.id, slate) { reelVideoID = null }
+    // Held by ID from then on, so a video added in front can't move it.
+    LaunchedEffect(reelVideoID, reelItem?.videoID) {
+        if (reelVideoID == null) reelVideoID = reelItem?.videoID
+    }
+    fun showReel(index: Int) {
+        val target = reel.getOrNull(index) ?: return
+        if (target.videoID == reelItem?.videoID) return
+        reelForward = index > reelIndex
+        reelVideoID = target.videoID
+        videoPaused = false
+    }
 
     // Sound from here on, so nothing else plays underneath.
     LaunchedEffect(Unit) { pauseFeedPlayback(context) }
@@ -324,7 +389,8 @@ internal fun PicksLandingScreen(
 
     // Opening or leaving a recap starts the night's video and takes over.
     LaunchedEffect(recapID) {
-        playingMoment = null
+        reelVideoID = null
+        tappedQuarter = null
         videoPaused = false
         floorGame = null
         openCard = null
@@ -378,6 +444,28 @@ internal fun PicksLandingScreen(
         }
     }
 
+    /**
+     * A host or co-host answering one of the page's videos. It's an ordinary
+     * stitch, and the server moves it onto the page as the next take.
+     */
+    fun replyTo(videoID: String) {
+        if (readOnly || startingVideo || !AccountStanding.guardPosting()) return
+        startingVideo = true
+        scope.launch {
+            val parent = PicksService.video(videoID)
+            if (parent == null) {
+                model.message = PicksError("").message
+            } else {
+                // The server takes a reply of up to 2:00.
+                PicksRecordingLimit.set(120)
+                PendingEntryHashtag.clear()
+                recorderAsked = true
+                onStitch(parent)
+            }
+            startingVideo = false
+        }
+    }
+
     fun openVideo(videoID: String?) {
         videoID ?: return
         scope.launch { PicksService.video(videoID)?.let(onOpenVideo) }
@@ -409,7 +497,10 @@ internal fun PicksLandingScreen(
                             slate = slate,
                             readOnly = readOnly,
                             myCard = myCard,
-                            playingMoment = playingMoment,
+                            reel = reel,
+                            reelIndex = reelIndex,
+                            reelForward = reelForward,
+                            tappedQuarter = tappedQuarter,
                             videoAllowed = !covered && onScreen,
                             videoPaused = videoPaused,
                             videoMuted = videoMuted,
@@ -417,34 +508,47 @@ internal fun PicksLandingScreen(
                             onToggleMuted = { videoMuted = !videoMuted },
                             onSlate = {
                                 slate = it
-                                playingMoment = null
+                                reelVideoID = null
                                 videoPaused = false
                             },
                             onClose = onDismiss,
                             onHost = { showingInvite = true },
                             onCoHost = { showingCoHostInvite = true },
-                            onMainVideo = { playingMoment = null },
+                            onShowReel = { showReel(it) },
                             onPlayMoment = { moment, quarter ->
-                                // The whole conversation plays, from its first take.
-                                val first = night?.conversation(moment)?.firstOrNull() ?: moment
-                                playingMoment = first to quarter
+                                // The break's conversation, from its first take.
+                                tappedQuarter = moment.conversationKey to quarter
+                                val index = reel.indexOfFirst { it.conversationKey == moment.conversationKey }
+                                if (index >= 0) showReel(index)
                                 videoPaused = false
                             },
-                            onTakeEnded = {
-                                playingMoment?.let { (take, quarter) ->
-                                    val takes = night?.conversation(take).orEmpty()
-                                    val next = takes.getOrNull(takes.indexOfFirst { it.id == take.id } + 1)
-                                    if (next != null) playingMoment = next to quarter
+                            onOpenSlot = run {
+                                val canReply = !readOnly && (page?.isHost == true || page?.isCoHost == true || night?.isHostTonight == true)
+                                // As the stitch button: a fan with a card and no video, before the lock. A co-host after it too.
+                                val canStitchCard = !readOnly && night != null && (!night.isLocked(slate) || page?.isCoHost == true) && !night.isHostTonight &&
+                                    myCard != null && myCard.videoID == null && (night.videoID(slate) != null || night.mainVideoID != null)
+                                val current = reelItem
+                                when {
+                                    current == null -> null
+                                    canReply -> { { replyTo(current.videoID) } }
+                                    canStitchCard -> { { record("card") } }
+                                    else -> null
                                 }
                             },
                             onFloor = { floorGame = it },
-                            onUpload = {
+                            onUpload = { card ->
                                 if (readOnly) return@TonightTab
-                                uploadIsSwap = night?.isLocked(slate) == true
+                                uploadCard = card
+                                // After the lock, an upload to a card you have is a swap. A co-host's
+                                // first card can still go in then.
+                                uploadIsSwap = night?.isLocked(slate) == true &&
+                                    night.cards.any { it.userID == uid && it.slate == slate && it.cardIndex == card }
                                 showingUpload = true
                             },
                             onRecordRole = { record(it) },
-                            onOpenCard = { openCard = it }
+                            onOpenCard = { openCard = it },
+                            followingShow = followingShow,
+                            onToggleFollow = toggleFollow
                         )
                         PicksTab.STITCHES -> StitchesTab(night, onOpen = { openVideo(it.videoID) })
                         PicksTab.RECORD -> RecordTab(model.page) { past ->
@@ -471,6 +575,8 @@ internal fun PicksLandingScreen(
                 isHost = night?.isHostTonight == true,
                 slate = slate,
                 isSwap = uploadIsSwap,
+                card = uploadCard,
+                onlyUnstarted = !uploadIsSwap && night?.isLocked(slate) == true,
                 onDismiss = {
                     showingUpload = false
                     scope.launch { model.refresh() }
@@ -531,7 +637,10 @@ private fun TonightTab(
     /** A recap: nothing here acts on the night. */
     readOnly: Boolean,
     myCard: PicksCard?,
-    playingMoment: Pair<PicksMoment, String>?,
+    reel: List<PicksReelItem>,
+    reelIndex: Int,
+    reelForward: Boolean,
+    tappedQuarter: Pair<String, String>?,
     videoAllowed: Boolean,
     videoPaused: Boolean,
     videoMuted: Boolean,
@@ -541,40 +650,56 @@ private fun TonightTab(
     onClose: () -> Unit,
     onHost: () -> Unit,
     onCoHost: () -> Unit,
-    onMainVideo: () -> Unit,
+    onShowReel: (Int) -> Unit,
     onPlayMoment: (PicksMoment, String) -> Unit,
-    onTakeEnded: () -> Unit,
+    onOpenSlot: (() -> Unit)?,
     onFloor: (PicksGame) -> Unit,
-    onUpload: () -> Unit,
+    /** Takes the card the upload is for: 1, 2 or 3. */
+    onUpload: (Int) -> Unit,
     onRecordRole: (String) -> Unit,
-    onOpenCard: (PicksCard) -> Unit
+    onOpenCard: (PicksCard) -> Unit,
+    /** Null hides the Follow pill. */
+    followingShow: Boolean? = null,
+    onToggleFollow: () -> Unit = {}
 ) {
     val colors = AppTheme.colors
     val night = page?.night
     Column(Modifier.fillMaxWidth()) {
         PicksHero(
-            page, slate, readOnly, playingMoment, videoAllowed, videoPaused, videoMuted,
-            onTogglePaused, onToggleMuted, onClose, onHost, onCoHost, onMainVideo, onTakeEnded
+            page, slate, readOnly, reel, reelIndex, reelForward, tappedQuarter, videoAllowed, videoPaused, videoMuted,
+            onTogglePaused, onToggleMuted, onClose, onHost, onCoHost, onShowReel, onOpenSlot,
+            followingShow, onToggleFollow
         )
         if (night != null && night.hasLateSlate && !night.hidden) SlatePicker(night, slate, onSlate)
         if (night != null && night.games.isNotEmpty()) {
             SectionHeader(if (readOnly) "Games" else "Tonight's games", if (night.games.size > 1) "Swipe for the next game" else null)
-            GameCards(night, playingMoment, onPlayMoment, onFloor)
+            GameCards(night, reel.getOrNull(reelIndex), onPlayMoment, onFloor)
         }
         when {
             night != null && !night.hidden -> {
+                val hostCards = night.hostCards(slate)
                 if (!readOnly) {
-                    PromptBanner(page, night, myCard) { onRecordRole("moment") }
+                    // The host's cards count together.
+                    val myScore = if (night.isHostTonight) night.hostTotal(slate) else myCard
+                    PromptBanner(page, night, myScore, if (night.isHostTonight) hostCards.size else 1) { onRecordRole("moment") }
                     SplitBanner(night)
-                    ActionButton(night, slate, myCard, onUpload, onRecordRole)
-                    SwapButton(night, slate, myCard, onUpload)
+                    ActionButton(night, slate, myCard, page?.isCoHost == true, { onUpload(1) }, onRecordRole)
+                    SwapButton(night, slate, if (night.isHostTonight) hostCards else listOfNotNull(myCard), onUpload)
                 }
-                night.hostCard(slate)?.let { host ->
-                    key(night.id, slate) { HostCardSection(night, slate, host) }
+                hostCards.forEach { host ->
+                    key(night.id, slate, host.cardIndex) { HostCardSection(night, slate, host, hostCards.size) }
+                }
+                if (!readOnly && night.isHostTonight && !night.isLocked(slate) && hostCards.size in 1 until MAX_HOST_CARDS) {
+                    val next = (1..MAX_HOST_CARDS).first { i -> hostCards.none { it.cardIndex == i } }
+                    Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp), contentAlignment = Alignment.Center) {
+                        ArtistMetalButton("ADD ANOTHER CARD") { onUpload(next) }
+                    }
                 }
                 SectionHeader(
                     if (night.isLocked(slate)) "Most picks right" else "Tonight's picks",
-                    if (readOnly || night.status == "final") null else "${night.cards.count { it.slate == slate }} in so far"
+                    // People, not cards: the host's 3 cards are one of them.
+                    if (readOnly || night.status == "final") null
+                    else "${night.cards.filter { it.slate == slate }.distinctBy { it.userID }.size} in so far"
                 )
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -616,7 +741,10 @@ private fun PicksHero(
     page: PicksPage?,
     slate: String,
     readOnly: Boolean,
-    playingMoment: Pair<PicksMoment, String>?,
+    reel: List<PicksReelItem>,
+    reelIndex: Int,
+    reelForward: Boolean,
+    tappedQuarter: Pair<String, String>?,
     videoAllowed: Boolean,
     videoPaused: Boolean,
     videoMuted: Boolean,
@@ -625,34 +753,104 @@ private fun PicksHero(
     onClose: () -> Unit,
     onHost: () -> Unit,
     onCoHost: () -> Unit,
-    onMainVideo: () -> Unit,
-    onTakeEnded: () -> Unit
+    onShow: (Int) -> Unit,
+    /** Null hides the rail's open slot. */
+    onOpenSlot: (() -> Unit)?,
+    /** Null hides the Follow pill. */
+    followingShow: Boolean? = null,
+    onToggleFollow: () -> Unit = {}
 ) {
     val colors = AppTheme.colors
     val night = page?.night
-    val url = (playingMoment?.first?.videoURL ?: night?.videoURL(slate))?.takeIf { it.isNotBlank() }
-    // A take plays through to the next one. The last take, and the main video, loop as before.
-    val takes = playingMoment?.first?.let { take -> night?.conversation(take) ?: listOf(take) }.orEmpty()
-    val takeNumber = playingMoment?.first?.let { take -> takes.indexOfFirst { it.id == take.id } + 1 } ?: 0
-    val loops = playingMoment == null || takeNumber >= takes.size
+    // The slate's video, its replies, then each break's takes. Each plays through
+    // to the next, and the last one loops as before.
+    val item = reel.getOrNull(reelIndex)
+    val loops = reelIndex >= reel.lastIndex
+    val speakerName = item?.let {
+        if (it.moment == null) night?.hostName?.takeIf { n -> n.isNotBlank() } else it.moment.speakerName
+    }
     // A recap has that night's host. Today's host and co-hosts may not have been on it.
     val host = night?.hostName?.takeIf { it.isNotEmpty() }
         ?: if (night?.hostName == null && !readOnly) page?.hostName?.takeIf { it.isNotEmpty() } else null
     val coHosts = if (readOnly) emptyList() else page?.coHosts.orEmpty()
+    val showsRail = item != null && (reel.size > 1 || onOpenSlot != null)
+    // Words stop short of the rail.
+    val railReserve = if (showsRail) 72.dp else 0.dp
 
-    Box(Modifier.fillMaxWidth().height(PICKS_HERO_HEIGHT).clipToBounds().background(picksHeroFallback)) {
-        if (url != null) {
-            // Off the page under the recorder or another video, and with the app away.
-            // Host videos are vertical and a face sits in the top third, so the
-            // video is laid out at full 9:16 and slid up, not centre-cropped.
-            if (videoAllowed) BoxWithConstraints(Modifier.fillMaxSize()) {
-                val videoHeight = maxWidth * (16f / 9f)
-                val shift = ((videoHeight - maxHeight) * PICKS_HERO_FACE_BIAS).coerceAtLeast(0.dp)
-                PicksHeroVideo(
-                    url, videoPaused, videoMuted, loops, onTakeEnded,
-                    Modifier.fillMaxWidth().requiredHeight(videoHeight.coerceAtLeast(maxHeight))
-                        .align(Alignment.TopCenter).offset(y = -shift + (videoHeight.coerceAtLeast(maxHeight) - maxHeight) / 2)
+    // Read when a swipe ends, not when the gesture started.
+    val count by rememberUpdatedState(reel.size)
+    val index by rememberUpdatedState(reelIndex)
+    val show by rememberUpdatedState(onShow)
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(PICKS_HERO_HEIGHT)
+            .clipToBounds()
+            .background(picksHeroFallback)
+            // Horizontal only, so the page still scrolls and the buttons still tap.
+            .pointerInput(Unit) {
+                val threshold = 50.dp.toPx()
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
+                    onDragEnd = {
+                        when {
+                            total <= -threshold && index < count - 1 -> show(index + 1)
+                            total >= threshold && index > 0 -> show(index - 1)
+                        }
+                    },
+                    onHorizontalDrag = { change, amount ->
+                        change.consume()
+                        total += amount
+                    }
                 )
+            }
+            .semantics {
+                if (item != null && reel.size > 1) {
+                    contentDescription = listOfNotNull("Video ${reelIndex + 1} of ${reel.size}", speakerName).joinToString(", ")
+                }
+                customActions = buildList {
+                    if (reelIndex < reel.lastIndex) add(CustomAccessibilityAction("Next video") { onShow(reelIndex + 1); true })
+                    if (reelIndex > 0) add(CustomAccessibilityAction("Previous video") { onShow(reelIndex - 1); true })
+                }
+            }
+    ) {
+        if (item != null) {
+            // Off the page under the recorder or another video, and with the app away.
+            if (videoAllowed) {
+                // One player for the reel. The video sliding out shows its thumbnail.
+                val player = rememberPicksHeroPlayer(item.videoURL, videoPaused, videoMuted, loops) {
+                    if (index < count - 1) show(index + 1)
+                }
+                AnimatedContent(
+                    targetState = item,
+                    contentKey = { it.videoID },
+                    transitionSpec = {
+                        val side = if (reelForward) 1 else -1
+                        slideInHorizontally { it * side } togetherWith slideOutHorizontally { -it * side }
+                    },
+                    label = "picksReel",
+                    modifier = Modifier.fillMaxSize()
+                ) { shown ->
+                    // Host videos are vertical and a face sits in the top third, so the
+                    // video is laid out at full 9:16 and slid up, not centre-cropped.
+                    BoxWithConstraints(Modifier.fillMaxSize().background(picksHeroFallback)) {
+                        val videoHeight = maxWidth * (16f / 9f)
+                        val frameHeight = videoHeight.coerceAtLeast(maxHeight)
+                        val shift = ((videoHeight - maxHeight) * PICKS_HERO_FACE_BIAS).coerceAtLeast(0.dp)
+                        val frame = Modifier.fillMaxWidth().requiredHeight(frameHeight)
+                            .align(Alignment.TopCenter).offset(y = -shift + (frameHeight - maxHeight) / 2)
+                        if (shown.videoID == item.videoID) {
+                            PicksHeroSurface(player, frame)
+                        } else if (shown.thumbnailURL != null) {
+                            AsyncImage(
+                                model = shown.thumbnailURL, contentDescription = null,
+                                contentScale = ContentScale.Crop, modifier = frame
+                            )
+                        }
+                    }
+                }
             }
         } else {
             Text(
@@ -667,10 +865,12 @@ private fun PicksHero(
         }
         Box(
             Modifier.fillMaxSize().background(
+                // Light at the top for the buttons, darker low where the words are.
                 Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.7f),
+                    0f to Color.Black.copy(alpha = 0.45f),
+                    0.22f to Color.Transparent,
                     0.5f to Color.Transparent,
-                    1f to Color.Black.copy(alpha = 0.55f)
+                    1f to Color.Black.copy(alpha = 0.8f)
                 )
             )
         )
@@ -680,7 +880,9 @@ private fun PicksHero(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 PicksBackButton(onClose)
-                Spacer(Modifier.weight(1f))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ReelIndicator(reel.size, reelIndex)
+                }
                 if (!readOnly && page?.isHost == true) {
                     Box(
                         modifier = Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(onClick = onCoHost),
@@ -695,26 +897,40 @@ private fun PicksHero(
                     ) { Text("Host", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                 }
             }
-            Text(
-                when {
-                    host == null -> "By Stitch Social"
-                    coHosts.isEmpty() -> "By Stitch Social · Hosted by $host"
-                    else -> "By Stitch Social · Hosted by $host · with ${coHosts.joinToString { it.name }}"
-                },
-                fontSize = 12.sp, fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                (night?.title ?: "Stitch Picks").uppercase(),
-                fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, color = picksGold
-            )
+            // The face is in the top of the shot, so the words sit in the lower third.
             Spacer(Modifier.weight(1f))
-            playingMoment?.first?.let { take ->
-                val speaker = listOfNotNull(
-                    take.speakerName,
-                    if (takes.size > 1) "Take $takeNumber of ${takes.size}" else null
-                ).joinToString(" · ")
-                if (speaker.isNotEmpty()) {
-                    Text(speaker, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.padding(end = railReserve), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // The main video says who's speaking only once there are replies to it.
+                if (item != null && (item.moment != null || item.takeCount > 1)) {
+                    val speaker = listOfNotNull(
+                        speakerName,
+                        if (item.takeCount > 1) "Take ${item.takeNumber} of ${item.takeCount}" else null
+                    ).joinToString(" · ")
+                    if (speaker.isNotEmpty()) {
+                        Text(speaker, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Text(
+                    when {
+                        host == null -> "By Stitch Social"
+                        coHosts.isEmpty() -> "By Stitch Social · Hosted by $host"
+                        else -> "By Stitch Social · Hosted by $host · with ${coHosts.joinToString { it.name }}"
+                    },
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2
+                )
+                // The title gives way so the pill always fits beside it.
+                Row(
+                    Modifier.padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        (night?.title ?: "Stitch Picks").uppercase(),
+                        fontSize = 26.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold, color = picksGold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    followingShow?.let { PicksFollowPill(it, onToggleFollow) }
                 }
             }
             Row(
@@ -724,7 +940,7 @@ private fun PicksHero(
             ) {
                 // Measured after the buttons, so a long badge wraps and can't squeeze them out.
                 Box(Modifier.weight(1f)) {
-                    heroBadge(night, slate, playingMoment)?.let { badge ->
+                    heroBadge(night, slate, item, tappedQuarter)?.let { badge ->
                         Text(
                             badge,
                             fontSize = 15.sp, fontWeight = FontWeight.Bold,
@@ -735,18 +951,18 @@ private fun PicksHero(
                         )
                     }
                 }
-                if (playingMoment != null) {
+                if (reelIndex > 0) {
                     Box(
                         modifier = Modifier
                             .heightIn(min = 44.dp)
                             .clip(CircleShape)
                             .background(colors.bg)
-                            .clickable(onClick = onMainVideo)
+                            .clickable { onShow(0) }
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center
                     ) { Text("Main video", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                 }
-                if (url != null) {
+                if (item != null) {
                     HeroControl(
                         if (videoPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                         if (videoPaused) "Play" else "Pause",
@@ -760,6 +976,80 @@ private fun PicksHero(
                 }
             }
         }
+        // The reel as a thread, above the pause and mute buttons. A tile plays that
+        // video here, and the open slot records onto the one playing.
+        if (showsRail) {
+            val chain = remember(reel) { reel.map { StitchChainRailLink(it.videoID, it.thumbnailURL) } }
+            StitchChainRail(
+                chain = chain,
+                currentID = item.videoID,
+                onTapLink = { link -> reel.indexOfFirst { it.videoID == link.id }.takeIf { it >= 0 }?.let(onShow) },
+                onTapOpenSlot = onOpenSlot,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 64.dp)
+            )
+        }
+    }
+}
+
+/** Dots for a short reel, the current one wider and brighter, or "3 / 12" for a long one. */
+@Composable
+private fun ReelIndicator(count: Int, index: Int) {
+    if (count <= 1) return
+    // The hero says which video this is, so these stay out of the way of a screen reader.
+    if (count <= 8) {
+        Row(
+            modifier = Modifier.clearAndSetSemantics {},
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(count) { i ->
+                val on = i == index
+                val width by animateDpAsState(if (on) 16.dp else 6.dp, label = "reelDot")
+                Box(
+                    Modifier.size(width, 6.dp).clip(CircleShape)
+                        .background(Color.White.copy(alpha = if (on) 1f else 0.45f))
+                )
+            }
+        }
+    } else {
+        Text(
+            "${index + 1} / $count",
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+            modifier = Modifier
+                .clearAndSetSemantics {}
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+    }
+}
+
+/** Follow the show: a gold outline to follow, a quiet fill with a check once following. */
+@Composable
+private fun PicksFollowPill(following: Boolean, onClick: () -> Unit) {
+    val shape = CircleShape
+    Row(
+        modifier = Modifier
+            .heightIn(min = 30.dp)
+            .clip(shape)
+            .then(
+                if (following) Modifier.background(Color.White.copy(alpha = 0.18f))
+                else Modifier.background(Color.Black.copy(alpha = 0.25f)).border(1.dp, picksGold, shape)
+            )
+            .clickable(onClickLabel = if (following) "Unfollow Stitch Picks" else "Follow Stitch Picks", onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (following) {
+            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+        }
+        Text(
+            if (following) "Following" else "Follow",
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = if (following) Color.White else picksGold,
+            maxLines = 1
+        )
     }
 }
 
@@ -774,35 +1064,27 @@ private fun HeroControl(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
-/**
- * The hero's video on a loop, with sound unless muted. Its own player because the
- * hero can pause and mute, and BirthdayLoopingVideo can't.
- */
 /** Tall enough for a head and shoulders out of a vertical video. */
 private val PICKS_HERO_HEIGHT = 440.dp
 /** How far down a tall video the window sits: 0 is the top, 0.5 the centre. */
 private const val PICKS_HERO_FACE_BIAS = 0.2f
 
+/**
+ * The hero's player, with sound unless muted. One for the whole reel: a new item
+ * swaps what it plays. Its own player because the hero can pause and mute, and
+ * BirthdayLoopingVideo can't.
+ */
 @Composable
-private fun PicksHeroVideo(
+private fun rememberPicksHeroPlayer(
     url: String,
     paused: Boolean,
     muted: Boolean,
     loops: Boolean,
-    onEnded: () -> Unit,
-    modifier: Modifier
-) {
+    onEnded: () -> Unit
+): ExoPlayer {
     val context = LocalContext.current
     val ended by rememberUpdatedState(onEnded)
-    val player = remember(url) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(url))
-            repeatMode = if (loops) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            volume = if (muted) 0f else 1f
-            playWhenReady = !paused
-            prepare()
-        }
-    }
+    val player = remember { ExoPlayer.Builder(context).build() }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -816,11 +1098,20 @@ private fun PicksHeroVideo(
             player.release()
         }
     }
+    LaunchedEffect(player, url) {
+        player.setMediaItem(MediaItem.fromUri(url))
+        player.prepare()
+    }
     SideEffect {
         player.repeatMode = if (loops) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         player.volume = if (muted) 0f else 1f
         player.playWhenReady = !paused
     }
+    return player
+}
+
+@Composable
+private fun PicksHeroSurface(player: ExoPlayer, modifier: Modifier) {
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
@@ -831,6 +1122,7 @@ private fun PicksHeroVideo(
             }
         },
         update = { it.player = player },
+        onRelease = { it.player = null },
         modifier = modifier
     )
 }
@@ -881,23 +1173,28 @@ private fun SlateButton(
     }
 }
 
-private fun heroBadge(night: PicksNight?, slate: String, playingMoment: Pair<PicksMoment, String>?): String? {
-    if (playingMoment != null) {
-        val (moment, quarter) = playingMoment
+private fun heroBadge(night: PicksNight?, slate: String, item: PicksReelItem?, tappedQuarter: Pair<String, String>?): String? {
+    val moment = item?.moment
+    if (moment != null) {
         val right = moment.right ?: return null
         val total = moment.total ?: return null
-        return "$right OF $total AT END OF $quarter"
+        // A reply to the main video isn't at a break.
+        if (moment.isVideoReply) return "$right OF $total RIGHT"
+        val quarter = tappedQuarter?.takeIf { it.first == moment.conversationKey }?.second
+            ?: moment.breaks.firstOrNull()?.quarter
+        return if (quarter.isNullOrEmpty()) "$right OF $total RIGHT" else "$right OF $total AT END OF $quarter"
     }
     night ?: return null
     if (!night.isLocked(slate)) return if (slate == "late") "LOCKS AT LATE TIP" else "LOCKS AT FIRST TIP"
-    val host = night.hostCard(slate) ?: return null
+    // All the host's cards on the slate, together.
+    val host = night.hostTotal(slate) ?: return null
     return if (night.status == "final") "${host.right} OF ${host.total} RIGHT" else "${host.right} OF ${host.total} RIGHT SO FAR"
 }
 
 @Composable
 private fun GameCards(
     night: PicksNight,
-    playingMoment: Pair<PicksMoment, String>?,
+    current: PicksReelItem?,
     onPlayMoment: (PicksMoment, String) -> Unit,
     onFloor: (PicksGame) -> Unit
 ) {
@@ -911,7 +1208,7 @@ private fun GameCards(
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(night.games, key = { it.id }) { game ->
-            GameCard(game, night, playingMoment, onPlayMoment, onFloor, Modifier.width(cardWidth))
+            GameCard(game, night, current, onPlayMoment, onFloor, Modifier.width(cardWidth))
         }
     }
 }
@@ -920,7 +1217,7 @@ private fun GameCards(
 private fun GameCard(
     game: PicksGame,
     night: PicksNight,
-    playingMoment: Pair<PicksMoment, String>?,
+    current: PicksReelItem?,
     onPlayMoment: (PicksMoment, String) -> Unit,
     onFloor: (PicksGame) -> Unit,
     modifier: Modifier
@@ -953,7 +1250,7 @@ private fun GameCard(
         if (hasPicks) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Q1", "Q2", "Q3", "Q4").forEach { quarter ->
-                    QuarterChip(quarter, game, night, playingMoment, onPlayMoment, Modifier.weight(1f))
+                    QuarterChip(quarter, game, night, current, onPlayMoment, Modifier.weight(1f))
                 }
             }
         } else {
@@ -987,14 +1284,17 @@ private fun QuarterChip(
     quarter: String,
     game: PicksGame,
     night: PicksNight,
-    playingMoment: Pair<PicksMoment, String>?,
+    current: PicksReelItem?,
     onPlayMoment: (PicksMoment, String) -> Unit,
     modifier: Modifier
 ) {
     val colors = AppTheme.colors
     val moment = night.moment(game.id, quarter)
     val takes = moment?.let { night.conversation(it).size } ?: 0
-    val isOn = moment != null && playingMoment?.first?.conversationKey == moment.conversationKey && playingMoment.second == quarter
+    // On while the hero plays a take from this break.
+    val isOn = moment != null && current?.moment?.let { take ->
+        take.conversationKey == moment.conversationKey && take.breaks.any { it.gameID == game.id && it.quarter == quarter }
+    } == true
     val tint = when {
         isOn -> picksOnAccent
         moment == null -> colors.textSecondary
@@ -1056,7 +1356,7 @@ private fun SplitBanner(night: PicksNight) {
 }
 
 @Composable
-private fun PromptBanner(page: PicksPage?, night: PicksNight, myCard: PicksCard?, onRecord: () -> Unit) {
+private fun PromptBanner(page: PicksPage?, night: PicksNight, myCard: PicksCard?, cardCount: Int, onRecord: () -> Unit) {
     val isCoHost = page?.isCoHost == true
     val prompt = night.openPrompt
     if ((!night.isHostTonight && !isCoHost) || prompt == null || prompt.breaks.isEmpty()) return
@@ -1089,7 +1389,7 @@ private fun PromptBanner(page: PicksPage?, night: PicksNight, myCard: PicksCard?
             fontSize = 13.sp, color = colors.textSecondary
         )
         myCard?.let {
-            Text("Your ${it.slate} card: ${it.right} of ${it.total} right so far", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("Your ${it.slate} ${if (cardCount > 1) "cards" else "card"}: ${it.right} of ${it.total} right so far", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         when {
             !hasTakes -> {
@@ -1116,20 +1416,34 @@ private fun ActionButton(
     night: PicksNight,
     slate: String,
     myCard: PicksCard?,
+    isCoHost: Boolean,
     onUpload: () -> Unit,
     onRecord: (String) -> Unit
 ) {
     // Picks are locked, but the host's video can still go up.
     val locked = night.isLocked(slate)
     val slateVideoID = night.videoID(slate)
-    if (locked && !(night.isHostTonight && slateVideoID == null)) return
+    // A co-host can still add their one card after the lock, and record its video.
+    val coHostAfterLock = locked && isCoHost && !night.isHostTonight
+    if (coHostAfterLock && myCard?.videoID != null) return
+    if (locked && !(night.isHostTonight && slateVideoID == null) && !coHostAfterLock) return
     val colors = AppTheme.colors
+    if (coHostAfterLock && myCard == null) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ArtistMetalButton("ADD YOUR CARD", onUpload)
+            Text("Only picks in games that haven't started.", fontSize = 12.sp, color = colors.textSecondary)
+        }
+        return
+    }
     Box(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         when {
-            locked ->
+            locked && night.isHostTonight ->
                 ArtistMetalButton("RECORD YOUR VIDEO · UP TO 2:00") { onRecord("main") }
             myCard == null ->
                 ArtistMetalButton(
@@ -1165,17 +1479,26 @@ private fun ActionButton(
  * can swap that pick by uploading the updated sheet.
  */
 @Composable
-private fun SwapButton(night: PicksNight, slate: String, myCard: PicksCard?, onUpload: () -> Unit) {
-    if (!night.isLocked(slate) || myCard == null) return
-    val canSwap = myCard.picks.any { pick ->
-        pick.isListedOut && night.games.firstOrNull { it.id == pick.gameID }?.hasStarted == false
+private fun SwapButton(night: PicksNight, slate: String, myCards: List<PicksCard>, onUpload: (Int) -> Unit) {
+    if (!night.isLocked(slate)) return
+    // The host can have up to 3 cards. Each swap goes to its own card.
+    val eligible = myCards.filter { card ->
+        card.picks.any { pick ->
+            pick.isListedOut && night.games.firstOrNull { it.id == pick.gameID }?.hasStarted == false
+        }
     }
-    if (!canSwap) return
+    if (eligible.isEmpty()) return
     Column(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        ArtistMetalButton("SWAP AN OUT PLAYER", onUpload)
+        if (eligible.size == 1) {
+            ArtistMetalButton("SWAP AN OUT PLAYER") { onUpload(eligible[0].cardIndex) }
+        } else {
+            eligible.forEach { card ->
+                key(card.cardIndex) { ArtistMetalButton("SWAP ON CARD ${card.cardIndex}") { onUpload(card.cardIndex) } }
+            }
+        }
         Text(
             "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started.",
             fontSize = 12.sp, color = AppTheme.colors.textSecondary
@@ -1185,16 +1508,26 @@ private fun SwapButton(night: PicksNight, slate: String, myCard: PicksCard?, onU
 
 private fun picksPrefs(context: Context) = context.getSharedPreferences("stitch_picks", Context.MODE_PRIVATE)
 
-/** The host's main or late card, which folds down to one line. Remembered per night and slate. */
+/** The host's cards per slate. Everyone else has 1. The server holds the same limit. */
+private const val MAX_HOST_CARDS = 3
+
+/**
+ * One of the host's cards, which folds down to one line. Remembered per night,
+ * slate and card. Card 1 keeps the key it had before the host could have more.
+ */
 @Composable
-private fun HostCardSection(night: PicksNight, slate: String, host: PicksCard) {
+private fun HostCardSection(night: PicksNight, slate: String, host: PicksCard, cardCount: Int) {
     val colors = AppTheme.colors
     val context = LocalContext.current
-    val prefKey = "picksCollapsed_${night.id}_$slate"
+    val prefKey = if (host.cardIndex == 1) "picksCollapsed_${night.id}_$slate" else "picksCollapsed_${night.id}_${slate}_${host.cardIndex}"
     var collapsed by remember(prefKey) {
         mutableStateOf(runCatching { picksPrefs(context).getBoolean(prefKey, false) }.getOrDefault(false))
     }
-    val title = if (slate == "late") "Late card" else "Main card"
+    val title = when {
+        cardCount > 1 -> "Card ${host.cardIndex}"
+        slate == "late" -> "Late card"
+        else -> "Main card"
+    }
     val name = night.hostName?.takeIf { it.isNotBlank() } ?: host.username
     val summary = buildString {
         // Before anything settles, "0 of 5 right" reads like a bad night.
@@ -1234,7 +1567,12 @@ private fun HostCardSection(night: PicksNight, slate: String, host: PicksCard) {
         enter = expandVertically() + fadeIn(),
         exit = shrinkVertically() + fadeOut()
     ) {
-        key(host.id) { PicksSlipCard(host, night, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) }
+        key(host.id) {
+            PicksSlipCard(
+                host, night, Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                title = if (cardCount > 1) "${host.username}'s ${host.slate} card ${host.cardIndex}" else null
+            )
+        }
     }
 }
 
@@ -1283,10 +1621,22 @@ private fun CardRow(card: PicksCard, night: PicksNight, onClick: () -> Unit) {
             contentAlignment = Alignment.Center
         ) { Text(card.username.take(2).uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                if (card.isHost) "${card.username}'s ${card.slate} card" else "@${card.username}",
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    if (card.isHost) "${card.username}'s ${card.slate} card" else "@${card.username}",
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)
+                )
+                if (card.isCoHost) {
+                    Text(
+                        "Co-host", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = LandingColors.accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(LandingColors.accent.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
             Text(detail, fontSize = 12.sp, color = colors.textSecondary)
         }
         Text(
@@ -1461,7 +1811,7 @@ private fun InviteAnswer(coHost: Boolean, onClose: () -> Unit, onAnswer: (Boolea
             if (coHost) "You're invited to join the host. Your videos post to the Stitch Picks page with your name on them." else "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them.",
             fontSize = 14.sp
         )
-        if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on one main card with 5 picks or more")
+        if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on up to 3 cards with 5 picks or more between them")
         InviteLine("When a quarter ends", "One moment, up to 1:00, for every game at a break. Skip any you like.")
         if (!coHost) InviteLine("Your main card locks at first tip", "Right and wrong picks both stay on the record")
         InviteLine("In your videos", "No app names, promo codes, screenshots or dollar talk")
@@ -1714,15 +2064,25 @@ private fun PicksField(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, isSwap: Boolean, onDismiss: () -> Unit) {
+private fun PicksUploadSheet(
+    landingID: String,
+    isHost: Boolean,
+    slate: String,
+    isSwap: Boolean,
+    /** 1, or the host's card 2 or 3. */
+    card: Int,
+    /** A co-host's card after the lock: only games that haven't started. */
+    onlyUnstarted: Boolean,
+    onDismiss: () -> Unit
+) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picks by remember { mutableStateOf<List<PicksPick>>(emptyList()) }
     var isWorking by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    // The host's 5-pick minimum is for the card before the lock, not a swap.
-    val canSave = picks.isNotEmpty() && (!isHost || isSwap || picks.size >= 5) && !isWorking
+    // The host's 5-pick minimum is across all their cards, checked by the server when the video starts.
+    val canSave = picks.isNotEmpty() && !isWorking
 
     fun read(uri: Uri) {
         errorText = null
@@ -1747,7 +2107,7 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, 
         isWorking = true
         scope.launch {
             try {
-                PicksService.submit(landingID, slate, picks)
+                PicksService.submit(landingID, slate, picks, card)
                 onDismiss()
             } catch (e: PicksError) {
                 errorText = e.message
@@ -1774,6 +2134,7 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, 
                 when {
                     picks.isNotEmpty() -> "CHECK YOUR PICKS"
                     isSwap -> "UPLOAD YOUR UPDATED SHEET"
+                    card > 1 -> "UPLOAD CARD $card"
                     else -> "UPLOAD YOUR SHEET"
                 },
                 fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.ExtraBold
@@ -1781,6 +2142,8 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, 
             Text(
                 if (isSwap) {
                     "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started."
+                } else if (onlyUnstarted) {
+                    "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. Only picks in games that haven't started."
                 } else {
                     "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
                         if (slate == "late") "This card is for the late games, and locks when the first one tips." else "Your picks lock when the first game tips."
@@ -1788,7 +2151,7 @@ private fun PicksUploadSheet(landingID: String, isHost: Boolean, slate: String, 
                 fontSize = 13.sp, color = colors.textSecondary
             )
             if (isHost && !isSwap) {
-                Text("Your card needs at least 5 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Your cards need at least 5 picks between them before your video.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             ArtistMetalButton(if (picks.isEmpty()) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

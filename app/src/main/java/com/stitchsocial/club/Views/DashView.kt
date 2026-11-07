@@ -42,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,19 +122,27 @@ fun DashView(
     var showingMusic by remember { mutableStateOf(false) }
     // Following from an artist's page should show up here on the way back.
     val pageUp = com.stitchsocial.club.landing.LandingPresenter.screen.value != null
-    LaunchedEffect(userID, pageUp) {
+    // Following or unfollowing Stitch Picks reads the list again.
+    val picksFollowChanges by com.stitchsocial.club.landing.PicksDash.followChanges.collectAsState()
+    // Whether this user follows the Stitch Picks account, from the same list as the artists.
+    var followsPicks by remember(userID) { mutableStateOf(false) }
+    LaunchedEffect(userID, pageUp, picksFollowChanges) {
         if (pageUp) return@LaunchedEffect
-        val pages = com.stitchsocial.club.landing.LandingService.artistPages()
         val following = UserService(context).getFollowingIDs(userID).toSet()
+        followsPicks = com.stitchsocial.club.landing.PicksDash.accountID in following
+        val pages = com.stitchsocial.club.landing.LandingService.artistPages()
         val followed = pages.filter { it.businessID in following }
         followsArtists = followed.isNotEmpty()
         artists = followed.ifEmpty { pages.take(10) }
     }
-    // Tonight on Stitch Picks, for the cover. Read again each time Dash comes back.
-    val isPicksAccount = userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID
+    // Tonight on Stitch Picks, for the cover: James Fortune's account and anyone who
+    // follows the show, never a teen. Read again each time Dash comes back.
+    val isPicksAccount = !com.stitchsocial.club.services.TeenSafety.viewerIsTeen && (
+        userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID || followsPicks
+    )
     var picksPage by remember { mutableStateOf(com.stitchsocial.club.landing.PicksDash.last) }
     var picksFailed by remember { mutableStateOf(false) }
-    LaunchedEffect(userID, pageUp) {
+    LaunchedEffect(userID, pageUp, isPicksAccount) {
         if (!isPicksAccount || pageUp) return@LaunchedEffect
         val loaded = com.stitchsocial.club.landing.PicksDash.load()
         ensureActive()
@@ -299,8 +309,8 @@ fun DashView(
                 )
             }
 
-            // Stitch Picks, for James Fortune's account only. It works while the page
-            // is paused, which is the only way in besides its link.
+            // Stitch Picks, for James Fortune's account and the show's followers. For
+            // James it works while the page is paused, the only way in besides its link.
             if (isPicksAccount) {
                 DashPicksCover(
                     page = picksPage,
@@ -1283,8 +1293,8 @@ private fun dashPlaceholderTint(name: String): Color {
 }
 
 /**
- * Stitch Picks on Dash: tonight's video still, the night, and how it's going.
- * With nothing read it's still a way in, on the page's own colors.
+ * Stitch Picks on Dash: the logo, the night, and how it's going. The logo is the
+ * cover; a video still here caught whatever the middle of the host's shot was.
  */
 @Composable
 private fun DashPicksCover(
@@ -1293,7 +1303,6 @@ private fun DashPicksCover(
     modifier: Modifier = Modifier
 ) {
     val night = page?.night
-    val thumb = if (failed) null else night?.mainVideoThumb ?: page?.recentNights?.firstNotNullOfOrNull { it.thumb }
     val title = when {
         failed || page == null -> "Open tonight's slate"
         night == null -> "Stitch Picks"
@@ -1302,12 +1311,12 @@ private fun DashPicksCover(
     val status = if (failed || page == null) null else dashPicksStatus(night)
     val record = page?.takeIf { !failed && it.recordTotal > 0 }?.let { "${it.recordRight} of ${it.recordTotal} right" }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(170.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(com.stitchsocial.club.landing.picksCoverGradient)
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(16.dp))
+            .background(Color(0xFF10151C))
             .clickable {
                 com.stitchsocial.club.landing.LandingPresenter.open(
                     com.stitchsocial.club.landing.LandingPresenter.Screen.Guest(
@@ -1318,80 +1327,46 @@ private fun DashPicksCover(
                     )
                 )
             }
+            .semantics(mergeDescendants = true) { contentDescription = "Stitch Picks. $title" }
     ) {
-        if (thumb != null) {
-            AsyncImage(
-                model = thumb,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.35f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.8f)
-                    )
-                )
+        Image(
+            painter = painterResource(com.stitchsocial.club.R.drawable.stitch_picks_cover),
+            contentDescription = null,
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier.fillMaxWidth()
         )
-        record?.let {
-            Text(
-                it,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            )
-        }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                "STITCH PICKS",
-                color = Color(0xFFE8C872),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.2.sp
-            )
-            Text(
-                title,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            status?.let {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                status?.let {
+                    Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            record?.let {
                 Text(
                     it,
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    color = Color(0xFFE8C872),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(horizontal = 9.dp, vertical = 5.dp)
                 )
             }
+            Text("›", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
-/** The cover's status line, from the host's main card once it's going. */
+/** The cover's status line, from the host's main-slate cards together once they're going. */
 private fun dashPicksStatus(night: com.stitchsocial.club.landing.PicksNight?): String {
     night ?: return "No games today"
-    val host = night.hostCard("main")
+    val host = night.hostTotal("main")
     return when (night.status) {
         "live" -> host?.let { "LIVE · ${it.right} of ${it.total} right" } ?: "LIVE"
         "final" -> host?.let { "Final · ${it.right} of ${it.total} right" } ?: "Final"

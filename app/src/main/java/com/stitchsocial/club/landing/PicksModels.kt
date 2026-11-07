@@ -164,7 +164,11 @@ data class PicksCard(
     val open: Int,
     val total: Int,
     val picks: List<PicksPick>,
-    val swaps: List<Swap> = emptyList()
+    val swaps: List<Swap> = emptyList(),
+    /** 1 to 3. The host can have up to 3 cards on a slate, everyone else 1. */
+    val cardIndex: Int = 1,
+    /** A co-host's card. They can still add it after the lock, with games that haven't started. */
+    val isCoHost: Boolean = false
 ) {
     /** A player listed out, swapped after the lock. [inPlayer] is null when nothing replaced them. */
     data class Swap(val out: String, val outPick: String?, val inPlayer: String?, val inPick: String?) {
@@ -182,6 +186,8 @@ data class PicksCard(
             slate = if (raw["slate"] == "late") "late" else "main",
             username = raw["username"] as? String ?: "",
             isHost = raw["isHost"] as? Boolean ?: false,
+            isCoHost = raw["isCoHost"] as? Boolean ?: false,
+            cardIndex = raw["cardIndex"].intOrNull()?.coerceIn(1, 3) ?: 1,
             videoID = raw["videoID"] as? String,
             right = raw["right"].int(),
             wrong = raw["wrong"].int(),
@@ -210,10 +216,17 @@ data class PicksMoment(
     val hostID: String? = null,
     val speakerName: String? = null,
     /** Takes posted at the same break share it. Older moments don't have one. */
-    val promptID: String? = null
+    val promptID: String? = null,
+    val thumbnailURL: String? = null
 ) {
     /** Which conversation this take is part of. An old moment is its own. */
     val conversationKey: String get() = promptID ?: "video:$id"
+
+    /**
+     * A host's reply to one of the page's videos, not a break take. Its promptID
+     * is "video_" and the video it answers, and its breaks are empty.
+     */
+    val isVideoReply: Boolean get() = promptID?.startsWith(VIDEO_REPLY_PREFIX) == true
 
     data class Break(val gameID: String, val quarter: String, val game: String) {
         companion object {
@@ -234,6 +247,8 @@ data class PicksMoment(
         }
 
     companion object {
+        const val VIDEO_REPLY_PREFIX = "video_"
+
         fun from(raw: Map<*, *>): PicksMoment {
             val snapshot = raw["snapshot"] as? Map<*, *>
             return PicksMoment(
@@ -245,7 +260,8 @@ data class PicksMoment(
                 total = snapshot?.get("total").intOrNull(),
                 hostID = raw["hostID"] as? String,
                 speakerName = (raw["speakerName"] as? String)?.takeIf { it.isNotBlank() },
-                promptID = (raw["promptID"] as? Any)?.toString()?.takeIf { it.isNotBlank() }
+                promptID = (raw["promptID"] as? Any)?.toString()?.takeIf { it.isNotBlank() },
+                thumbnailURL = (raw["thumbnailURL"] as? String)?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -295,7 +311,70 @@ data class PicksNight(
     fun isLocked(slate: String): Boolean = if (slate == "late") lateLocked else locked
     fun videoID(slate: String): String? = if (slate == "late") lateVideoID else mainVideoID
     fun videoURL(slate: String): String? = if (slate == "late") lateVideoURL ?: mainVideoURL else mainVideoURL
-    fun hostCard(slate: String): PicksCard? = cards.firstOrNull { it.isHost && it.slate == slate }
+    /** The host's cards on [slate], card 1 first. */
+    fun hostCards(slate: String): List<PicksCard> =
+        cards.filter { it.isHost && it.slate == slate }.sortedBy { it.cardIndex }
+
+    /**
+     * The host's score on [slate]: every one of their cards on it added together,
+     * picks and all. Null with no host card. Use this wherever the host's card is a score.
+     */
+    fun hostTotal(slate: String): PicksCard? {
+        val list = hostCards(slate)
+        val first = list.firstOrNull() ?: return null
+        if (list.size == 1) return first
+        return first.copy(
+            right = list.sumOf { it.right },
+            wrong = list.sumOf { it.wrong },
+            open = list.sumOf { it.open },
+            total = list.sumOf { it.total },
+            picks = list.flatMap { it.picks },
+            swaps = list.flatMap { it.swaps }
+        )
+    }
+
+    /** The video the hero plays for [slate]: the late one, or the main one when the late slate has none. */
+    fun heroVideoID(slate: String): String? = if (slate == "late" && lateVideoURL != null) lateVideoID else mainVideoID
+
+    /**
+     * The hosts' replies to [slate]'s video, oldest first. They play after it as
+     * one conversation, the video being take 1.
+     */
+    fun videoReplies(slate: String): List<PicksMoment> =
+        heroVideoID(slate)?.let { id -> moments.filter { it.promptID == PicksMoment.VIDEO_REPLY_PREFIX + id } }.orEmpty()
+
+    /**
+     * What the hero plays for [slate], in order: the slate's video and the hosts'
+     * replies to it, then each break's conversation, oldest first. A recap plays
+     * the same way.
+     */
+    fun reel(slate: String): List<PicksReelItem> {
+        val items = mutableListOf<PicksReelItem>()
+        val heroID = heroVideoID(slate)
+        val heroURL = videoURL(slate)?.takeIf { it.isNotBlank() }
+        val replies = videoReplies(slate).filter { it.videoURL.isNotBlank() }
+        if (heroID != null) {
+            val heroKey = PicksMoment.VIDEO_REPLY_PREFIX + heroID
+            val count = replies.size + if (heroURL != null) 1 else 0
+            if (heroURL != null) {
+                // The late video has no thumbnail of its own on the night.
+                val thumb = if (heroID == mainVideoID) mainVideoThumb else null
+                items += PicksReelItem(heroID, heroURL, thumb, null, heroKey, 1, count)
+            }
+            replies.forEachIndexed { i, reply ->
+                items += PicksReelItem(reply.id, reply.videoURL, reply.thumbnailURL, reply, heroKey, i + 1 + (count - replies.size), count)
+            }
+        }
+        // groupBy keeps the order each conversation first appears in.
+        moments.filter { !it.isVideoReply && it.videoURL.isNotBlank() }
+            .groupBy { it.conversationKey }
+            .forEach { (key, takes) ->
+                takes.forEachIndexed { i, take ->
+                    items += PicksReelItem(take.id, take.videoURL, take.thumbnailURL, take, key, i + 1, takes.size)
+                }
+            }
+        return items.distinctBy { it.videoID }
+    }
 
     fun moment(gameID: String, quarter: String): PicksMoment? =
         moments.firstOrNull { m -> m.breaks.any { it.gameID == gameID && it.quarter == quarter } }
@@ -343,6 +422,21 @@ data class PicksNight(
         )
     }
 }
+
+/**
+ * One video in the hero's reel. [moment] is null for the slate's own video (the
+ * main video, or the late one).
+ */
+data class PicksReelItem(
+    val videoID: String,
+    val videoURL: String,
+    val thumbnailURL: String?,
+    val moment: PicksMoment?,
+    /** The conversation it's in: the slate video's, or a break's. */
+    val conversationKey: String,
+    val takeNumber: Int,
+    val takeCount: Int
+)
 
 data class PicksPastNight(
     val id: String,
@@ -447,7 +541,8 @@ class PicksError(val code: String) : Exception(code) {
             code == "outs_unavailable" -> "Couldn't check who's out right now. Try again in a minute."
             code == "wrong_app" -> "Only PrizePicks and Underdog sheets work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
-            code == "host_needs_five_picks" -> "The main card needs at least 5 picks."
+            code == "host_needs_five_picks" -> "Your cards need at least 5 picks between them before your video."
+            code == "card_not_allowed" -> "You can have up to 3 cards a night."
             code == "no_main_video_yet" -> "The host hasn't posted tonight's video yet."
             code == "add_picks_first" -> "Add your picks first."
             code == "no_break_right_now" -> "That break has passed. The next prompt comes when a game reaches a break."
@@ -458,6 +553,7 @@ class PicksError(val code: String) : Exception(code) {
             code == "not_for_teens" -> "Stitch Picks isn't available on this account."
             code == "too_many_reads" -> "That's enough uploads for today. Try again tomorrow."
             code.endsWith("not_in_late_slate") -> "A late card can only have picks from the late games."
+            code.startsWith("pick_") && code.endsWith("_game_started") -> "That pick's game has already started."
             code.startsWith("pick_") -> "One of your picks needs fixing."
             else -> "Something went wrong. Please try again."
         }
@@ -492,8 +588,9 @@ object PicksService {
         call("picks_readSheet", mapOf("landingID" to landingID, "imageBase64" to jpegBase64))["picks"]
             .maps().map(PicksPick::from)
 
-    suspend fun submit(landingID: String, slate: String, picks: List<PicksPick>) {
-        call("picks_submitCard", mapOf("landingID" to landingID, "slate" to slate, "picks" to picks.map { it.payload }))
+    /** [card] is 1, 2 or 3. Only the host has more than card 1. A swap after the lock names its card too. */
+    suspend fun submit(landingID: String, slate: String, picks: List<PicksPick>, card: Int = 1) {
+        call("picks_submitCard", mapOf("landingID" to landingID, "slate" to slate, "picks" to picks.map { it.payload }, "card" to card))
     }
 
     /**
@@ -542,7 +639,28 @@ object PicksService {
 object PicksDash {
     const val SLUG = "stitch-picks"
 
+    /** The @stitchpicks account, the page's businessID. Used until the page has been read. */
+    const val ACCOUNT_UID_FALLBACK = "cKz55jkSZaYP2R1yc7lbuJ8luPM2"
+
     private var landingID: String? = null
+
+    /** The show's account, from the resolved page when there is one. */
+    @Volatile
+    var accountID: String = ACCOUNT_UID_FALLBACK
+        private set
+
+    /** The page's own businessID wins over the fallback. */
+    fun noteAccount(businessID: String?) {
+        if (!businessID.isNullOrBlank()) accountID = businessID
+    }
+
+    /**
+     * Bumped when the viewer follows or unfollows the show, so Dash reads its
+     * following list again and shows or drops the cover.
+     */
+    val followChanges = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    fun followChanged() { followChanges.value += 1 }
 
     @Volatile
     var last: PicksPage? = null
@@ -550,7 +668,7 @@ object PicksDash {
 
     /** Null if the page couldn't be read. */
     suspend fun load(): PicksPage? = runCatching {
-        val id = landingID ?: LandingService.resolve(SLUG)?.landingID?.also { landingID = it }
+        val id = landingID ?: LandingService.resolve(SLUG)?.also { noteAccount(it.businessID) }?.landingID?.also { landingID = it }
         id?.let { PicksService.page(it) }?.also { last = it }
     }.getOrNull()
 }

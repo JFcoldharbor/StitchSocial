@@ -343,7 +343,9 @@ object LandingService {
             .get().await()
             .documents
             .mapNotNull { Landing.from(it.data, it.id) }
-            .firstOrNull { it.isLive && it.slug.isNotBlank() }
+            // A paused Stitch Picks page still opens from its profile: the show is
+            // followed and shared while it's being tried out. Other pages need to be live.
+            .firstOrNull { (it.isLive || (it.isPicks && it.status == "paused")) && it.slug.isNotBlank() }
     }.getOrNull()
 
     /**
