@@ -47,6 +47,24 @@
         tools:targetApi="31">
 
         <!--
+            targetSdk 36 makes Android IGNORE android:screenOrientation="portrait"
+            and resizability on any display at least sw600dp — tablets and unfolded
+            foldables. Nothing in this app is adaptive: the feed is a full-bleed
+            9:16 deck, the recorder is a portrait camera surface, and Agora live
+            streaming assumes a portrait channel. Left alone, the 36 bump would
+            hand all three a landscape window.
+
+            This property restores the pre-36 behaviour (compatibility mode). It is
+            a TEMPORARY reprieve: the framework drops the opt-out at API 37, after
+            which the restrictions are always ignored on those displays. Doing the
+            adaptive-layout work is the real fix, not this line.
+            https://developer.android.com/about/versions/16/behavior-changes-16
+        -->
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
+
+        <!--
             AdMob APPLICATION ID for the ANDROID app (Stitch Social Club). This
             is NOT the iOS app id — they are separate AdMob apps and using the
             wrong one crashes the SDK on init with a clear-but-easily-missed

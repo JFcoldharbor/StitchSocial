@@ -38,14 +38,20 @@ val canSign = resolvedKeystore?.exists() == true
 
 android {
     namespace = "com.stitchsocial.club"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
 
         applicationId = "com.stitchsocial.club"
         minSdk = 28
-        targetSdk = 35
-        versionCode = 32
+        // API 36 (Android 16) is a Play upload floor as of this release.
+        // Edge-to-edge enforcement, the headline 36 change, is a no-op here:
+        // MainActivity already calls enableEdgeToEdge() and then hides the system
+        // bars outright, so the app was fully immersive under 35 already. What 36
+        // DOES change is orientation — see the resizability property in the
+        // manifest.
+        targetSdk = 36
+        versionCode = 41
         versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -151,8 +157,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.0.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
-    // Google Play Billing — HypeCoin in-app purchases
-    implementation("com.android.billingclient:billing-ktx:7.0.0")
+    // Google Play Billing — HypeCoin in-app purchases.
+    // 8.0.0 is a Play upload floor as of this release.
+    implementation("com.android.billingclient:billing-ktx:8.0.0")
 
     implementation("io.coil-kt:coil-compose:2.5.0")
 
