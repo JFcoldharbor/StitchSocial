@@ -378,10 +378,14 @@ class DiscoveryViewModel(
             creatorID = data["creatorID"] as? String ?: "",
             creatorName = data["creatorName"] as? String ?: "",
             hashtags = @Suppress("UNCHECKED_CAST") (data["hashtags"] as? List<String>) ?: emptyList(),
-            taggedUserIDs = emptyList(),
+            // Both were hardcoded — empty and null — while iOS parses them in the
+            // matching decoder (DiscoveryService.createThreadFromDocument). A card
+            // decoded here therefore carried no tags and no parent link, so any
+            // model-level check for either was dead on the Discovery feed.
+            taggedUserIDs = (data["taggedUserIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
             createdAt = (data["createdAt"] as? Timestamp)?.toDate() ?: java.util.Date(),
             threadID = data["threadID"] as? String,
-            replyToVideoID = null,
+            replyToVideoID = data["replyToVideoID"] as? String,
             conversationDepth = (data["conversationDepth"] as? Long)?.toInt() ?: 0,
             viewCount = (data["viewCount"] as? Long)?.toInt() ?: 0,
             hypeCount = hype,
@@ -412,6 +416,19 @@ class DiscoveryViewModel(
             segmentNumber = (data["segmentNumber"] as? Long)?.toInt(),
             segmentTitle = data["segmentTitle"] as? String,
             isCollectionSegment = data["isCollectionSegment"] as? Boolean ?: false,
+            replyTimestamp = (data["replyTimestamp"] as? Number)?.toDouble(),
+            // iOS sets all four of these on the way out of the same decoder.
+            // primaryCategory is the one that bites: it is the key rankByAffinity
+            // scores on, so leaving it null made every Discovery card look like an
+            // uncategorised video and flattened affinity ranking to a no-op.
+            primaryCategory = data["primaryCategory"] as? String,
+            boostCoins = (data["boostCoins"] as? Number)?.toInt() ?: 0,
+            boostExpiresAt = (data["boostExpiresAt"] as? Timestamp)?.toDate(),
+            freeBoostExpiresAt = (data["freeBoostExpiresAt"] as? Timestamp)?.toDate(),
+            // The feed builder above already gates on this, so dropping it here
+            // changed nothing visible — but it left the model blind to moderation
+            // state for anything downstream that asks the video instead of the doc.
+            publicVisibility = data["publicVisibility"] as? String,
             eventID = data["eventId"] as? String,
             isEventPromo = data["isEventPromo"] as? Boolean ?: false,
             isEventRecap = data["isEventRecap"] as? Boolean ?: false,
