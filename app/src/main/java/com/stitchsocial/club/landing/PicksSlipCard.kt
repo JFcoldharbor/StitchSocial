@@ -132,8 +132,10 @@ internal fun PicksSlipCard(card: PicksCard, night: PicksNight, modifier: Modifie
     val groups = slipGroups(card, night)
     val isLive = groups.any { it.game?.state == "live" } && card.open > 0
     val shape = RoundedCornerShape(22.dp)
+    val context = LocalContext.current
+    val locksAt = if (card.slate == "late") night.lateLocksAt else night.locksAt
     val summary = when {
-        !night.isLocked(card.slate) -> "${card.picks.size} picks · Locks at ${if (card.slate == "late") "late" else "first"} tip"
+        !night.isLocked(card.slate) -> "${card.picks.size} picks · Locks ${locksAt?.let { android.text.format.DateFormat.getTimeFormat(context).format(it) } ?: "after tip"}"
         card.open > 0 -> "${card.right} right · ${card.wrong} wrong · ${card.open} to go"
         else -> "${card.right} right · ${card.wrong} wrong"
     }

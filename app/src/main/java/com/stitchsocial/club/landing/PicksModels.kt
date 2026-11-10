@@ -286,6 +286,9 @@ data class PicksNight(
     /** Set when the night has late games as well as early ones. */
     val lateTipAt: Date?,
     val lateLocked: Boolean,
+    /** Cards lock 10 minutes after their slate's first tip. */
+    val locksAt: Date,
+    val lateLocksAt: Date?,
     val lateVideoID: String?,
     val lateVideoURL: String?,
     val games: List<PicksGame>,
@@ -400,6 +403,9 @@ data class PicksNight(
             mainVideoThumb = (raw["mainVideoThumb"] as? String)?.takeIf { it.isNotBlank() },
             lateTipAt = raw["lateTipAt"].dateOrNull(),
             lateLocked = raw["lateLocked"] as? Boolean ?: false,
+            // Older servers locked at the tip itself and didn't send these.
+            locksAt = raw["locksAt"].dateOrNull() ?: raw["firstTipAt"].dateOrNull() ?: Date(0),
+            lateLocksAt = raw["lateLocksAt"].dateOrNull() ?: raw["lateTipAt"].dateOrNull(),
             lateVideoID = raw["lateVideoID"] as? String,
             lateVideoURL = raw["lateVideoURL"] as? String,
             games = raw["games"].maps().map(PicksGame::from),
@@ -541,7 +547,8 @@ class PicksError(val code: String) : Exception(code) {
             code == "outs_unavailable" -> "Couldn't check who's out right now. Try again in a minute."
             code == "wrong_app" -> "Only PrizePicks and Underdog sheets work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
-            code == "host_needs_five_picks" -> "Your cards need at least 5 picks between them before your video."
+            code == "host_needs_picks" || code == "host_needs_five_picks" -> "Add a card of at least 2 picks before your video."
+            code == "picks_too_few" -> "A card needs at least 2 picks."
             code == "card_not_allowed" -> "You can have up to 3 cards a night."
             code == "no_main_video_yet" -> "The host hasn't posted tonight's video yet."
             code == "add_picks_first" -> "Add your picks first."

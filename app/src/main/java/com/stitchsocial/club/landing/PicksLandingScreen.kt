@@ -1133,8 +1133,8 @@ private fun SlatePicker(night: PicksNight, slate: String, onSlate: (String) -> U
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        SlateButton("Main slate", night.locked, null, slate == "main", Modifier.weight(1f)) { onSlate("main") }
-        SlateButton("Late slate", night.lateLocked, night.lateTipAt, slate == "late", Modifier.weight(1f)) { onSlate("late") }
+        SlateButton("Main slate", night.locked, night.locksAt, slate == "main", Modifier.weight(1f)) { onSlate("main") }
+        SlateButton("Late slate", night.lateLocked, night.lateLocksAt, slate == "late", Modifier.weight(1f)) { onSlate("late") }
     }
 }
 
@@ -1166,7 +1166,7 @@ private fun SlateButton(
                 locked -> "Locked"
                 // The phone's own 12 or 24 hour setting.
                 tip != null -> "Locks ${DateFormat.getTimeFormat(context).format(tip)}"
-                else -> "Locks at first tip"
+                else -> "Locks 10 min after first tip"
             },
             fontSize = 11.sp, color = tint
         )
@@ -1811,9 +1811,9 @@ private fun InviteAnswer(coHost: Boolean, onClose: () -> Unit, onAnswer: (Boolea
             if (coHost) "You're invited to join the host. Your videos post to the Stitch Picks page with your name on them." else "Stitch Picks invited you to host. Your videos post to the Stitch Picks page with your name on them.",
             fontSize = 14.sp
         )
-        if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on up to 3 cards with 5 picks or more between them")
+        if (!coHost) InviteLine("Before first tip", "One video, up to 2:00, on up to 3 cards of 2 picks or more")
         InviteLine("When a quarter ends", "One moment, up to 1:00, for every game at a break. Skip any you like.")
-        if (!coHost) InviteLine("Your main card locks at first tip", "Right and wrong picks both stay on the record")
+        if (!coHost) InviteLine("Your main card locks 10 minutes after first tip", "Right and wrong picks both stay on the record")
         InviteLine("In your videos", "No app names, promo codes, screenshots or dollar talk")
         ArtistMetalButton("ACCEPT") { onAnswer(true) }
         Box(
@@ -2146,12 +2146,12 @@ private fun PicksUploadSheet(
                     "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. Only picks in games that haven't started."
                 } else {
                     "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
-                        if (slate == "late") "This card is for the late games, and locks when the first one tips." else "Your picks lock when the first game tips."
+                        if (slate == "late") "This card is for the late games, and locks 10 minutes after the first one tips." else "Your picks lock 10 minutes after the first game tips."
                 },
                 fontSize = 13.sp, color = colors.textSecondary
             )
             if (isHost && !isSwap) {
-                Text("Your cards need at least 5 picks between them before your video.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Each card needs at least 2 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             ArtistMetalButton(if (picks.isEmpty()) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
