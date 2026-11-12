@@ -49,6 +49,9 @@ fun VideoReviewView(
     initialState: VideoEditState,
     onContinueToThread: (VideoEditState) -> Unit,
     onCancel: () -> Unit,
+    /** Record this take again with the same camera. Null when the video didn't
+     *  come from the camera (a gallery pick, a draft, a reaction). */
+    onRetake: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -63,6 +66,9 @@ fun VideoReviewView(
     var isPlaying by remember { mutableStateOf(true) }
     var showingExportError by remember { mutableStateOf(false) }
     var exportError by remember { mutableStateOf<String?>(null) }
+    var showingRetakeDialog by remember { mutableStateOf(false) }
+    /** The creator tapped Save, so this take is theirs to keep in Drafts. */
+    var savedByUser by remember { mutableStateOf(false) }
 
     // Video player
     val exoPlayer = remember {
@@ -112,6 +118,43 @@ fun VideoReviewView(
     }
     androidx.activity.compose.BackHandler(enabled = true) { autoSaveAndExit() }
 
+    // Retake: this take goes, unless the creator saved it to Drafts. The
+    // 30-second autosave may have made it a draft without them asking; that
+    // copy goes too, along with the raw recording in the cache.
+    val retake: () -> Unit = {
+        val keep = savedByUser
+        val draftId = editState.draftId
+        val rawFile = initialState.videoUri.path?.let { java.io.File(it) }
+        coroutineScope.launch {
+            if (!keep) {
+                LocalDraftManager.getInstance(context).deleteDraft(draftId)
+                if (rawFile != null && rawFile.absolutePath.startsWith(context.cacheDir.absolutePath)) {
+                    rawFile.delete()
+                }
+            }
+            onRetake?.invoke()
+        }
+    }
+
+    if (showingRetakeDialog) {
+        AlertDialog(
+            onDismissRequest = { showingRetakeDialog = false },
+            title = { Text("Record it again?") },
+            text = {
+                Text(
+                    if (savedByUser) "This take stays in your Drafts."
+                    else "This take will be deleted. To keep it, tap Save first."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showingRetakeDialog = false; retake() }) { Text("Retake") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showingRetakeDialog = false }) { Text("Keep Editing") }
+            }
+        )
+    }
+
     // Cleanup
     DisposableEffect(Unit) {
         onDispose {
@@ -137,7 +180,12 @@ fun VideoReviewView(
         // ── Top bar: cancel left, save right ───────────────────────
         TopToolbar(
             onClose = autoSaveAndExit,
+            onRetake = if (onRetake != null) ({
+                exoPlayer.pause(); isPlaying = false
+                showingRetakeDialog = true
+            }) else null,
             onSave = {
+                savedByUser = true
                 coroutineScope.launch {
                     editState = LocalDraftManager.getInstance(context).persistDraft(editState)
                 }
@@ -276,6 +324,7 @@ private fun VideoPreviewLayer(
 @Composable
 private fun TopToolbar(
     onClose: () -> Unit,
+    onRetake: (() -> Unit)?,
     onSave: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -286,19 +335,43 @@ private fun TopToolbar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Close button
-        IconButton(
-            onClick = onClose,
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Close",
-                tint = Color.White
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Close button
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.5f))
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Close",
+                    tint = Color.White
+                )
+            }
+            // Back to the camera to record this take again.
+            if (onRetake != null) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Black.copy(alpha = 0.5f),
+                    modifier = Modifier.clickable { onRetake() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Videocam,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(text = "Retake", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
 
         Text(

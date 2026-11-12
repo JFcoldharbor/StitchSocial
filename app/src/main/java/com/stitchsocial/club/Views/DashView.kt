@@ -135,11 +135,10 @@ fun DashView(
         followsArtists = followed.isNotEmpty()
         artists = followed.ifEmpty { pages.take(10) }
     }
-    // Tonight on Stitch Picks, for the cover: James Fortune's account and anyone who
-    // follows the show, never a teen. Read again each time Dash comes back.
-    val isPicksAccount = !com.stitchsocial.club.services.TeenSafety.viewerIsTeen && (
-        userID == com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID || followsPicks
-    )
+    // Tonight on Stitch Picks, for the cover: everyone but teens. Anyone who doesn't
+    // follow the show yet sees it as an invite. Read again each time Dash comes back.
+    val isPicksAccount = !com.stitchsocial.club.services.TeenSafety.viewerIsTeen
+    val picksInvite = !followsPicks && userID != com.stitchsocial.club.foundation.SpecialUsersConfig.FOUNDER_UID
     var picksPage by remember { mutableStateOf(com.stitchsocial.club.landing.PicksDash.last) }
     var picksFailed by remember { mutableStateOf(false) }
     LaunchedEffect(userID, pageUp, isPicksAccount) {
@@ -315,6 +314,7 @@ fun DashView(
                 DashPicksCover(
                     page = picksPage,
                     failed = picksFailed,
+                    invited = picksInvite,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
@@ -1300,6 +1300,7 @@ private fun dashPlaceholderTint(name: String): Color {
 private fun DashPicksCover(
     page: com.stitchsocial.club.landing.PicksPage?,
     failed: Boolean,
+    invited: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val night = page?.night
@@ -1327,14 +1328,33 @@ private fun DashPicksCover(
                     )
                 )
             }
-            .semantics(mergeDescendants = true) { contentDescription = "Stitch Picks. $title" }
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (invited) "Stitch Picks. You're invited. $title" else "Stitch Picks. $title"
+            }
     ) {
-        Image(
-            painter = painterResource(com.stitchsocial.club.R.drawable.stitch_picks_cover),
-            contentDescription = null,
-            contentScale = ContentScale.FillWidth,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Box {
+            Image(
+                painter = painterResource(com.stitchsocial.club.R.drawable.stitch_picks_cover),
+                contentDescription = null,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth()
+            )
+            // Not following the show yet: the cover carries an invite.
+            if (invited) {
+                Text(
+                    "✉ YOU'RE INVITED",
+                    color = Color(0xFF1A1206),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier
+                        .padding(10.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE8C872))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,

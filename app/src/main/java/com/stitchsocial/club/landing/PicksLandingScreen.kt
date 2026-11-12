@@ -37,6 +37,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.SportsBasketball
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -728,6 +730,7 @@ private fun TonightTab(
                 fontSize = 14.sp, color = colors.textSecondary, modifier = Modifier.padding(16.dp)
             )
         }
+        AllSportsShelf(night)
         Text(
             "For fun. No money and no prizes here. Not advice. Picks are read from each person's sheet and not verified. Not for teens.",
             fontSize = 11.sp, color = colors.textSecondary, textAlign = TextAlign.Center,
@@ -2143,9 +2146,9 @@ private fun PicksUploadSheet(
                 if (isSwap) {
                     "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started."
                 } else if (onlyUnstarted) {
-                    "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. Only picks in games that haven't started."
+                    "We read your PrizePicks, Underdog or DraftKings Pick6 sheet. Fix anything we got wrong. Only picks in games that haven't started."
                 } else {
-                    "We read your PrizePicks or Underdog sheet. Fix anything we got wrong. " +
+                    "We read your PrizePicks, Underdog or DraftKings Pick6 sheet. Fix anything we got wrong. " +
                         if (slate == "late") "This card is for the late games, and locks 10 minutes after the first one tips." else "Your picks lock 10 minutes after the first game tips."
                 },
                 fontSize = 13.sp, color = colors.textSecondary
@@ -2287,4 +2290,80 @@ private suspend fun picksDownsizedJpeg(context: Context, uri: Uri): String? = wi
         bitmap.recycle()
         Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }.getOrNull()
+}
+
+
+/**
+ * Every sport Stitch Picks covers, on one page (iOS allSports). NBA is the one
+ * running today; the rest show as coming soon until their slates exist.
+ */
+@Composable
+private fun AllSportsShelf(night: PicksNight?) {
+    val colors = AppTheme.colors
+    val gold = Color(0xFFE8C872)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 22.dp), verticalAlignment = Alignment.Bottom) {
+            Text("ALL SPORTS", fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Text("Every slate, one page", fontSize = 12.sp, color = colors.textSecondary)
+        }
+        val line = if (night == null) "The next slate shows up here" else {
+            val n = night.games.size
+            listOfNotNull(
+                if (night.isTonight) "Tonight" else night.date,
+                if (n > 0) (if (n == 1) "1 game" else "$n games") else null,
+                "you're here"
+            ).joinToString(" · ")
+        }
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(1.dp, gold.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                .padding(12.dp)
+                .semantics(mergeDescendants = true) {},
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(gold.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.SportsBasketball, contentDescription = null, tint = gold, modifier = Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("NBA", fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text(line, fontSize = 12.sp, color = colors.textSecondary)
+            }
+            if (night != null && night.isTonight && night.status != "final") {
+                Text(
+                    "LIVE", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFFFF8A87),
+                    modifier = Modifier.clip(CircleShape).background(Color(0xFFF0625F).copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+        listOf("NFL", "College football", "NHL", "MLB", "Soccer").chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { sport ->
+                    Column(
+                        Modifier.weight(1f)
+                            .drawBehind {
+                                val r = 14.dp.toPx()
+                                drawRoundRect(
+                                    color = Color.White.copy(alpha = 0.18f),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                        width = 1.dp.toPx(),
+                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))
+                                    )
+                                )
+                            }
+                            .padding(12.dp)
+                            .semantics(mergeDescendants = true) {},
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(sport, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Coming soon", fontSize = 11.5.sp, color = colors.textSecondary)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }

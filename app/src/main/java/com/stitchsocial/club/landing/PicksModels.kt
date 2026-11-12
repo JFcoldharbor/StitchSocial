@@ -545,7 +545,7 @@ class PicksError(val code: String) : Exception(code) {
             code == "swap_more_added" -> "You can only swap out as many picks as you add."
             code == "swap_no_change" -> "Nothing changed on your card."
             code == "outs_unavailable" -> "Couldn't check who's out right now. Try again in a minute."
-            code == "wrong_app" -> "Only PrizePicks and Underdog sheets work here."
+            code == "wrong_app" -> "Only PrizePicks, Underdog and DraftKings Pick6 sheets work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
             code == "host_needs_picks" || code == "host_needs_five_picks" -> "Add a card of at least 2 picks before your video."
             code == "picks_too_few" -> "A card needs at least 2 picks."

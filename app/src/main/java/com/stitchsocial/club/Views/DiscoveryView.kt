@@ -146,6 +146,8 @@ enum class DiscoveryCategory(
     // to watch, and what they are watching is a show.
     COLLECTIONS("Shows", Icons.Default.VideoLibrary),
     MUSIC("Music", Icons.Default.MusicNote),
+    // Opens the Stitch Picks hub: Sports, Movies, Shows and Music.
+    PICKS("Stitch Picks", Icons.Default.Verified),
     TRENDING("Trending", Icons.Default.LocalFireDepartment);
 
     companion object {
@@ -155,7 +157,8 @@ enum class DiscoveryCategory(
          * has left: Community is Dash's, Events has its own tab, and Trending was
          * a filter over the videos For You ranks anyway.
          */
-        val visibleTabs = listOf(FOR_YOU, COLLECTIONS, MUSIC)
+        // Shows and Music moved inside Stitch Picks, beside Sports and Movies.
+        val visibleTabs = listOf(FOR_YOU, PICKS)
     }
 }
 
@@ -665,6 +668,7 @@ class DiscoveryViewModel(
             }
             DiscoveryCategory.COLLECTIONS -> emptyList() // Handled by CollectionsDiscoveryRow
             DiscoveryCategory.MUSIC -> emptyList() // Handled by MusicBrowseView
+            DiscoveryCategory.PICKS -> emptyList() // Handled by StitchPicksHubView
         }
 
         // For You keeps its tiers (see watchedLast); diversifying the whole
@@ -1093,6 +1097,12 @@ fun DiscoveryView(
     // Discovery Mode - default to SWIPE like iOS
     var discoveryMode by remember { mutableStateOf(DiscoveryMode.SWIPE) }
     var selectedCategory by remember { mutableStateOf(DiscoveryCategory.FOR_YOU) }
+    // The Stitch Picks hub's Movies/Shows split, the page it has open over it
+    // (Movies, Shows or Music), and a fan take playing from one of those pages.
+    var picksMovies by remember { mutableStateOf<List<VideoCollection>?>(null) }
+    var picksShows by remember { mutableStateOf<List<VideoCollection>?>(null) }
+    var picksPage by remember { mutableStateOf<com.stitchsocial.club.landing.StitchPicksVertical?>(null) }
+    var picksTake by remember { mutableStateOf<CoreVideoMetadata?>(null) }
 
     // Swipe cards state
     var currentSwipeIndex by remember { mutableStateOf(0) }
@@ -1139,7 +1149,7 @@ fun DiscoveryView(
 
     // Reload when explicitly switching to COLLECTIONS tab (cache hit — free)
     LaunchedEffect(selectedCategory) {
-        if (selectedCategory == DiscoveryCategory.COLLECTIONS && discoveryCollections.isEmpty()) {
+        if ((selectedCategory == DiscoveryCategory.COLLECTIONS || selectedCategory == DiscoveryCategory.PICKS) && discoveryCollections.isEmpty()) {
             try { discoveryCollections = collectionService.getDiscoveryCollections(30) } catch (e: Exception) { println("Collections load failed: ${e.message}") }
         }
     }
@@ -1182,7 +1192,8 @@ fun DiscoveryView(
     val fullScreenCategoryUp = selectedCategory == DiscoveryCategory.COMMUNITIES ||
         selectedCategory == DiscoveryCategory.EVENTS ||
         selectedCategory == DiscoveryCategory.COLLECTIONS ||
-        selectedCategory == DiscoveryCategory.MUSIC
+        selectedCategory == DiscoveryCategory.MUSIC ||
+        selectedCategory == DiscoveryCategory.PICKS
     val anyFullScreenUp = showVideoPlayer || showCollectionPlayer || fullScreenCategoryUp
     LaunchedEffect(anyFullScreenUp) {
         onTabBarVisibilityChange?.invoke(!anyFullScreenUp)
@@ -1280,6 +1291,126 @@ fun DiscoveryView(
                         viewModel.filterBy(DiscoveryCategory.FOR_YOU)
                     }
                 )
+            }
+        }
+        // Stitch Picks — the hub of Sports, Movies, Shows and Music. Movies, Shows
+        // and Music open their own Stitch Picks page over the hub; back returns to it.
+        if (selectedCategory == DiscoveryCategory.PICKS) {
+            LaunchedEffect(discoveryCollections) {
+                val (m, s) = com.stitchsocial.club.landing.splitMoviesAndShows(discoveryCollections)
+                picksMovies = m
+                picksShows = s
+            }
+            Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                com.stitchsocial.club.landing.StitchPicksHubView(
+                    movies = picksMovies,
+                    shows = picksShows,
+                    onOpen = { vertical ->
+                        when (vertical) {
+                            com.stitchsocial.club.landing.StitchPicksVertical.SPORTS ->
+                                com.stitchsocial.club.landing.openStitchPicksSports()
+                            else -> picksPage = vertical
+                        }
+                    },
+                    onClose = {
+                        picksPage = null
+                        selectedCategory = DiscoveryCategory.FOR_YOU
+                        com.stitchsocial.club.foundation.FullScreenSurfaceState.set(false)
+                        viewModel.filterBy(DiscoveryCategory.FOR_YOU)
+                    }
+                )
+            }
+            when (val page = picksPage) {
+                com.stitchsocial.club.landing.StitchPicksVertical.MOVIES,
+                com.stitchsocial.club.landing.StitchPicksVertical.SHOWS -> {
+                    val recording = navigationCoordinator?.navigationState?.collectAsState()?.value?.modalState == ModalState.RECORDING
+                    Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                        com.stitchsocial.club.landing.StitchPicksShelfView(
+                            vertical = page,
+                            episodes = (if (page == com.stitchsocial.club.landing.StitchPicksVertical.MOVIES) picksMovies else picksShows).orEmpty(),
+                            covered = showCollectionPlayer || openShowID != null || picksTake != null || recording || externallyCovered,
+                            onPlay = { coll, startIndex ->
+                                com.stitchsocial.club.services.AnalyticsService.collectionPlayed(
+                                    collectionID = coll.id,
+                                    contentType = coll.contentType.rawValue,
+                                    resumed = startIndex > 0,
+                                )
+                                selectedCollection = coll
+                                collectionStartIndex = startIndex
+                                showCollectionPlayer = true
+                            },
+                            onOpenShow = { openShowID = it },
+                            onOpenTake = { picksTake = it },
+                            onStitch = { seg ->
+                                // Suspended: the shared sheet explains instead.
+                                if (com.stitchsocial.club.services.AccountStanding.guardPosting()) {
+                                    com.stitchsocial.club.VideoManager.startRecording()
+                                    navigationCoordinator?.showModal(
+                                        ModalState.RECORDING,
+                                        mapOf(
+                                            "context" to RecordingContextFactory.createStitchToThread(
+                                                seg.threadID ?: seg.id, seg.creatorName, seg.title
+                                            ),
+                                            "parentVideo" to seg
+                                        )
+                                    )
+                                }
+                            },
+                            onClose = { picksPage = null }
+                        )
+                    }
+                }
+                com.stitchsocial.club.landing.StitchPicksVertical.MUSIC ->
+                    Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                        com.stitchsocial.club.landing.StitchPicksMusicView(onClose = { picksPage = null })
+                    }
+                else -> Unit
+            }
+            // A show's page from Movies or Shows, above the page, below the player.
+            if (picksPage != null) {
+                openShowID?.let { showID ->
+                    androidx.activity.compose.BackHandler { openShowID = null }
+                    Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                        ShowDetailView(
+                            showId = showID,
+                            currentUserID = currentUserID ?: "",
+                            onDismiss = { openShowID = null },
+                            onPlayEpisode = { ep ->
+                                openShowID = null
+                                selectedCollection = ep
+                                collectionStartIndex = 0
+                                showCollectionPlayer = true
+                            },
+                            onResumeEpisode = { ep, index ->
+                                openShowID = null
+                                selectedCollection = ep
+                                collectionStartIndex = index
+                                showCollectionPlayer = true
+                            },
+                        )
+                    }
+                }
+            }
+            // A fan's take, from the page's list or its stitch rail.
+            picksTake?.let { take ->
+                androidx.activity.compose.BackHandler { picksTake = null }
+                Box(modifier = Modifier.fillMaxSize().zIndex(200f)) {
+                    FullscreenVideoPlayer(
+                        video = take,
+                        currentUserID = currentUserID,
+                        currentUserTier = currentUserTier,
+                        navigationCoordinator = navigationCoordinator,
+                        onShowThreadView = { threadID, videoID ->
+                            picksTake = null
+                            onShowThreadView(threadID, videoID)
+                        },
+                        onShowProfile = { userID ->
+                            picksTake = null
+                            onNavigateToProfile(userID)
+                        },
+                        onDismiss = { picksTake = null }
+                    )
+                }
             }
         }
         if (selectedCategory == DiscoveryCategory.COLLECTIONS) {
@@ -1442,7 +1573,8 @@ fun DiscoveryView(
                             category == DiscoveryCategory.COMMUNITIES ||
                                 category == DiscoveryCategory.EVENTS ||
                                 category == DiscoveryCategory.COLLECTIONS ||
-                                category == DiscoveryCategory.MUSIC
+                                category == DiscoveryCategory.MUSIC ||
+                                category == DiscoveryCategory.PICKS
                         )
                         viewModel.filterBy(category)
                         currentSwipeIndex = 0 // Reset swipe position
@@ -1504,6 +1636,7 @@ fun DiscoveryView(
                         }
                     }
                     selectedCategory == DiscoveryCategory.MUSIC -> {}
+                    selectedCategory == DiscoveryCategory.PICKS -> {}
                     selectedCategory == DiscoveryCategory.COLLECTIONS -> {
                         // Rendered as a full-screen takeover overlay above the
                         // chrome (see the Collections overlay near the Community

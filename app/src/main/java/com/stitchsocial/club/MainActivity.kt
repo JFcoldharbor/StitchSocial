@@ -1788,11 +1788,14 @@ private fun ModalOverlay(
                                 // Go to VIDEO_REVIEW for editing before processing
                                 navigationCoordinator.showModal(
                                     ModalState.VIDEO_REVIEW,
-                                    mapOf(
-                                        "videoPath" to recordedVideo.videoURL,
-                                        "context" to recordingContext,
-                                        "metadata" to recordedVideo
-                                    )
+                                    buildMap<String, Any> {
+                                        put("videoPath", recordedVideo.videoURL)
+                                        put("context", recordingContext)
+                                        put("metadata", recordedVideo)
+                                        // Fresh off the camera: the editor can send it back for a retake.
+                                        put("fromCamera", true)
+                                        parentVideo?.let { put("parentVideo", it) }
+                                    }
                                 )
                                 if (BuildConfig.DEBUG) { println("📹 MAINACT: VIDEO_REVIEW modal shown") }
                             } catch (e: Exception) {
@@ -1995,6 +1998,17 @@ private fun ModalOverlay(
                                 com.stitchsocial.club.landing.LandingPostRouter.cancel()
                                 navigationCoordinator.dismissModal()
                             },
+                            // Back to the same camera — same context and parent,
+                            // and the Landing / community routers stay armed.
+                            onRetake = if (modalData["fromCamera"] == true) ({
+                                navigationCoordinator.showModal(
+                                    ModalState.RECORDING,
+                                    buildMap<String, Any> {
+                                        put("context", recordingContext)
+                                        modalData["parentVideo"]?.let { put("parentVideo", it) }
+                                    }
+                                )
+                            }) else null,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
