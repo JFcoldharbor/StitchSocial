@@ -268,7 +268,8 @@ fun AnnouncementOverlayView(
             AnnouncementHeader(
                 announcement = announcement,
                 priorityColor = priorityColor,
-                modifier = Modifier.padding(top = 48.dp)
+                // Just below the status bar, wherever it is on this phone.
+                modifier = Modifier.statusBarsPadding().padding(top = 4.dp)
             )
 
             Spacer(modifier = Modifier.weight(1f))
