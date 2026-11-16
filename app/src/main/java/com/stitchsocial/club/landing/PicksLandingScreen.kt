@@ -528,7 +528,7 @@ internal fun PicksLandingScreen(
                                 val canReply = !readOnly && (page?.isHost == true || page?.isCoHost == true || night?.isHostTonight == true)
                                 // As the stitch button: a fan with a card and no video, before the lock. A co-host after it too.
                                 val canStitchCard = !readOnly && night != null && (!night.isLocked(slate) || page?.isCoHost == true) && !night.isHostTonight &&
-                                    myCard != null && myCard.videoID == null && (night.videoID(slate) != null || night.mainVideoID != null)
+                                    myCard != null && myCard.videoID == null
                                 val current = reelItem
                                 when {
                                     current == null -> null
@@ -1460,15 +1460,9 @@ private fun ActionButton(
             night.isHostTonight && slateVideoID == null ->
                 ArtistMetalButton("RECORD YOUR VIDEO · UP TO 2:00") { onRecord("main") }
             !night.isHostTonight && myCard.videoID == null ->
-                // A late stitch goes on the main video until there's a late one.
-                if (slateVideoID == null && night.mainVideoID == null) {
-                    Text(
-                        "You're in. You can record once the host posts tonight's video.",
-                        fontSize = 13.sp, color = colors.textSecondary
-                    )
-                } else {
-                    ArtistMetalButton("RECORD YOUR VIDEO") { onRecord("card") }
-                }
+                // Stitches the host's video (a late stitch goes on the main one until
+                // there's a late one), or posts on its own if the host hasn't posted.
+                ArtistMetalButton("RECORD YOUR VIDEO") { onRecord("card") }
             else -> Text(
                 if (slate == "late") "You're all set. Late picks lock when the first late game tips." else "You're all set. Picks lock when the first game tips.",
                 fontSize = 13.sp, color = colors.textSecondary
