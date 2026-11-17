@@ -125,7 +125,38 @@ private fun slipGroups(card: PicksCard, night: PicksNight): List<SlipGroup> {
  * page polls, and a row has to outlive a poll for its bar to move from where it
  * was and for it to see its result change.
  */
-private fun PicksPick.rowKey(): String = "$player|$statText|$side|$line"
+private fun PicksPick.rowKey(): String = "$kind|$market|$team|$player|$statText|$side|$line"
+
+/**
+ * ESPN's logo for a team. Its logo files use its own short codes, which differ
+ * from the usual ones for a few teams.
+ */
+internal fun picksTeamLogoURL(code: String): String {
+    val espn = when (val upper = code.uppercase()) {
+        "GSW" -> "gs"
+        "NOP" -> "no"
+        "NYK" -> "ny"
+        "SAS" -> "sa"
+        "UTA" -> "utah"
+        "WAS" -> "wsh"
+        else -> upper.lowercase()
+    }
+    return "https://a.espncdn.com/i/teamlogos/nba/500/$espn.png"
+}
+
+/**
+ * Whether a live win or spread is on its way to being right: the team's margin
+ * so far, plus the spread. Null for anything else, or before there's a score.
+ */
+private fun PicksPick.isCovering(): Boolean? {
+    if (!isTeam || result != null) return null
+    val margin = actual ?: return null
+    return when (market) {
+        "win" -> margin > 0
+        "spread" -> line?.let { margin + it > 0 }
+        else -> null
+    }
+}
 
 @Composable
 internal fun PicksSlipCard(card: PicksCard, night: PicksNight, modifier: Modifier = Modifier, title: String? = null) {
@@ -361,16 +392,26 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
     // How far the stat has come towards the number.
     val line = pick.line
     val actual = pick.actual
-    val progress = if (line != null && line > 0 && actual != null) {
+    // A win or spread has no partway: its actual is a margin, not a count towards the number.
+    val isMargin = pick.isTeam && pick.market != "total"
+    val progress = if (!isMargin && line != null && line > 0 && actual != null) {
         minOf(1.0, actual / line).toFloat()
     } else {
         if (pick.result == "right") 1f else 0f
     }
+    val covering = if (game?.state == "live") pick.isCovering() else null
     val color = when (pick.result) {
         "right" -> SlipColor.right
         "wrong" -> SlipColor.wrong
         "push", "void" -> SlipColor.textMuted
-        null -> if (pick.listedOut) SlipColor.close else if (pick.side == "under" && progress >= 0.8f) SlipColor.close else SlipColor.live
+        null -> when {
+            pick.isListedOut -> SlipColor.close
+            // A team behind on its win or spread is the one to watch.
+            covering == false -> SlipColor.close
+            covering == true -> SlipColor.right
+            pick.side == "under" && progress >= 0.8f -> SlipColor.close
+            else -> SlipColor.live
+        }
         // A "less than" pick getting close to its number is the one to watch.
         else -> if (pick.side == "under" && progress >= 0.8f) SlipColor.close else SlipColor.live
     }
@@ -378,7 +419,7 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
         "right" -> "RIGHT"
         "wrong" -> "WRONG"
         "push", "void" -> "OUT"
-        null -> if (pick.listedOut) "Listed out" else if (game?.hasStarted == true) "LIVE" else "SOON"
+        null -> if (pick.isListedOut) "Listed out" else if (game?.hasStarted == true) "LIVE" else "SOON"
         else -> if (game?.hasStarted == true) "LIVE" else "SOON"
     }
 
@@ -424,7 +465,16 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SlipHeadshot(pick.athleteID, pick.player, pick.result, pop)
+            SlipHeadshot(
+                imageURL = when {
+                    pick.isTeam -> pick.team?.let(::picksTeamLogoURL)
+                    else -> pick.athleteID?.let { "https://a.espncdn.com/i/headshots/nba/players/full/$it.png" }
+                },
+                name = pick.player, result = pick.result, pop = pop,
+                // A total is on the game, so it has both teams' logos.
+                pairURLs = if (pick.isTeam && pick.team == null) game?.let { picksTeamLogoURL(it.away) to picksTeamLogoURL(it.home) } else null,
+                isLogo = pick.isTeam
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     pick.player, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SlipColor.text,
@@ -464,7 +514,9 @@ private fun SlipPickRow(pick: PicksPick, game: PicksGame?) {
                     .border(1.5.dp, color.copy(alpha = 0.7f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                SlipNumber(actual?.let(::numberText) ?: "–", 16.sp, SlipColor.text)
+                // A margin carries its sign, so "+7" reads as up 7.
+                val shownActual = actual?.let { if (isMargin && it > 0) "+${numberText(it)}" else numberText(it) }
+                SlipNumber(shownActual ?: "–", 16.sp, SlipColor.text)
             }
             SlipBar(progress, color, Modifier.weight(1f))
             Box(Modifier.widthIn(min = 46.dp), contentAlignment = Alignment.CenterEnd) {
@@ -514,14 +566,20 @@ private fun SlipLinePill(pick: PicksPick) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Icon(
-            if (pick.side == "under") Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-            contentDescription = null, tint = SlipColor.text, modifier = Modifier.size(13.dp)
-        )
-        Text(
-            pick.line?.let(::numberText) ?: "?",
-            fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = SlipColor.text
-        )
+        // A win has no number and a spread has its sign: only a total is more or less.
+        val isMargin = pick.isTeam && pick.market != "total"
+        if (!isMargin) {
+            Icon(
+                if (pick.side == "under") Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                contentDescription = null, tint = SlipColor.text, modifier = Modifier.size(13.dp)
+            )
+        }
+        if (pick.market != "win" || !pick.isTeam) {
+            Text(
+                if (pick.isTeam && pick.market == "spread") pick.spreadText else pick.line?.let(::numberText) ?: "?",
+                fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = SlipColor.text
+            )
+        }
         Text(
             pick.statText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = SlipColor.text,
             maxLines = 1, overflow = TextOverflow.Ellipsis
@@ -530,11 +588,19 @@ private fun SlipLinePill(pick: PicksPick) {
 }
 
 /**
- * The player's picture, or their initials if there isn't one. A settled pick gets
- * a check or a cross that pops in.
+ * The player's picture, or a team's logo, or their initials if there isn't one.
+ * A total shows both teams' logos, [pairURLs]. A settled pick gets a check or a
+ * cross that pops in.
  */
 @Composable
-private fun SlipHeadshot(athleteID: String?, name: String, result: String?, pop: Animatable<Float, *>) {
+private fun SlipHeadshot(
+    imageURL: String?,
+    name: String,
+    result: String?,
+    pop: Animatable<Float, *>,
+    pairURLs: Pair<String, String>? = null,
+    isLogo: Boolean = false
+) {
     val motionOff = rememberMotionOff()
     val initials = name.split(" ").filter { it.isNotEmpty() }.take(2).joinToString("") { it.take(1) }
     val settled = result == "right" || result == "wrong"
@@ -545,12 +611,25 @@ private fun SlipHeadshot(athleteID: String?, name: String, result: String?, pop:
             contentAlignment = Alignment.Center
         ) {
             Text(initials, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SlipColor.textMuted)
-            if (athleteID != null) {
+            if (pairURLs != null) {
+                // The total's two teams, away on top left and home bottom right.
+                Box(Modifier.fillMaxSize().background(SlipColor.track)) {
+                    AsyncImage(
+                        model = pairURLs.first, contentDescription = null, contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(26.dp).align(Alignment.TopStart).padding(start = 3.dp, top = 3.dp)
+                    )
+                    AsyncImage(
+                        model = pairURLs.second, contentDescription = null, contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(26.dp).align(Alignment.BottomEnd).padding(end = 3.dp, bottom = 3.dp)
+                    )
+                }
+            } else if (imageURL != null) {
                 AsyncImage(
-                    model = "https://a.espncdn.com/i/headshots/nba/players/full/$athleteID.png",
+                    model = imageURL,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    // A logo is drawn whole, inset, where a headshot fills the circle.
+                    contentScale = if (isLogo) ContentScale.Fit else ContentScale.Crop,
+                    modifier = if (isLogo) Modifier.fillMaxSize().background(SlipColor.track).padding(6.dp) else Modifier.fillMaxSize()
                 )
             }
         }

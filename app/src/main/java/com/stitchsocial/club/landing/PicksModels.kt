@@ -42,12 +42,24 @@ data class PicksGame(
     val awayTimeouts: Int,
     val homeTimeouts: Int,
     val awayFloor: List<Player>,
-    val homeFloor: List<Player>
+    val homeFloor: List<Player>,
+    /** Tonight's posted lines, for making a team pick. Null when the server has none. */
+    val posted: Posted? = null
 ) {
     data class Player(val id: String, val name: String, val points: Int, val fouls: Int)
 
+    /** Any of these can be missing. [spread] is the favorite's margin, as a positive number. */
+    data class Posted(val favorite: String?, val spread: Double?, val total: Double?)
+
     val name: String get() = "$away @ $home"
     val hasStarted: Boolean get() = state != "upcoming"
+
+    /** The posted spread for [team]: the favorite's is negative, the other team's positive. */
+    fun spread(team: String): Double? {
+        val spread = posted?.spread ?: return null
+        val favorite = posted.favorite ?: return null
+        return if (team == favorite) -spread else spread
+    }
 
     companion object {
         private fun players(list: Any?): List<Player> = list.maps().map {
@@ -74,7 +86,14 @@ data class PicksGame(
                 awayTimeouts = raw["awayTimeouts"].int(),
                 homeTimeouts = raw["homeTimeouts"].int(),
                 awayFloor = players(lineups?.get("away")),
-                homeFloor = players(lineups?.get("home"))
+                homeFloor = players(lineups?.get("home")),
+                posted = (raw["posted"] as? Map<*, *>)?.let {
+                    Posted(
+                        favorite = (it["favorite"] as? String)?.takeIf { f -> f.isNotBlank() },
+                        spread = it["spread"].doubleOrNull(),
+                        total = it["total"].doubleOrNull()
+                    )
+                }
             )
         }
     }
@@ -90,24 +109,75 @@ data class PicksPick(
     val athleteID: String? = null,
     val actual: Double? = null,
     val result: String? = null,
-    /** player_not_playing, stat_not_tracked, number_unread or side_unread. */
+    /**
+     * player_not_playing, stat_not_tracked, number_unread or side_unread. A team
+     * pick can also have team_not_playing or market_unread.
+     */
     val problem: String? = null,
     /** ESPN lists the player out and the pick hasn't settled. */
     val listedOut: Boolean = false,
     /** Put on the card by a swap after the lock. */
-    val swappedIn: Boolean = false
+    val swappedIn: Boolean = false,
+    /** "team" for a team pick. Older picks, and every player pick, have none. */
+    val kind: String? = null,
+    /** A team pick's market: "win", "spread" or "total". */
+    val market: String? = null,
+    /** A team pick's team, as ESPN writes it. Null for a total, which is on the game. */
+    val team: String? = null,
+    val opponent: String? = null
 ) {
-    val isListedOut: Boolean get() = listedOut && result == null
+    /**
+     * A team pick has no player, so [player] holds what the server shows for it:
+     * the team, or "AWAY @ HOME" for a total. It never has an athleteID.
+     */
+    val isTeam: Boolean get() = kind == "team"
+
+    /** Only a player can be listed out, so only a player pick can be swapped. */
+    val isListedOut: Boolean get() = !isTeam && listedOut && result == null
+
+    /** A spread as it's written: "-9.5" or "+3.5". */
+    val spreadText: String
+        get() = line?.let { (if (it > 0) "+" else "") + numberText(it) } ?: "?"
+
+    /** The pick's short name: "BOS to win", "BOS -9.5", or a total's line. */
+    val teamTitle: String
+        get() = when (market) {
+            "win" -> "${team ?: player} to win"
+            "spread" -> "${team ?: player} $spreadText"
+            else -> player
+        }
 
     val lineText: String
         get() {
             val number = line?.let { numberText(it) } ?: "?"
+            if (isTeam) {
+                return when (market) {
+                    "win" -> "${team ?: player} to win"
+                    "spread" -> when {
+                        line == null -> "Spread"
+                        // A spread is signed for the team: -9.5 is a win by 10 or more.
+                        line < 0 -> "Win by more than ${numberText(-line)}"
+                        else -> "Lose by less than $number, or win"
+                    }
+                    else -> "${if (side == "under") "Less than" else "More than"} $number total points"
+                }
+            }
             return "${if (side == "under") "Less than" else "More than"} $number ${statText.lowercase()}"
         }
 
     val stateText: String
         get() {
-            val value = actual?.let { numberText(it) }
+            // Before a win or spread settles, actual is the team's margin so far.
+            if (isTeam && market != "total" && result == null) {
+                val margin = actual ?: return "Not started"
+                return when {
+                    margin > 0 -> "Up ${numberText(margin)}"
+                    margin < 0 -> "Down ${numberText(-margin)}"
+                    else -> "Tied"
+                }
+            }
+            // A settled win or spread is just right or wrong: its margin would read like a score.
+            val value = if (isTeam && market != "total") null else actual?.let { numberText(it) }
             return when (result) {
                 "right" -> value?.let { "Right · $it" } ?: "Right"
                 "wrong" -> value?.let { "Wrong · $it" } ?: "Wrong"
@@ -122,11 +192,20 @@ data class PicksPick(
             put("side", side)
             put("statText", statText)
             line?.let { put("line", it) }
+            if (isTeam) {
+                put("kind", "team")
+                market?.let { put("market", it) }
+                gameID?.let { put("gameID", it) }
+                // A total is on the game, and the server takes either team for it.
+                (team ?: player.substringAfter("@", "").trim().takeIf { it.isNotEmpty() })?.let { put("team", it) }
+            }
         }
 
     val problemText: String?
         get() = when (problem) {
             "player_not_playing" -> "Not playing tonight"
+            "team_not_playing" -> "That team isn't playing tonight"
+            "market_unread" -> "Choose to win, spread or total"
             "stat_not_tracked" -> "We can't follow this stat"
             "number_unread" -> "Couldn't read the number"
             "side_unread" -> "Choose more or less"
@@ -145,7 +224,31 @@ data class PicksPick(
             result = raw["result"] as? String,
             problem = raw["problem"] as? String,
             listedOut = raw["listedOut"] as? Boolean ?: false,
-            swappedIn = raw["swappedIn"] as? Boolean ?: false
+            swappedIn = raw["swappedIn"] as? Boolean ?: false,
+            kind = raw["kind"] as? String,
+            market = raw["market"] as? String,
+            team = raw["team"] as? String,
+            opponent = raw["opponent"] as? String
+        )
+
+        /** What the server calls each market. */
+        fun teamStatText(market: String): String = when (market) {
+            "win" -> "To win"
+            "spread" -> "Spread"
+            else -> "Total points"
+        }
+
+        /** A team pick made by tapping, for [game]. [team] is null for a total. */
+        fun team(market: String, game: PicksGame, team: String?, side: String = "over", line: Double?) = PicksPick(
+            player = if (market == "total" || team == null) game.name else team,
+            side = if (market == "total") side else "over",
+            line = if (market == "win") null else line,
+            statText = teamStatText(market),
+            gameID = game.id,
+            kind = "team",
+            market = market,
+            team = if (market == "total") null else team,
+            opponent = team?.let { if (it == game.away) game.home else game.away }
         )
     }
 }
@@ -545,7 +648,7 @@ class PicksError(val code: String) : Exception(code) {
             code == "swap_more_added" -> "You can only swap out as many picks as you add."
             code == "swap_no_change" -> "Nothing changed on your card."
             code == "outs_unavailable" -> "Couldn't check who's out right now. Try again in a minute."
-            code == "wrong_app" -> "Only PrizePicks, Underdog and DraftKings Pick6 sheets work here."
+            code == "wrong_app" -> "Only PrizePicks, Underdog, DraftKings Pick6 and sportsbook slips work here."
             code == "not_a_sheet" -> "We couldn't find any picks in that picture."
             code == "host_needs_picks" || code == "host_needs_five_picks" -> "Add a card of at least 2 picks before your video."
             code == "picks_too_few" -> "A card needs at least 2 picks."
@@ -561,6 +664,10 @@ class PicksError(val code: String) : Exception(code) {
             code == "too_many_reads" -> "That's enough uploads for today. Try again tomorrow."
             code.endsWith("not_in_late_slate") -> "A late card can only have picks from the late games."
             code.startsWith("pick_") && code.endsWith("_game_started") -> "That pick's game has already started."
+            code.startsWith("pick_") && code.endsWith("_team_not_playing") -> "That team isn't playing tonight."
+            code.startsWith("pick_") && code.endsWith("_market_unread") -> "Choose to win, spread or total."
+            code.startsWith("pick_") && code.endsWith("_number_unread") -> "One of your picks is missing its number."
+            code.startsWith("pick_") && code.endsWith("_side_unread") -> "Choose more or less on each pick."
             code.startsWith("pick_") -> "One of your picks needs fixing."
             else -> "Something went wrong. Please try again."
         }

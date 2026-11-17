@@ -579,6 +579,7 @@ internal fun PicksLandingScreen(
                 isSwap = uploadIsSwap,
                 card = uploadCard,
                 onlyUnstarted = !uploadIsSwap && night?.isLocked(slate) == true,
+                games = night?.games.orEmpty(),
                 onDismiss = {
                     showingUpload = false
                     scope.launch { model.refresh() }
@@ -2070,12 +2071,18 @@ private fun PicksUploadSheet(
     card: Int,
     /** A co-host's card after the lock: only games that haven't started. */
     onlyUnstarted: Boolean,
+    /** Tonight's games, for adding a team pick by tapping. */
+    games: List<PicksGame>,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picks by remember { mutableStateOf<List<PicksPick>>(emptyList()) }
+    // Team picks added by tapping stay when a different screenshot is read.
+    var tappedIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var hasRead by remember { mutableStateOf(false) }
+    var addingTeam by remember { mutableStateOf(false) }
     var isWorking by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     // The host's 5-pick minimum is across all their cards, checked by the server when the video starts.
@@ -2090,7 +2097,8 @@ private fun PicksUploadSheet(
                 errorText = "We couldn't open that picture."
             } else {
                 try {
-                    picks = PicksService.readSheet(landingID, jpeg)
+                    picks = PicksService.readSheet(landingID, jpeg) + picks.filter { it.id in tappedIDs }
+                    hasRead = true
                 } catch (e: PicksError) {
                     errorText = e.message
                 }
@@ -2140,9 +2148,9 @@ private fun PicksUploadSheet(
                 if (isSwap) {
                     "Upload your updated sheet. Only a player listed out can change, and only for a game that hasn't started."
                 } else if (onlyUnstarted) {
-                    "We read your PrizePicks, Underdog or DraftKings Pick6 sheet. Fix anything we got wrong. Only picks in games that haven't started."
+                    "We read your PrizePicks, Underdog, DraftKings Pick6 or sportsbook slip. Fix anything we got wrong, or add team picks by tapping. Only picks in games that haven't started."
                 } else {
-                    "We read your PrizePicks, Underdog or DraftKings Pick6 sheet. Fix anything we got wrong. " +
+                    "We read your PrizePicks, Underdog, DraftKings Pick6 or sportsbook slip. Fix anything we got wrong, or add team picks by tapping. " +
                         if (slate == "late") "This card is for the late games, and locks 10 minutes after the first one tips." else "Your picks lock 10 minutes after the first game tips."
                 },
                 fontSize = 13.sp, color = colors.textSecondary
@@ -2150,8 +2158,24 @@ private fun PicksUploadSheet(
             if (isHost && !isSwap) {
                 Text("Each card needs at least 2 picks.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
-            ArtistMetalButton(if (picks.isEmpty()) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
+            ArtistMetalButton(if (!hasRead) "CHOOSE A SCREENSHOT" else "CHOOSE A DIFFERENT SCREENSHOT") {
                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }
+            // A swap only replaces a player listed out, so it can't take a team pick.
+            if (!isSwap) {
+                if (addingTeam) {
+                    TeamPickPicker(
+                        games = games.filter { !it.hasStarted },
+                        onAdd = { pick ->
+                            picks = picks + pick
+                            tappedIDs = tappedIDs + pick.id
+                            addingTeam = false
+                        },
+                        onCancel = { addingTeam = false }
+                    )
+                } else {
+                    ArtistMetalButton("ADD A TEAM PICK") { addingTeam = true }
+                }
             }
             if (isWorking) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -2161,16 +2185,21 @@ private fun PicksUploadSheet(
             errorText?.let { Text(it, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = picksWarning) }
             picks.forEach { pick ->
                 key(pick.id) {
-                    PickEditor(
-                        pick = pick,
-                        onChange = { changed -> picks = picks.map { if (it.id == changed.id) changed else it } },
-                        onRemove = { picks = picks.filterNot { it.id == pick.id } }
-                    )
+                    val onChange: (PicksPick) -> Unit = { changed -> picks = picks.map { if (it.id == changed.id) changed else it } }
+                    val onRemove = {
+                        picks = picks.filterNot { it.id == pick.id }
+                        tappedIDs = tappedIDs - pick.id
+                    }
+                    if (pick.isTeam) {
+                        TeamPickEditor(pick, games.firstOrNull { it.id == pick.gameID }, onChange, onRemove)
+                    } else {
+                        PickEditor(pick = pick, onChange = onChange, onRemove = onRemove)
+                    }
                 }
             }
             if (picks.isNotEmpty()) {
                 Text(
-                    "Only the players and numbers are kept. Amounts and payouts are ignored, and your sheet is never shown or saved.",
+                    "Only the picks and numbers are kept. Amounts and payouts are ignored, and your sheet is never shown or saved.",
                     fontSize = 12.sp, color = colors.textSecondary
                 )
                 Box(Modifier.alpha(if (canSave) 1f else 0.4f)) {
@@ -2240,6 +2269,228 @@ private fun PickEditor(pick: PicksPick, onChange: (PicksPick) -> Unit, onRemove:
             )
         }
         pick.problemText?.let { Text(it, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = picksWarning) }
+    }
+}
+
+/** Typed text as a number, or null. A spread can start with a sign. */
+private fun picksNumberOrNull(text: String): Double? = text.removePrefix("+").toDoubleOrNull()
+
+/** Whether [text] can still become a number, with a sign in front when [signed]. */
+private fun picksNumberTyping(text: String, signed: Boolean): Boolean {
+    val body = if (signed && (text.startsWith("-") || text.startsWith("+"))) text.drop(1) else text
+    return body.all { it.isDigit() || it == '.' } && body.count { it == '.' } <= 1
+}
+
+private fun picksMarketLabel(market: String?): String = when (market) {
+    "win" -> "To win"
+    "spread" -> "Spread"
+    "total" -> "Total points"
+    else -> "Choose to win, spread or total"
+}
+
+/**
+ * A team pick on the check screen. It shows its team or game as text: a team is
+ * chosen when the pick is made, not typed. A spread or total can have its number
+ * fixed, and a total its side.
+ */
+@Composable
+private fun TeamPickEditor(pick: PicksPick, game: PicksGame?, onChange: (PicksPick) -> Unit, onRemove: () -> Unit) {
+    val colors = AppTheme.colors
+    var lineText by remember { mutableStateOf(pick.line?.let { if (pick.market == "spread") pick.spreadText else numberText(it) } ?: "") }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.surface)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            pick.team?.let {
+                AsyncImage(
+                    model = picksTeamLogoURL(it), contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    pick.player.ifBlank { "Team" }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                val detail = listOfNotNull(picksMarketLabel(pick.market), game?.name?.takeIf { pick.market != "total" })
+                Text(detail.joinToString(" · "), fontSize = 12.sp, color = colors.textSecondary)
+            }
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Close, contentDescription = "Remove ${pick.player}",
+                    tint = colors.textPrimary, modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        // A market the sheet didn't make clear can be chosen here, when we know the game.
+        if (pick.market == null && game != null) {
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                listOf("win", "spread", "total").forEach { market ->
+                    SideChoice(picksMarketLabel(market), false, Modifier.weight(1f)) {
+                        val team = pick.team?.takeIf { it == game.away || it == game.home }
+                        // Without a team, only a total can be made from the game.
+                        if (market != "total" && team == null) return@SideChoice
+                        onChange(
+                            PicksPick.team(market, game, team, pick.side, pick.line).copy(id = pick.id)
+                        )
+                        lineText = pick.line?.let(::numberText) ?: ""
+                    }
+                }
+            }
+        }
+        if (pick.market == "spread" || pick.market == "total") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (pick.market == "total") {
+                    Row(Modifier.width(130.dp).clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                        SideChoice("More", pick.side == "over", Modifier.weight(1f)) { onChange(pick.copy(side = "over")) }
+                        SideChoice("Less", pick.side == "under", Modifier.weight(1f)) { onChange(pick.copy(side = "under")) }
+                    }
+                }
+                PicksField(
+                    value = lineText,
+                    onValueChange = { text ->
+                        val clean = text.replace(',', '.')
+                        if (picksNumberTyping(clean, signed = pick.market == "spread")) {
+                            lineText = clean
+                            onChange(pick.copy(line = picksNumberOrNull(clean)))
+                        }
+                    },
+                    placeholder = if (pick.market == "spread") "-9.5" else "Number",
+                    modifier = Modifier.width(80.dp),
+                    keyboard = KeyboardOptions(keyboardType = if (pick.market == "spread") KeyboardType.Text else KeyboardType.Decimal)
+                )
+                Text(
+                    pick.lineText, fontSize = 12.sp, color = colors.textSecondary,
+                    maxLines = 2, modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        pick.problemText?.let { Text(it, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = picksWarning) }
+    }
+}
+
+/**
+ * Builds a team pick by tapping, so a card can be made without a screenshot:
+ * a game that hasn't started, then to win, spread or total, then the team or
+ * more or less. A spread or total starts from tonight's posted number when
+ * there is one, and has to be typed when there isn't.
+ */
+@Composable
+private fun TeamPickPicker(games: List<PicksGame>, onAdd: (PicksPick) -> Unit, onCancel: () -> Unit) {
+    val colors = AppTheme.colors
+    var game by remember { mutableStateOf<PicksGame?>(null) }
+    var market by remember { mutableStateOf<String?>(null) }
+    var team by remember { mutableStateOf<String?>(null) }
+    var side by remember { mutableStateOf<String?>(null) }
+    var lineText by remember { mutableStateOf("") }
+
+    // A new game, market or team starts the number again from what's posted.
+    fun prefill() {
+        val g = game ?: return
+        lineText = when (market) {
+            "spread" -> team?.let { g.spread(it) }?.let { (if (it > 0) "+" else "") + numberText(it) } ?: ""
+            "total" -> g.posted?.total?.let(::numberText) ?: ""
+            else -> ""
+        }
+    }
+
+    val line = picksNumberOrNull(lineText)
+    val chosen = game
+    val draft = when {
+        chosen == null || market == null -> null
+        market == "win" -> team?.let { PicksPick.team("win", chosen, it, line = null) }
+        market == "spread" -> if (team != null && line != null) PicksPick.team("spread", chosen, team, line = line) else null
+        else -> if (side != null && line != null) PicksPick.team("total", chosen, null, side!!, line) else null
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("ADD A TEAM PICK", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        if (games.isEmpty()) {
+            Text("Every game tonight has started.", fontSize = 13.sp, color = colors.textSecondary)
+        } else {
+            Text("Choose a game", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
+            games.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { g ->
+                        Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                            SideChoice(g.name, game?.id == g.id, Modifier.fillMaxWidth()) {
+                                game = g
+                                team = null
+                                prefill()
+                            }
+                        }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+        chosen?.let { g ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                listOf("win", "spread", "total").forEach { m ->
+                    SideChoice(picksMarketLabel(m), market == m, Modifier.weight(1f)) {
+                        market = m
+                        prefill()
+                    }
+                }
+            }
+            when (market) {
+                "win", "spread" -> Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                    listOf(g.away, g.home).forEach { code ->
+                        SideChoice(code, team == code, Modifier.weight(1f)) {
+                            team = code
+                            prefill()
+                        }
+                    }
+                }
+                "total" -> Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(colors.surfaceStrong)) {
+                    SideChoice("More", side == "over", Modifier.weight(1f)) { side = "over" }
+                    SideChoice("Less", side == "under", Modifier.weight(1f)) { side = "under" }
+                }
+            }
+            if (market == "total" || (market == "spread" && team != null)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PicksField(
+                        value = lineText,
+                        onValueChange = { text ->
+                            val clean = text.replace(',', '.')
+                            if (picksNumberTyping(clean, signed = market == "spread")) lineText = clean
+                        },
+                        placeholder = if (market == "spread") "-9.5" else "Number",
+                        modifier = Modifier.width(80.dp),
+                        keyboard = KeyboardOptions(keyboardType = if (market == "spread") KeyboardType.Text else KeyboardType.Decimal)
+                    )
+                    Text(
+                        when {
+                            draft != null -> draft.lineText
+                            line == null -> if (market == "spread") "Type the spread for $team, like -9.5 or +3.5" else "Type the total points"
+                            else -> "Choose more or less"
+                        },
+                        fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) { ArtistMetalButton("CANCEL", onCancel) }
+            Box(Modifier.weight(1f).alpha(if (draft != null) 1f else 0.4f)) {
+                ArtistMetalButton("ADD") { draft?.let(onAdd) }
+            }
+        }
     }
 }
 
