@@ -16,6 +16,8 @@ package com.stitchsocial.club.views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stitchsocial.club.community.Community
+import com.stitchsocial.club.community.CommunityHomeService
 import com.stitchsocial.club.community.CommunityService
+import com.stitchsocial.club.community.InterestCardSettings
 import com.stitchsocial.club.community.CommunityStatus
 import com.stitchsocial.club.foundation.UserTier
 import kotlinx.coroutines.launch
@@ -49,9 +53,17 @@ fun CreatorCommunitySettingsView(
     creatorDisplayName: String,
     creatorTier: UserTier,
     onDismiss: () -> Unit,
-    communityService: CommunityService = CommunityService.shared
+    communityService: CommunityService = CommunityService.shared,
+    /** Told after the owner's "Into right now" switches save, so an open community page can follow. */
+    onInterestCardsChanged: (InterestCardSettings) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val homeService = remember { CommunityHomeService.shared }
+    // "Into right now" switches. null until community_home answers; if it
+    // never does, the section stays hidden rather than showing defaults the
+    // server might not hold.
+    var interestCards by remember { mutableStateOf<InterestCardSettings?>(null) }
+    var savingInterestCards by remember { mutableStateOf(false) }
 
     var status by remember { mutableStateOf<CommunityStatus>(CommunityStatus.NotCreated) }
     var communityName by remember { mutableStateOf("") }
@@ -84,6 +96,28 @@ fun CreatorCommunitySettingsView(
         isLoading = false
     }
 
+    LaunchedEffect(creatorID) {
+        interestCards = homeService.fetchHome(creatorID)?.owner?.interestCards
+    }
+
+    fun saveInterestCards(next: InterestCardSettings) {
+        val previous = interestCards ?: return
+        interestCards = next               // optimistic
+        savingInterestCards = true
+        scope.launch {
+            try {
+                val stored = homeService.setInterestCards(next)
+                interestCards = stored
+                onInterestCardsChanged(stored)
+            } catch (e: Exception) {
+                interestCards = previous
+                errorMessage = "Couldn't save that. ${e.message ?: ""}".trim()
+            } finally {
+                savingInterestCards = false
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -114,6 +148,7 @@ fun CreatorCommunitySettingsView(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -174,11 +209,20 @@ fun CreatorCommunitySettingsView(
                                 }
                             }
                         )
-                        is CommunityStatus.Active -> ActiveSection(
-                            community = s.data,
-                            onEditRequest = { showEditView = true },
-                            onDeactivateRequest = { showDeactivateConfirm = true }
-                        )
+                        is CommunityStatus.Active -> {
+                            interestCards?.let { cards ->
+                                InterestCardsSection(
+                                    settings = cards,
+                                    enabled = !savingInterestCards,
+                                    onChange = { saveInterestCards(it) }
+                                )
+                            }
+                            ActiveSection(
+                                community = s.data,
+                                onEditRequest = { showEditView = true },
+                                onDeactivateRequest = { showDeactivateConfirm = true }
+                            )
+                        }
                     }
                 }
             }
@@ -461,6 +505,56 @@ private fun ActiveSection(
             .padding(vertical = 4.dp)
     ) {
         Text("Deactivate Community", color = Color(0xFFFF453A), fontSize = 14.sp)
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Into right now
+// ─────────────────────────────────────────────
+
+@Composable
+private fun InterestCardsSection(
+    settings: InterestCardSettings,
+    enabled: Boolean,
+    onChange: (InterestCardSettings) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text("Into right now", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        Text(
+            "Members see these on your community page.",
+            fontSize = 12.sp, color = Color.White.copy(alpha = 0.5f)
+        )
+        Spacer(Modifier.height(6.dp))
+        InterestSwitchRow("Stitch Picks results", settings.picks, enabled) { onChange(settings.copy(picks = it)) }
+        InterestSwitchRow("Videos I hyped", settings.hyped, enabled) { onChange(settings.copy(hyped = it)) }
+        InterestSwitchRow("Shows I'm watching", settings.watching, enabled) { onChange(settings.copy(watching = it)) }
+    }
+}
+
+@Composable
+private fun InterestSwitchRow(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 14.sp, color = Color.White, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFFE91E63),
+                uncheckedThumbColor = Color.White.copy(alpha = 0.8f),
+                uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
+                uncheckedBorderColor = Color.Transparent
+            )
+        )
     }
 }
 

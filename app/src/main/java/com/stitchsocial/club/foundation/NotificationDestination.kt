@@ -171,7 +171,7 @@ sealed class NotificationDestination {
                 return str("campaignID", "campaignId", "campaign_id")?.let { Campaign(it) } ?: Campaigns
             }
             if (type == "adopportunity") return AdOpportunities
-            if (type == "stripeconnectactive") return Wallet
+            if (type in setOf("stripeconnectactive", "payoutsent", "payoutdeposited", "payoutfailed")) return Wallet
             if (type in OWN_PROFILE_TYPES) return OwnProfile
 
             // 7. Anything carrying a video plays that video.

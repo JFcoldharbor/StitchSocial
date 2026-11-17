@@ -232,6 +232,11 @@ fun EarningsPayoutsPage(
     onPayoutMethod: () -> Unit,
     onSubscriptionTiers: () -> Unit,
 ) {
+    var showingHistory by remember { mutableStateOf(false) }
+    if (showingHistory) {
+        PayoutHistoryPage(onDismiss = { showingHistory = false })
+        return
+    }
     SettingsSubPage(title = "Earnings & payouts", onDismiss = onDismiss) {
         Column(
             modifier = Modifier
@@ -291,7 +296,11 @@ fun EarningsPayoutsPage(
 
         SettingsSectionHeader("History")
         SettingsGroupCard {
-            SettingsRow(title = "Payout history", subtitle = "Coming soon", showChevron = false, titleColor = AppTheme.colors.textSecondary)
+            SettingsRow(
+                title = "Payout history",
+                subtitle = "What you've been paid and what's coming",
+                onClick = { showingHistory = true },
+            )
             SettingsDivider(inset = Spacing.md)
             SettingsRow(title = "Statements & receipts", subtitle = "Coming soon", showChevron = false, titleColor = AppTheme.colors.textSecondary)
         }

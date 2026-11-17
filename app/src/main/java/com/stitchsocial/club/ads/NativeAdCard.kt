@@ -60,7 +60,13 @@ fun NativeAdCard(
     /** Subscribers bought an ad-free experience — honour it. */
     enabled: Boolean = true,
     /** The video the slot sits beside, if any — context for brand ad targeting. */
-    videoID: String? = null
+    videoID: String? = null,
+    /**
+     * The community page's slot: a #1A1A26 card with icon, headline,
+     * "Community partner · Ad" and a white CTA in one row, media below at the
+     * 120dp minimum. Same registered assets and rules as the default card.
+     */
+    compact: Boolean = false
 ) {
     if (!enabled) return
 
@@ -99,8 +105,9 @@ fun NativeAdCard(
     val ad = nativeAd ?: return
 
     AndroidView(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-        factory = { ctx -> buildAdView(ctx) },
+        modifier = if (compact) modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        else modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+        factory = { ctx -> if (compact) buildCompactAdView(ctx) else buildAdView(ctx) },
         update = { root -> bind(root, ad) }
     )
 }
@@ -217,6 +224,93 @@ private fun buildAdView(ctx: Context): NativeAdView {
 
     root.headlineView = headline
     root.bodyView = body
+    root.advertiserView = advertiser
+    root.iconView = icon
+    root.mediaView = media
+    root.callToActionView = cta
+    return root
+}
+
+/**
+ * The compact community card. Every asset view keeps the tag [bind] looks up;
+ * there is no body view, so bind leaves bodyView unregistered (never an empty
+ * registered asset).
+ */
+private fun buildCompactAdView(ctx: Context): NativeAdView {
+    val density = ctx.resources.displayMetrics.density
+    fun dp(v: Int) = (v * density).toInt()
+
+    val root = NativeAdView(ctx)
+    val column = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(AndroidColor.parseColor("#1A1A26"))
+            cornerRadius = dp(16).toFloat()
+        }
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    }
+    val row = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    val icon = ImageView(ctx).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) }
+        clipToOutline = true
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(AndroidColor.WHITE); cornerRadius = dp(12).toFloat()
+        }
+        tag = "icon"
+    }
+    val texts = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+    }
+    val headline = TextView(ctx).apply {
+        setTextColor(AndroidColor.WHITE); textSize = 14f
+        typeface = Typeface.DEFAULT_BOLD; maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        tag = "headline"
+    }
+    val label = TextView(ctx).apply {
+        text = "Community partner · Ad"     // Always labelled. Policy, and honesty.
+        setTextColor(AndroidColor.parseColor("#80808C"))
+        textSize = 11f
+        tag = "label"
+    }
+    val advertiser = TextView(ctx).apply {
+        setTextColor(AndroidColor.parseColor("#80808C")); textSize = 11f; maxLines = 1
+        tag = "advertiser"
+    }
+    texts.addView(headline); texts.addView(label); texts.addView(advertiser)
+    val cta = Button(ctx).apply {
+        setTextColor(AndroidColor.parseColor("#0D0D14"))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(AndroidColor.WHITE); cornerRadius = dp(17).toFloat()
+        }
+        isAllCaps = false
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        minHeight = 0; minimumHeight = 0
+        setPadding(dp(14), 0, dp(14), 0)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(34))
+        tag = "cta"
+    }
+    row.addView(icon); row.addView(texts); row.addView(cta)
+    // >= 120x120dp for video creatives, or the validator flags it.
+    val media = MediaView(ctx).apply {
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(120)).apply {
+            topMargin = dp(10)
+        }
+        tag = "media"
+    }
+    column.addView(row)
+    column.addView(media)
+    root.addView(column)
+
+    root.headlineView = headline
     root.advertiserView = advertiser
     root.iconView = icon
     root.mediaView = media

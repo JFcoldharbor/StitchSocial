@@ -215,16 +215,34 @@ data class CommunityMembership(
             level >= feature.requiredLevel
 
     companion object {
-        fun fromFirestore(data: Map<String, Any>): CommunityMembership {
+        /**
+         * Never throws, and every field has a safe default.
+         *
+         * Real member docs carry exactly: coinsPaid, communityID,
+         * dailyLoginStreak, displayName, earnedBadgeIDs, id, isBanned,
+         * isModerator, isOwner, joinedAt, lastActiveAt, level, localXP,
+         * streamsAttended, totalHypesGiven, totalHypesReceived, totalPosts,
+         * totalReplies, userID, username. No hasOwnerPrivileges, no
+         * subscriptionTier, no lastDailyLoginAt — on iOS one REQUIRED field
+         * from that missing list failed every decode and emptied the
+         * leaderboard. Keep it that way here: anything absent, null or of an
+         * unexpected type (a Long where a Timestamp was expected, a Double
+         * level) falls back instead of failing.
+         *
+         * [docID] is the document id (== userID) for a doc that is missing its
+         * own id/userID fields.
+         */
+        fun fromFirestore(data: Map<String, Any?>, docID: String? = null): CommunityMembership {
+            val id = docID?.takeIf { it.isNotBlank() } ?: str(data["id"]) ?: str(data["userID"]) ?: ""
             return CommunityMembership(
-                id = data["id"] as? String ?: data["userID"] as? String ?: "",
-                userID = data["userID"] as? String ?: "",
-                communityID = data["communityID"] as? String ?: "",
+                id = id,
+                userID = str(data["userID"]) ?: docID ?: id,
+                communityID = str(data["communityID"]) ?: "",
                 username = data["username"] as? String ?: "",
                 displayName = data["displayName"] as? String ?: "",
-                subscriptionTier = data["subscriptionTier"] as? String ?: "supporter",
-                localXP = (data["localXP"] as? Number)?.toInt() ?: 0,
-                level = (data["level"] as? Number)?.toInt() ?: 1,
+                subscriptionTier = str(data["subscriptionTier"]) ?: "supporter",
+                localXP = int(data["localXP"]) ?: 0,
+                level = (int(data["level"]) ?: 1).coerceAtLeast(1),
                 earnedBadgeIDs = (data["earnedBadgeIDs"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
                 isOwner = data["isOwner"] as? Boolean ?: false,
                 // Legacy members were written before this field existed. Falling
@@ -234,16 +252,32 @@ data class CommunityMembership(
                     ?: (data["isOwner"] as? Boolean ?: false),
                 isModerator = data["isModerator"] as? Boolean ?: false,
                 isBanned = data["isBanned"] as? Boolean ?: false,
-                lastActiveAt = (data["lastActiveAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
-                joinedAt = (data["joinedAt"] as? com.google.firebase.Timestamp)?.toDate() ?: Date(),
-                totalPosts = (data["totalPosts"] as? Number)?.toInt() ?: 0,
-                totalReplies = (data["totalReplies"] as? Number)?.toInt() ?: 0,
-                totalHypesGiven = (data["totalHypesGiven"] as? Number)?.toInt() ?: 0,
-                totalHypesReceived = (data["totalHypesReceived"] as? Number)?.toInt() ?: 0,
-                streamsAttended = (data["streamsAttended"] as? Number)?.toInt() ?: 0,
-                dailyLoginStreak = (data["dailyLoginStreak"] as? Number)?.toInt() ?: 0,
-                lastDailyLoginAt = (data["lastDailyLoginAt"] as? com.google.firebase.Timestamp)?.toDate()
+                lastActiveAt = date(data["lastActiveAt"]) ?: Date(),
+                joinedAt = date(data["joinedAt"]) ?: Date(),
+                totalPosts = int(data["totalPosts"]) ?: 0,
+                totalReplies = int(data["totalReplies"]) ?: 0,
+                totalHypesGiven = int(data["totalHypesGiven"]) ?: 0,
+                totalHypesReceived = int(data["totalHypesReceived"]) ?: 0,
+                streamsAttended = int(data["streamsAttended"]) ?: 0,
+                dailyLoginStreak = int(data["dailyLoginStreak"]) ?: 0,
+                lastDailyLoginAt = date(data["lastDailyLoginAt"])
             )
+        }
+
+        private fun str(v: Any?): String? = (v as? String)?.takeIf { it.isNotBlank() }
+
+        private fun int(v: Any?): Int? = when (v) {
+            is Number -> v.toInt()
+            is String -> v.toDoubleOrNull()?.toInt()
+            else -> null
+        }
+
+        private fun date(v: Any?): Date? = when (v) {
+            is com.google.firebase.Timestamp -> v.toDate()
+            is Date -> v
+            // Epoch seconds or millis, written by a script or another client.
+            is Number -> v.toLong().let { if (it < 100_000_000_000L) Date(it * 1000) else Date(it) }
+            else -> null
         }
     }
 

@@ -2,38 +2,25 @@
  * CommunityDetailV2View.kt
  * STITCH SOCIAL - ANDROID KOTLIN
  *
- * Layer 8: Views - Community Detail Screen (V2)
+ * Layer 8: Views - Community home
  *
- * Mirrors iOS CommunityDetailV2View.swift — TabView pattern with Home +
- * Threads tabs, sticky header, contextual FAB, bottom tab bar. Replaces the
- * v1 single-scroll layout that lived in CommunityDetailView.kt.
+ * The approved "B" layout, one scrolling column with pull-to-refresh:
+ *   cover (the creator's latest clip, or the live state) → identity →
+ *   owner actions + this week (owner) → Into right now → You (member) →
+ *   Top members → Highlights → Posts (partner slot after the 3rd), with one
+ *   floating record button. Palette is the Stitch brand, not the old navy V2.
  *
- * Surface:
- *  - V2 design tokens (private object)
- *  - V2Tab enum + V2TabBar + V2FAB
- *  - CommunityDetailV2View (root composable, replaces V1)
- *  - CommunityHomeTab (LiveBanner/GoLiveCTA + StatsRow + 4 preview cards
- *    + QuickLinks)
- *  - CommunityThreadsTab + CommunityThreadRow (compact feed rows per the
- *    handoff spec, screen 1e — no longer V1's boxed PostCard)
- *  - GoLiveCTACard / LiveBannerCard / StatsRow / LeaderboardPreviewCard /
- *    TopSupportersPreviewCard / BadgesPreviewCard / HighlightReelPreviewCard
- *    / QuickLinksRow
+ * Data comes from CommunityHomeViewModel (Firestore reads + the
+ * community_home callable, each failing on its own). Live state — the ghost
+ * recovery, the listener, join/auto-join — stays here unchanged.
  *
- * Reuses from V1:
- *  - CreatorHeaderCard (sticky header)
- *  - ComposePostSheet (compose flow)
- *  - parseMembership / parsePost helpers
+ * The old Home/Threads tabs, stats boxes and preview cards are gone; nothing
+ * here navigates to Threads/Events/Challenges any more.
  */
 
 package com.stitchsocial.club.views
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,86 +28,107 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.PlayCircleFilled
-import androidx.compose.material.icons.filled.Podcasts
-import androidx.compose.material.icons.filled.QuestionAnswer
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.foundation.lazy.itemsIndexed
-import coil.compose.AsyncImage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.Timestamp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import com.stitchsocial.club.BuildConfig
+import com.stitchsocial.club.community.CommunityHome
 import com.stitchsocial.club.community.CommunityListItem
 import com.stitchsocial.club.community.CommunityMembership
-import com.stitchsocial.club.community.CommunityXPService
-import com.stitchsocial.club.community.LevelUpToastHost
-import com.stitchsocial.club.foundation.UserTier
-import com.stitchsocial.club.live.VideoComment
 import com.stitchsocial.club.community.CommunityPost
-import com.stitchsocial.club.community.CommunityPostType
+import com.stitchsocial.club.community.CommunityUserProfile
+import com.stitchsocial.club.community.CommunityXPCurve
+import com.stitchsocial.club.community.CommunityXPService
+import com.stitchsocial.club.community.InterestHypedVideo
+import com.stitchsocial.club.community.InterestPicks
+import com.stitchsocial.club.community.InterestWatching
+import com.stitchsocial.club.community.LevelUpToastHost
+import com.stitchsocial.club.foundation.NotificationRouter
+import com.stitchsocial.club.foundation.UserTier
+import com.stitchsocial.club.foundation.VideoCollection
+import com.stitchsocial.club.live.VideoComment
+import com.stitchsocial.club.services.CollectionService
+import com.stitchsocial.club.viewmodels.CommunityHomeViewModel
+import com.stitchsocial.club.viewmodels.CommunityHomeViewModelFactory
+import com.stitchsocial.club.viewmodels.isVideo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Date
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Design tokens — mirrors iOS V2 palette
+// Stitch brand palette (mockup B)
 // ─────────────────────────────────────────────────────────────────────────────
 
-private object V2 {
-    val bg = Color(0xFF0F0B1E)
-    val card = Color(0xFF1A1432)
-    val cardBorder = Color.White.copy(alpha = 0.08f)
-    val cyan = Color(0xFF22D3EE)   // handoff cyan
-    val purple = Color(0xFFA78BFA) // handoff purple
-    val pink = Color(0xFFF0245F)   // handoff brand pink
-    val orange = Color(0xFFF59E0B)
-    val gold = Color(0xFFFACC15)   // handoff gold
-    val red = Color(0xFFEF4444)
-    val green = Color(0xFF10B981)
-    val txt = Color(0xFFF1F5F9)
-    val txt2 = Color(0xFF94A3B8)
-    val txt3 = Color(0xFF64748B)
+private object B {
+    val bg = Color(0xFF0D0D14)
+    val card = Color(0xFF1A1A26)
+    val magenta = Color(0xFFE91E63)
+    val blue = Color(0xFF3399FF)
+    val blueLight = Color(0xFF66B3FF)
+    val live = Color(0xFFFF3B30)
+    val txt = Color(0xFFFFFFFF)
+    val txt2 = Color(0xFFB3B3BF)
+    val txt3 = Color(0xFF80808C)
+    val txtSoft = Color(0xFFE6E6EE)
+    val green = Color(0xFF4ADE80)
+    val gold = Color(0xFFFFD24A)
+    val wrong = Color(0xFFFF6B6B)
+    val streak = Color(0xFFFF9F43)
+    val coverFallback = Color(0xFF2A1030)
+    val liveCoverFallback = Color(0xFF3A0F1E)
+    val translucent = Color.Black.copy(alpha = 0.45f)
+
+    val brand = Brush.linearGradient(listOf(blue, magenta))
+    val brandH = Brush.horizontalGradient(listOf(blue, magenta))
+
+    /** Top-member ring by rank: gold, magenta, blue, indigo, then green. */
+    fun rankRing(rank: Int): Color = when (rank) {
+        1 -> gold
+        2 -> magenta
+        3 -> blue
+        4 -> Color(0xFF6366F1)
+        else -> Color(0xFF34C759)
+    }
 }
 
-private enum class V2Tab(val label: String, val icon: ImageVector, val fabIcon: ImageVector) {
-    // Both tabs share the Edit/pencil FAB icon — tapping it on either tab
-    // opens the post composer. Go Live is creator-only and lives behind
-    // the GoLiveCTACard on the Home tab (not behind this FAB).
-    HOME(label = "Home", icon = Icons.Default.Home, fabIcon = Icons.Default.Edit),
-    THREADS(label = "Threads", icon = Icons.Default.QuestionAnswer, fabIcon = Icons.Default.Edit),
-}
+/** Same rule the community list uses for its PARTNER label. */
+private fun isPartnerTier(tier: String?): Boolean =
+    tier == "partner" || tier == "topCreator" || tier == "founder"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Root composable
@@ -163,26 +171,30 @@ fun CommunityDetailV2View(
 ) {
     val db = remember { FirebaseFirestore.getInstance("stitchfin") }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
-    var membership by remember { mutableStateOf<CommunityMembership?>(null) }
+    val vm: CommunityHomeViewModel = viewModel(
+        key = "communityHome_${communityID}_$userID",
+        factory = CommunityHomeViewModelFactory(communityID, userID),
+    )
+    val state by vm.state.collectAsState()
+    LaunchedEffect(vm) { vm.onAppear() }
+
+    val membership = state.membership
     // The VIEWER's account tier — deliberately not the room owner's. An
     // Ambassador visiting someone else's community is the case this exists
     // for, and reading the community's creatorTier would answer about the
     // wrong person entirely.
-    var viewerTier by remember { mutableStateOf<UserTier?>(null) }
+    val viewerTier: UserTier? = state.viewer?.tier?.let { UserTier.fromRawValue(it) }
     // Live profile values, preferred over the membership snapshot.
-    var viewerUsername by remember { mutableStateOf<String?>(null) }
-    var viewerDisplayName by remember { mutableStateOf<String?>(null) }
-    // Ad-free is a paid perk — resolved once, defaults to SHOWING ads so a
-    // failed lookup can't accidentally give the product away.
-    var viewerHasNoAds by remember { mutableStateOf(false) }
+    val viewerUsername: String? = state.viewer?.username
+    val viewerDisplayName: String? = state.viewer?.displayName
+    // Ad-free is a paid perk — defaults to SHOWING ads so a failed lookup
+    // can't accidentally give the product away.
+    val viewerHasNoAds = false
     // null = prompt not answered yet; "" = answered with the default.
     // Nullable rather than a second boolean so the two states can't drift.
     var goLiveMessage by remember { mutableStateOf<String?>(null) }
-    var topMembers by remember { mutableStateOf<List<CommunityMembership>>(emptyList()) }
-    var posts by remember { mutableStateOf<List<CommunityPost>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var tab by remember { mutableStateOf(V2Tab.HOME) }
     var showingComposer by remember { mutableStateOf(false) }
     // The clip the app recorder handed back for a NEW thread in this channel.
     var recordedClipUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -190,14 +202,16 @@ fun CommunityDetailV2View(
     var showingGoLive by remember { mutableStateOf(false) }
     var showingLiveStream by remember { mutableStateOf(false) }
     var showingLeaderboard by remember { mutableStateOf(false) }
-    var showingSupporters by remember { mutableStateOf(false) }
     var showingBadges by remember { mutableStateOf(false) }
-    var showingHighlight by remember { mutableStateOf(false) }
+    var showingSettings by remember { mutableStateOf(false) }
+    var openCollection by remember { mutableStateOf<VideoCollection?>(null) }
 
     // Live state — mirrored from snapshot listener + verified against the
     // actual stream doc (handles ghost flags on the community doc).
     var isCreatorLiveRealtime by remember { mutableStateOf(communityItem.isCreatorLive) }
     var liveStreamID by remember { mutableStateOf<String?>(null) }
+    var memberCount by remember { mutableStateOf(communityItem.memberCount) }
+    var liveViewerCount by remember { mutableStateOf<Int?>(null) }
 
     val isCreator = userID == communityID
 
@@ -290,6 +304,7 @@ fun CommunityDetailV2View(
                 val data = snap?.data ?: return@addSnapshotListener
                 isCreatorLiveRealtime = data["isCreatorLive"] as? Boolean ?: false
                 liveStreamID = data["activeStreamID"] as? String
+                (data["memberCount"] as? Number)?.toInt()?.let { memberCount = it }
                 // Close the viewer when the stream it was showing goes away.
                 // Without this, showingLiveStream stayed true after a stream
                 // ended, so the NEXT stream re-presented the screen on its own
@@ -359,48 +374,46 @@ fun CommunityDetailV2View(
         openLiveStream()
     }
 
-    // Data load
-    LaunchedEffect(communityID) {
-        isLoading = true
-        try {
-            val memDoc = db.collection("communities").document(communityID)
-                .collection("members").document(userID).get().await()
-            if (memDoc.exists()) {
-                membership = parseMembership(memDoc.id, memDoc.data ?: emptyMap())
-            }
+    // "N watching" on the live cover — the stream doc's viewerCount, re-read
+    // every 30s while live. A separate read, not LiveStreamService's listener,
+    // which belongs to the viewer screen.
+    LaunchedEffect(isCreatorLiveRealtime, liveStreamID) {
+        liveViewerCount = null
+        val sid = liveStreamID ?: return@LaunchedEffect
+        if (!isCreatorLiveRealtime) return@LaunchedEffect
+        while (true) {
+            com.stitchsocial.club.community.CommunityHomeService.shared
+                .fetchViewerCount(communityID, sid)?.let { liveViewerCount = it }
+            delay(30_000)
+        }
+    }
 
-            // The viewer's own profile — tier AND name.
-            //
-            // The membership doc carries a username/displayName snapshot taken
-            // when they JOINED this community, so anyone who has renamed since
-            // shows up under their old name in chat and the join message, while
-            // notifications (which read the users doc) show the new one. Same
-            // person, two names, depending on which door they came through.
-            runCatching {
-                val doc = db.collection("users").document(userID).get().await()
-                viewerTier = UserTier.fromRawValue(doc.getString("tier") ?: "rookie")
-                doc.getString("username")?.takeIf { it.isNotBlank() }?.let { viewerUsername = it }
-                doc.getString("displayName")?.takeIf { it.isNotBlank() }?.let { viewerDisplayName = it }
-            }
+    val creatorName = state.creator?.displayName ?: communityItem.creatorDisplayName
+    val creatorImage = state.creator?.profileImageURL ?: communityItem.profileImageURL
+    val isPartner = isPartnerTier(state.creator?.tier ?: communityItem.creatorTier)
+    val home: CommunityHome? = state.home
 
-            val membersSnap = db.collection("communities").document(communityID)
-                .collection("members")
-                .orderBy("localXP", Query.Direction.DESCENDING)
-                .limit(10).get().await()
-            topMembers = membersSnap.documents.mapNotNull { d ->
-                parseMembership(d.id, d.data ?: emptyMap())
+    val record: () -> Unit = { onRecordClip(communityID, null) }
+    val share: () -> Unit = {
+        val username = state.creator?.username ?: communityItem.creatorUsername
+        val text = "Join $creatorName's community on Stitch: https://stitchsocial.me/u/$username"
+        runCatching {
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, text)
+                    },
+                    "Share community"
+                )
+            )
+        }
+    }
+    val openWatching: (InterestWatching) -> Unit = { w ->
+        w.collectionID?.let { cid ->
+            scope.launch {
+                openCollection = runCatching { CollectionService().getCollection(cid) }.getOrNull()
             }
-
-            val postsSnap = db.collection("communities").document(communityID)
-                .collection("posts")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(20).get().await()
-            posts = postsSnap.documents.mapNotNull { d ->
-                parsePost(d.id, d.data ?: emptyMap())
-            }
-        } catch (_: Exception) {
-        } finally {
-            isLoading = false
         }
     }
 
@@ -411,99 +424,96 @@ fun CommunityDetailV2View(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(V2.bg)
+            .background(B.bg)
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { /* consume */ })
             }
     ) {
-        if (isLoading) {
+        if (state.isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = V2.cyan, modifier = Modifier.size(36.dp))
+                CircularProgressIndicator(color = B.magenta, modifier = Modifier.size(36.dp))
             }
         } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Sticky header — reuses V1 CreatorHeaderCard.
-                CreatorHeaderCard(
-                    communityItem = communityItem,
-                    memberCount = topMembers.size,
+            PullToRefreshBox(
+                isRefreshing = state.isRefreshing,
+                onRefresh = { vm.refresh() },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                CommunityHomeColumn(
+                    communityID = communityID,
+                    creatorName = creatorName,
+                    creatorImage = creatorImage,
+                    isPartner = isPartner,
+                    memberCount = memberCount,
+                    home = home,
                     isCreator = isCreator,
+                    isLive = isCreatorLiveRealtime,
+                    liveViewerCount = liveViewerCount,
+                    membership = membership,
+                    topMembers = state.topMembers,
+                    profiles = state.profiles,
+                    posts = state.posts,
+                    highlights = state.highlights,
+                    adOwner = com.stitchsocial.club.ads.AdConfig.ImpressionOwner(
+                        // The ROOM's owner earns, split by THEIR tier — not
+                        // the viewer's, who is just watching.
+                        type = com.stitchsocial.club.ads.AdConfig.OwnerType.CREATOR,
+                        creatorID = communityID,
+                        tier = UserTier.fromRawValue(communityItem.creatorTier)
+                    ),
+                    // Subscribers bought ad-free; delivering ads anyway
+                    // is selling something we don't hand over.
+                    adsEnabled = !viewerHasNoAds,
                     onBack = onDismiss,
-                )
-
-                Box(modifier = Modifier.weight(1f)) {
-                    when (tab) {
-                        V2Tab.HOME -> CommunityHomeTab(
-                            communityItem = communityItem,
-                            membership = membership,
-                            topMembers = topMembers,
-                            isCreator = isCreator,
-                            isCreatorLive = isCreatorLiveRealtime,
-                            onJoinLive = { scope.launch { openLiveStream() } },
-                            onGoLive = { if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingGoLive = true },
-                            onShowLeaderboard = { showingLeaderboard = true },
-                            onShowSupporters = { showingSupporters = true },
-                            onShowBadges = { showingBadges = true },
-                            onShowHighlight = { showingHighlight = true },
+                    onShare = share,
+                    onSettings = { showingSettings = true },
+                    onJoinLive = { scope.launch { openLiveStream() } },
+                    onGoLive = {
+                        if (com.stitchsocial.club.services.AccountStanding.guardPosting()) showingGoLive = true
+                    },
+                    onRecord = record,
+                    onOpenPicks = { slug ->
+                        com.stitchsocial.club.landing.LandingPresenter.route(
+                            slug = slug,
+                            source = com.stitchsocial.club.landing.LandingSource.PROFILE
                         )
-                        V2Tab.THREADS -> CommunityThreadsTab(
-                            posts = posts,
-                            onSelectPost = { selectedPost = it },
-                            onHype = { post ->
-                                scope.launch {
-                                    runCatching {
-                                        db.collection("communities").document(communityID)
-                                            .collection("posts").document(post.id)
-                                            .update(
-                                                "hypeCount",
-                                                com.google.firebase.firestore.FieldValue.increment(1L)
-                                            ).await()
-                                        posts = posts.map { p ->
-                                            if (p.id == post.id) p.copy(hypeCount = p.hypeCount + 1) else p
-                                        }
-                                    }
-                                }
-                            },
-                            onCompose = { onRecordClip(communityID, null) },
-                            // The ROOM's owner earns, split by THEIR tier — not
-                            // the viewer's, who is just watching.
-                            adOwner = com.stitchsocial.club.ads.AdConfig.ImpressionOwner(
-                                type = com.stitchsocial.club.ads.AdConfig.OwnerType.CREATOR,
-                                creatorID = communityID,
-                                tier = com.stitchsocial.club.foundation.UserTier
-                                    .fromRawValue(communityItem.creatorTier)
-                            ),
-                            // Subscribers bought ad-free; delivering ads anyway
-                            // is selling something we don't hand over.
-                            adsEnabled = !viewerHasNoAds,
-                        )
-                    }
-                }
-
-                // Channel nav — Home/Threads pills + record FAB beside them
-                // (tightening pass; replaces the full-width tab bar + floating FAB).
-                // The record FAB now opens the SAME recorder as the main + button
-                // (iOS parity, e6f51f6) — not a Record/Pick menu.
-                V2ChannelNav(
-                    active = tab,
-                    onSelect = { tab = it },
-                    onRecord = { onRecordClip(communityID, null) },
+                    },
+                    onOpenVideo = { videoID ->
+                        // The same route a /v link takes: the fullscreen player.
+                        NotificationRouter.request(NotificationRouter.TYPE_SHARED_LINK, mapOf("videoID" to videoID))
+                    },
+                    onOpenWatching = openWatching,
+                    onShowBadges = { showingBadges = true },
+                    onShowLeaderboard = { showingLeaderboard = true },
+                    onOpenPost = { selectedPost = it },
+                    onHype = { vm.hype(it) },
+                    onStitch = { post -> onRecordClip(communityID, post.id) },
                 )
+            }
+
+            // One floating record button (replaces the Home/Threads pill nav).
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 18.dp, bottom = 18.dp)
+                    .shadow(16.dp, CircleShape, ambientColor = B.magenta, spotColor = B.magenta)
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(B.brand)
+                    .clickable { record() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Videocam, contentDescription = "Record a post", tint = Color.White, modifier = Modifier.size(28.dp))
             }
         }
 
-        // Fullscreen overlays — drill-downs opened from preview cards / chips
+        // Fullscreen overlays
         if (showingLeaderboard) {
             MemberLeaderboardViewV2(
-                topMembers = topMembers,
+                topMembers = state.topMembers,
                 initialSort = LeaderboardSortV2.LEVEL,
                 onDismiss = { showingLeaderboard = false },
-            )
-        }
-        if (showingSupporters) {
-            MemberLeaderboardViewV2(
-                topMembers = topMembers,
-                initialSort = LeaderboardSortV2.HYPES_GIVEN,
-                onDismiss = { showingSupporters = false },
             )
         }
         if (showingBadges) {
@@ -514,10 +524,34 @@ fun CommunityDetailV2View(
                 onDismiss = { showingBadges = false },
             )
         }
-        if (showingHighlight) {
-            HighlightPlayerViewV2(
-                communityName = communityItem.creatorDisplayName,
-                onDismiss = { showingHighlight = false },
+        if (showingSettings && isCreator) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .pointerInput(Unit) { detectTapGestures(onTap = { /* consume */ }) }
+            ) {
+                CreatorCommunitySettingsView(
+                    creatorID = communityID,
+                    creatorUsername = communityItem.creatorUsername,
+                    creatorDisplayName = communityItem.creatorDisplayName,
+                    creatorTier = viewerTier
+                        ?: UserTier.fromRawValue(communityItem.creatorTier)
+                        ?: UserTier.ROOKIE,
+                    onDismiss = {
+                        showingSettings = false
+                        vm.refresh()
+                    },
+                    onInterestCardsChanged = { vm.applyInterestCards(it) },
+                )
+            }
+        }
+        openCollection?.let { coll ->
+            CollectionPlayerView(
+                collection = coll,
+                userID = userID,
+                currentUserTier = viewerTier ?: UserTier.ROOKIE,
+                onDismiss = { openCollection = null },
             )
         }
 
@@ -543,7 +577,7 @@ fun CommunityDetailV2View(
         // Compose the invite BEFORE the camera opens — see GoLivePromptSheet.
         if (showingGoLive && isCreator && goLiveMessage == null) {
             com.stitchsocial.club.live.GoLivePromptSheet(
-                memberCount = communityItem.memberCount,
+                memberCount = memberCount,
                 onGoLive = { goLiveMessage = it },
                 onCancel = { showingGoLive = false }
             )
@@ -577,9 +611,8 @@ fun CommunityDetailV2View(
             isCreator = isCreator,
             initialUri = recordedClipUri,
             onPosted = { newPost ->
-                // Optimistic: prepend so the new thread shows up immediately
-                // on the Threads tab without needing a reload.
-                posts = listOf(newPost) + posts
+                // Optimistic: prepend so the new post shows up immediately.
+                vm.prependPost(newPost)
             },
             onDismiss = {
                 showingComposer = false
@@ -597,277 +630,1059 @@ fun CommunityDetailV2View(
             membership = membership,
             isCommunityCreator = isCreator,
             onDismiss = { selectedPost = null },
-            onDeleted = { deleted -> posts = posts.filter { it.id != deleted.id } },
+            onDeleted = { deleted -> vm.removePost(deleted.id) },
             onRecordClip = { cid, postID -> onRecordClip(cid, postID) },
         )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Home Tab
+// The scrolling column
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CommunityHomeTab(
-    communityItem: CommunityListItem,
+private fun CommunityHomeColumn(
+    communityID: String,
+    creatorName: String,
+    creatorImage: String?,
+    isPartner: Boolean,
+    memberCount: Int,
+    home: CommunityHome?,
+    isCreator: Boolean,
+    isLive: Boolean,
+    liveViewerCount: Int?,
     membership: CommunityMembership?,
     topMembers: List<CommunityMembership>,
-    isCreator: Boolean,
-    isCreatorLive: Boolean,
+    profiles: Map<String, CommunityUserProfile>,
+    posts: List<CommunityPost>,
+    highlights: List<CommunityPost>,
+    adOwner: com.stitchsocial.club.ads.AdConfig.ImpressionOwner,
+    adsEnabled: Boolean,
+    onBack: () -> Unit,
+    onShare: () -> Unit,
+    onSettings: () -> Unit,
     onJoinLive: () -> Unit,
     onGoLive: () -> Unit,
-    onShowLeaderboard: () -> Unit,
-    onShowSupporters: () -> Unit,
+    onRecord: () -> Unit,
+    onOpenPicks: (String) -> Unit,
+    onOpenVideo: (String) -> Unit,
+    onOpenWatching: (InterestWatching) -> Unit,
     onShowBadges: () -> Unit,
-    onShowHighlight: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(top = 6.dp, bottom = 24.dp),
-    ) {
-        when {
-            isCreatorLive -> LiveBannerCard(
-                creatorName = communityItem.creatorDisplayName,
-                onJoin = onJoinLive,
-            )
-            isCreator -> GoLiveCTACard(onTap = onGoLive)
-        }
-
-        StatsRow(
-            communityItem = communityItem,
-            membership = membership,
-        )
-
-        LeaderboardPreviewCard(topMembers = topMembers, membership = membership, onTap = onShowLeaderboard)
-        // Collapse empty cards (tightening pass) — don't render Supporters/Badges when empty.
-        if (topMembers.any { it.totalHypesGiven > 0 }) {
-            TopSupportersPreviewCard(topMembers = topMembers, onTap = onShowSupporters)
-        }
-
-        val badgeCount = membership?.earnedBadgeIDs?.size ?: 0
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (badgeCount > 0) {
-                BadgesPreviewCard(
-                    earnedCount = badgeCount,
-                    modifier = Modifier.weight(1f),
-                    onTap = onShowBadges,
-                )
-            }
-            HighlightReelPreviewCard(
-                modifier = Modifier.weight(1f),
-                onTap = onShowHighlight,
-            )
-        }
-        // QuickLinksRow removed in the tightening pass (duplicate chips).
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Threads Tab
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun CommunityThreadsTab(
-    posts: List<CommunityPost>,
-    onSelectPost: (CommunityPost) -> Unit,
+    onShowLeaderboard: () -> Unit,
+    onOpenPost: (CommunityPost) -> Unit,
     onHype: (CommunityPost) -> Unit,
-    onCompose: () -> Unit,
-    /** Community inventory is CREATOR-owned — the room's owner earns, split by
-     *  their tier — matching the iOS ownership map. */
-    adOwner: com.stitchsocial.club.ads.AdConfig.ImpressionOwner? = null,
-    adsEnabled: Boolean = true,
+    onStitch: (CommunityPost) -> Unit,
 ) {
-    if (posts.isEmpty()) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("💬", fontSize = 36.sp)
-            Spacer(Modifier.height(8.dp))
-            Text("No threads yet", fontSize = 15.sp, color = V2.txt2)
-            Text(
-                "Tap the pencil to start one",
-                fontSize = 12.sp,
-                color = V2.txt3,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-        return
-    }
-    // Feed rows per the handoff spec (screen 1e): compact rows separated by
-    // hairline rules, not V1's boxed PostCard with a full-width 9:16 thumbnail.
+    val top10 = remember(topMembers) { topMembers.take(10) }
+    val interests = home?.interests
+    val adIndex = if (posts.isEmpty()) -1 else minOf(2, posts.lastIndex)
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp, bottom = 20.dp),
+        // Room for the floating record button over the last post.
+        contentPadding = PaddingValues(bottom = 110.dp),
     ) {
-        itemsIndexed(posts, key = { _, p -> p.id }) { index, post ->
-            if (index > 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp)
-                        .height(1.dp)
-                        .background(Color.White.copy(alpha = 0.06f))
-                )
-            }
-            CommunityThreadRow(
-                post = post,
-                onHype = { onHype(post) },
-                onTap = { onSelectPost(post) },
+        item(key = "header") {
+            CoverAndIdentity(
+                coverURL = home?.coverURL,
+                creatorName = creatorName,
+                creatorImage = creatorImage,
+                isPartner = isPartner,
+                memberCount = memberCount,
+                activeThisWeek = home?.activeThisWeek,
+                faces = top10.take(5).map { it to profiles[it.userID]?.profileImageURL },
+                isCreator = isCreator,
+                isLive = isLive,
+                liveViewerCount = liveViewerCount,
+                onBack = onBack,
+                onShare = onShare,
+                onSettings = onSettings,
+                onJoinLive = onJoinLive,
             )
         }
 
-        // Partner card, LAST in the scroll. Deliberately not interleaved between
-        // posts: an ad spliced into a conversation reads as a post, which is
-        // both worse for the member and a policy problem — sponsored content
-        // has to be distinguishable from content.
-        if (adOwner != null && adsEnabled) {
-            item {
-                com.stitchsocial.club.ads.NativeAdCard(
-                    unitId = com.stitchsocial.club.ads.AdConfig.NativeUnit.community,
-                    owner = adOwner,
-                    placement = "community_partner_card",
+        if (isCreator) {
+            item(key = "owner") {
+                OwnerActions(
+                    memberCount = memberCount,
+                    isLive = isLive,
+                    onGoLive = onGoLive,
+                    onPost = onRecord,
+                )
+                home?.owner?.let { ThisWeekCard(it.newMembers, it.posts, it.activeMembers) }
+            }
+        }
+
+        if (interests != null && !interests.isEmpty) {
+            item(key = "interests") {
+                IntoRightNow(
+                    picks = interests.picks,
+                    hyped = interests.hyped,
+                    watching = interests.watching,
+                    onOpenPicks = onOpenPicks,
+                    onOpenVideo = onOpenVideo,
+                    onOpenWatching = onOpenWatching,
                 )
             }
         }
-    }
-}
 
-/**
- * One thread in the channel feed. Spec (1e): 72x96 rounded-12 thumbnail, 20pt
- * author avatar, handle + age, title, then a metric row of hype + stitches.
- * Rows older than a day render at 60% opacity so today's activity reads first.
- */
-@Composable
-private fun CommunityThreadRow(
-    post: CommunityPost,
-    onHype: () -> Unit,
-    onTap: () -> Unit,
-) {
-    val isOlder = System.currentTimeMillis() - post.createdAt.time > 86_400_000L
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (isOlder) 0.6f else 1f)
-            .clickable { onTap() }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // Thumbnail
-        Box(
-            modifier = Modifier
-                .size(width = 72.dp, height = 96.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.07f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (!post.videoThumbnailURL.isNullOrEmpty()) {
-                AsyncImage(
-                    model = post.videoThumbnailURL,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+        if (membership != null && !isCreator) {
+            item(key = "you") { YouCard(membership = membership, onTap = onShowBadges) }
+        }
+
+        if (top10.isNotEmpty()) {
+            item(key = "top") {
+                TopMembersRow(
+                    members = top10,
+                    profiles = profiles,
+                    onLeaderboard = onShowLeaderboard,
                 )
             }
-            if (post.postType == CommunityPostType.VIDEO_CLIP) {
-                Box(
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(15.dp),
+        }
+
+        if (highlights.isNotEmpty()) {
+            item(key = "highlights") { HighlightsRow(highlights, onOpenPost) }
+        }
+
+        item(key = "postsHeader") {
+            SectionTitle("Posts", modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 26.dp, bottom = 4.dp))
+        }
+
+        if (posts.isEmpty()) {
+            item(key = "empty") { EmptyPosts(onRecord) }
+        } else {
+            itemsIndexed(posts, key = { _, p -> p.id }) { index, post ->
+                PostCard(
+                    post = post,
+                    authorImage = profiles[post.authorID]?.profileImageURL,
+                    onOpen = { onOpenPost(post) },
+                    onHype = { onHype(post) },
+                    onStitch = { onStitch(post) },
+                )
+                // One partner slot, after the 3rd post (or the last, if fewer).
+                if (index == adIndex && adsEnabled) {
+                    com.stitchsocial.club.ads.NativeAdCard(
+                        unitId = com.stitchsocial.club.ads.AdConfig.NativeUnit.community,
+                        owner = adOwner,
+                        placement = "community_partner_card",
+                        compact = true,
                     )
                 }
             }
         }
+    }
+}
 
-        Column(modifier = Modifier.weight(1f)) {
+// ─────────────────────────────────────────────────────────────────────────────
+// 1–2. Cover + identity (and 9. the live state)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CoverAndIdentity(
+    coverURL: String?,
+    creatorName: String,
+    creatorImage: String?,
+    isPartner: Boolean,
+    memberCount: Int,
+    activeThisWeek: Int?,
+    faces: List<Pair<CommunityMembership, String?>>,
+    isCreator: Boolean,
+    isLive: Boolean,
+    liveViewerCount: Int?,
+    onBack: () -> Unit,
+    onShare: () -> Unit,
+    onSettings: () -> Unit,
+    onJoinLive: () -> Unit,
+) {
+    if (isLive) {
+        // While live, the cover IS the stream: 330dp, LIVE tag, join button.
+        Column {
+            Cover(
+                height = 330.dp,
+                coverURL = coverURL,
+                fallback = B.liveCoverFallback,
+                fadeHeight = 140.dp,
+                onBack = onBack,
+                trailing = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "LIVE", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp,
+                            color = Color.White,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(B.live)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                        liveViewerCount?.let {
+                            Text(
+                                "${formatShort(it)} watching", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                },
+                bottom = {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 16.dp, end = 16.dp, bottom = 18.dp)
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .shadow(12.dp, RoundedCornerShape(26.dp), ambientColor = B.live, spotColor = B.live)
+                            .clip(RoundedCornerShape(26.dp))
+                            .background(B.live)
+                            .clickable { onJoinLive() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            // The owner's way back to their own stream (as before).
+                            if (isCreator) "Back to your live" else "Join the live",
+                            fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color.White
+                        )
+                    }
+                },
+            )
             Row(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                MemberAvatar(name = post.authorDisplayName, size = 20)
-                Text(
-                    "@${post.authorUsername}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                RingAvatar(
+                    url = creatorImage, name = creatorName, size = 60.dp,
+                    ring = Brush.linearGradient(listOf(B.live, B.live)), ringWidth = 3.dp, gap = 2.dp,
                 )
-                Text(
-                    timeAgoShort(post.createdAt),
-                    fontSize = 10.5.sp,
-                    color = Color.White.copy(alpha = 0.35f),
-                )
-                if (post.isPinned) Text("📌", fontSize = 11.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    NameRow(creatorName, isPartner, fontSize = 22)
+                    MemberLine(memberCount, activeThisWeek)
+                }
             }
+        }
+        return
+    }
 
-            if (post.body.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    post.body,
-                    fontSize = 12.5.sp,
-                    color = Color.White.copy(alpha = 0.78f),
-                    lineHeight = 18.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                MetricChip(
-                    icon = Icons.Default.LocalFireDepartment,
-                    label = "${post.hypeCount}",
-                    onTap = onHype,
-                )
-                MetricChip(
-                    icon = Icons.Default.ContentCut,
-                    label = if (post.replyCount == 1) "1 stitch" else "${post.replyCount} stitches",
-                )
+    Box {
+        Cover(
+            height = 230.dp,
+            coverURL = coverURL,
+            fallback = B.coverFallback,
+            fadeHeight = 120.dp,
+            onBack = onBack,
+            trailing = {
+                RoundButton(
+                    onClick = if (isCreator) onSettings else onShare,
+                    contentDescription = if (isCreator) "Community settings" else "Share community",
+                ) {
+                    Icon(
+                        if (isCreator) Icons.Default.Tune else Icons.Default.IosShare,
+                        contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp)
+                    )
+                }
+            },
+            bottom = {},
+        )
+        // Identity, overlapping the cover by 64dp.
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 230.dp - 64.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RingAvatar(url = creatorImage, name = creatorName, size = 84.dp, ring = B.brand, ringWidth = 3.dp, gap = 3.dp)
+            NameRow(creatorName, isPartner, fontSize = 26)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (faces.isNotEmpty()) {
+                    FacePile(faces)
+                    Spacer(Modifier.width(10.dp))
+                }
+                MemberLine(memberCount, activeThisWeek)
             }
         }
     }
 }
 
 @Composable
-private fun MetricChip(
-    icon: ImageVector,
-    label: String,
-    onTap: (() -> Unit)? = null,
+private fun Cover(
+    height: Dp,
+    coverURL: String?,
+    fallback: Color,
+    fadeHeight: Dp,
+    onBack: () -> Unit,
+    trailing: @Composable () -> Unit,
+    bottom: @Composable BoxScope.() -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = if (onTap != null) Modifier.clickable { onTap() } else Modifier,
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .background(fallback)
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.5f),
-            modifier = Modifier.size(13.dp),
+        if (coverURL != null) {
+            AsyncImage(
+                model = coverURL,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(fadeHeight)
+                .background(Brush.verticalGradient(listOf(B.bg.copy(alpha = 0f), B.bg)))
         )
-        Text(
-            label,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.5f),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RoundButton(onClick = onBack, contentDescription = "Back") {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            trailing()
+        }
+        Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            bottom()
+        }
     }
 }
 
-/** "now" / "5m" / "3h" / "2d" — the compact age the spec's feed rows use. */
+@Composable
+private fun RoundButton(onClick: () -> Unit, contentDescription: String, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(B.translucent)
+            .clickable(onClickLabel = contentDescription) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+@Composable
+private fun NameRow(name: String, isPartner: Boolean, fontSize: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            name,
+            fontSize = fontSize.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.4).sp,
+            color = B.txt,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (isPartner) {
+            Text(
+                "PARTNER", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp,
+                color = B.bg,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(B.magenta)
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemberLine(memberCount: Int, activeThisWeek: Int?) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = B.txt, fontWeight = FontWeight.Bold)) { append(formatShort(memberCount)) }
+            append(if (memberCount == 1) " member" else " members")
+            if (activeThisWeek != null) {
+                append(" · ")
+                withStyle(SpanStyle(color = B.green, fontWeight = FontWeight.Bold)) { append(formatShort(activeThisWeek)) }
+                append(" active this week")
+            }
+        },
+        fontSize = 14.sp,
+        color = B.txt2,
+    )
+}
+
+/** Up to five overlapping 26dp avatars of the top members. */
+@Composable
+private fun FacePile(faces: List<Pair<CommunityMembership, String?>>) {
+    val step = 18.dp
+    Box(modifier = Modifier.width(step * (faces.size - 1) + 26.dp).height(26.dp)) {
+        faces.forEachIndexed { i, (m, url) ->
+            Box(
+                modifier = Modifier
+                    .offset(x = step * i)
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(B.bg)
+                    .padding(2.dp)
+            ) {
+                PersonImage(url = url, name = m.displayName.ifBlank { m.username }, size = 22.dp)
+            }
+        }
+    }
+}
+
+/** A round avatar inside a [ring] of [ringWidth], separated from it by a [gap] of page colour. */
+@Composable
+private fun RingAvatar(url: String?, name: String, size: Dp, ring: Brush, ringWidth: Dp, gap: Dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(ring)
+            .padding(ringWidth)
+            .clip(CircleShape)
+            .background(B.bg)
+            .padding(gap),
+    ) {
+        PersonImage(url = url, name = name, size = size - (ringWidth + gap) * 2)
+    }
+}
+
+/** Profile image, or initials on magenta. */
+@Composable
+private fun PersonImage(url: String?, name: String, size: Dp) {
+    if (!url.isNullOrBlank()) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape).background(B.card),
+        )
+    } else {
+        Box(
+            modifier = Modifier.size(size).clip(CircleShape).background(B.magenta),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                initials(name),
+                fontSize = (size.value * 0.36f).sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+            )
+        }
+    }
+}
+
+private fun initials(name: String): String {
+    val parts = name.trim().removePrefix("@").split(" ").filter { it.isNotBlank() }
+    val a = parts.getOrNull(0)?.firstOrNull()?.toString() ?: ""
+    val b = parts.getOrNull(1)?.firstOrNull()?.toString() ?: ""
+    return (a + b).uppercase().ifEmpty { "?" }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Owner actions + this week
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun OwnerActions(memberCount: Int, isLive: Boolean, onGoLive: () -> Unit, onPost: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // While live, the cover carries the way back to the stream instead.
+            if (!isLive) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(50.dp)
+                        .shadow(10.dp, RoundedCornerShape(25.dp), ambientColor = B.live, spotColor = B.live)
+                        .clip(RoundedCornerShape(25.dp))
+                        .background(B.live)
+                        .clickable { onGoLive() },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White))
+                    Spacer(Modifier.width(9.dp))
+                    Text("Go live", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp)
+                    .clip(RoundedCornerShape(25.dp))
+                    .background(B.card)
+                    .clickable { onPost() },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Videocam, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Post", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+        if (!isLive) {
+            Text(
+                "Going live sends a push to all ${formatShort(memberCount)} members",
+                fontSize = 12.sp,
+                color = B.txt3,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThisWeekCard(newMembers: Int, posts: Int, activeMembers: Int) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(B.card)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("THIS WEEK", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp, color = B.txt2)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WeekStat(if (newMembers > 0) "+${formatShort(newMembers)}" else "0", "new members", B.green, Modifier.weight(1f))
+            WeekStat(formatShort(posts), "posts", B.blueLight, Modifier.weight(1f))
+            WeekStat(formatShort(activeMembers), "active members", B.gold, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun WeekStat(value: String, label: String, color: Color, modifier: Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        Text(label, fontSize = 12.sp, color = B.txt2)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Into right now
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun IntoRightNow(
+    picks: InterestPicks?,
+    hyped: List<InterestHypedVideo>,
+    watching: List<InterestWatching>,
+    onOpenPicks: (String) -> Unit,
+    onOpenVideo: (String) -> Unit,
+    onOpenWatching: (InterestWatching) -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(top = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionTitle("Into right now", modifier = Modifier.padding(horizontal = 16.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            picks?.let { PicksCard(it, onOpenPicks) }
+            if (hyped.isNotEmpty()) HypedCard(hyped, onOpenVideo)
+            watching.forEach { WatchingCard(it, onOpenWatching) }
+        }
+    }
+}
+
+@Composable
+private fun InterestCard(
+    background: Color,
+    border: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .width(210.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(background)
+            .border(1.dp, border, RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun CardEyebrow(text: String, color: Color) {
+    Text(text, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp, color = color)
+}
+
+@Composable
+private fun PicksCard(picks: InterestPicks, onOpenPicks: (String) -> Unit) {
+    InterestCard(
+        background = Color(0xFF10241A),
+        border = B.green.copy(alpha = 0.35f),
+    ) {
+        CardEyebrow("STITCH PICKS", B.green)
+        Spacer(Modifier.height(8.dp))
+        picks.lastNight?.let { night ->
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${night.right}/${night.total}", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = B.txt)
+                Text("last night", fontSize = 13.sp, color = B.txt2, modifier = Modifier.padding(bottom = 6.dp))
+            }
+            if (night.results.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                    night.results.forEach { right ->
+                        Box(
+                            Modifier
+                                .weight(1f, fill = false)
+                                .width(26.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(if (right) B.green else B.wrong)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Text(
+            buildAnnotatedString {
+                append("This week ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(if (picks.weekCashed == 1) "1 card cashed" else "${picks.weekCashed} cards cashed")
+                }
+                append(" of ${picks.weekCards}")
+            },
+            fontSize = 13.sp,
+            color = B.txtSoft,
+        )
+        picks.landingSlug?.let { slug ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "See tonight's card ›",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = B.green,
+                modifier = Modifier.clickable { onOpenPicks(slug) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HypedCard(videos: List<InterestHypedVideo>, onOpenVideo: (String) -> Unit) {
+    InterestCard(
+        background = Color(0xFF2A1020),
+        border = B.wrong.copy(alpha = 0.35f),
+    ) {
+        CardEyebrow("RECENTLY HYPED", B.wrong)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            videos.take(3).forEach { v ->
+                Box(
+                    modifier = Modifier
+                        .size(width = 56.dp, height = 84.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF4A1A30))
+                        .clickable { onOpenVideo(v.videoID) },
+                ) {
+                    v.thumbnailURL?.let {
+                        AsyncImage(model = it, contentDescription = v.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Videos they hyped this week", fontSize = 12.sp, color = B.txt2)
+    }
+}
+
+@Composable
+private fun WatchingCard(w: InterestWatching, onOpen: (InterestWatching) -> Unit) {
+    Row(
+        modifier = Modifier
+            .width(210.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF16182E))
+            .border(1.dp, B.blueLight.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            .then(if (w.collectionID != null) Modifier.clickable { onOpen(w) } else Modifier)
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 64.dp, height = 96.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF2C3460)),
+        ) {
+            w.coverURL?.let {
+                AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            CardEyebrow("WATCHING", B.blueLight)
+            Text(
+                w.title.ifBlank { w.episodeTitle },
+                fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = B.txt,
+                maxLines = 3, overflow = TextOverflow.Ellipsis,
+            )
+            w.seasonEpisodeLabel?.let { Text(it, fontSize = 12.sp, color = B.txt2) }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. You
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun YouCard(membership: CommunityMembership, onTap: () -> Unit) {
+    val level = membership.level.coerceAtLeast(1)
+    val xp = membership.localXP
+    val floor = CommunityXPCurve.totalXPForLevel(level)
+    val next = CommunityXPCurve.totalXPForLevel(level + 1)
+    val toNext = (next - xp).coerceAtLeast(0)
+    val progress = if (next > floor) ((xp - floor).toFloat() / (next - floor)).coerceIn(0f, 1f) else 1f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 18.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(B.card)
+            .clickable { onTap() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(46.dp).clip(CircleShape).background(B.blue),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Lv$level", fontSize = if (level >= 100) 12.sp else 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("Your level", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = B.txt)
+                Spacer(Modifier.weight(1f))
+                Text("${formatShort(toNext)} XP to Lv ${level + 1}", fontSize = 13.sp, color = B.txt2)
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(progress)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(B.brandH)
+                )
+            }
+        }
+        if (membership.dailyLoginStreak > 0) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text("${membership.dailyLoginStreak}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = B.streak)
+                Text("day streak", fontSize = 10.sp, color = B.txt2)
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Top members
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TopMembersRow(
+    members: List<CommunityMembership>,
+    profiles: Map<String, CommunityUserProfile>,
+    onLeaderboard: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(top = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionTitle("Top members", modifier = Modifier.weight(1f))
+            Text(
+                "Leaderboard",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = B.blue,
+                modifier = Modifier.clickable { onLeaderboard() },
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            members.forEachIndexed { i, m ->
+                val rank = i + 1
+                val ring = B.rankRing(rank)
+                val profile = profiles[m.userID]
+                val username = profile?.username ?: m.username
+                Column(
+                    modifier = Modifier.width(62.dp).clickable { onLeaderboard() },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(modifier = Modifier.size(width = 62.dp, height = 69.dp)) {
+                        RingAvatar(
+                            url = profile?.profileImageURL,
+                            name = profile?.displayName ?: m.displayName.ifBlank { username },
+                            size = 62.dp,
+                            ring = Brush.linearGradient(listOf(ring, ring)),
+                            ringWidth = 2.dp,
+                            gap = 2.dp,
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .size(width = 30.dp, height = 19.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(B.bg)
+                                .padding(2.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(ring),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("#$rank", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "@$username",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = B.txt,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Highlights
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun HighlightsRow(posts: List<CommunityPost>, onOpenPost: (CommunityPost) -> Unit) {
+    Column(
+        modifier = Modifier.padding(top = 26.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionTitle("Highlights", modifier = Modifier.padding(horizontal = 16.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            posts.forEach { post ->
+                Box(
+                    modifier = Modifier
+                        .size(width = 112.dp, height = 168.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF3A1430))
+                        .clickable { onOpenPost(post) },
+                ) {
+                    post.videoThumbnailURL?.takeIf { it.isNotBlank() }?.let {
+                        AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
+                    )
+                    Row(
+                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = B.wrong, modifier = Modifier.size(12.dp))
+                        Text(formatShort(post.hypeCount), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Posts
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PostCard(
+    post: CommunityPost,
+    authorImage: String?,
+    onOpen: () -> Unit,
+    onHype: () -> Unit,
+    onStitch: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onOpen() },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            PersonImage(url = authorImage, name = post.authorDisplayName.ifBlank { post.authorUsername }, size = 38.dp)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        post.authorDisplayName.ifBlank { "@${post.authorUsername}" },
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold, color = B.txt,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (post.isCreatorPost) {
+                        Text("HOST", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = B.magenta)
+                    }
+                }
+                Text(
+                    (if (post.isPinned) "Pinned · " else "") + timeAgoShort(post.createdAt),
+                    fontSize = 12.sp,
+                    color = B.txt3,
+                )
+            }
+        }
+
+        val thumb = post.videoThumbnailURL?.takeIf { it.isNotBlank() }
+        if (post.isVideo || thumb != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFF24142E))
+                    .clickable { onOpen() },
+                contentAlignment = Alignment.Center,
+            ) {
+                thumb?.let {
+                    AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+                if (post.isVideo) {
+                    Box(
+                        modifier = Modifier.size(62.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(28.dp))
+                    }
+                }
+                if (post.body.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))))
+                            .padding(start = 12.dp, end = 12.dp, top = 28.dp, bottom = 12.dp)
+                    ) {
+                        Text(
+                            post.body, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 20.sp,
+                            color = Color.White, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        } else if (post.body.isNotBlank()) {
+            Text(
+                post.body,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                color = B.txtSoft,
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(B.card)
+                    .clickable { onOpen() }
+                    .padding(16.dp),
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(Color(0xFFFF4D4D).copy(alpha = 0.16f))
+                    .clickable { onHype() }
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = B.wrong, modifier = Modifier.size(16.dp))
+                Text("Hype ${formatShort(post.hypeCount)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = B.wrong)
+            }
+            Box(
+                modifier = Modifier
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(B.blue.copy(alpha = 0.16f))
+                    .clickable { onStitch() }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Stitch · ${formatShort(post.replyCount)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = B.blueLight)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyPosts(onRecord: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("No posts yet", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = B.txt)
+        Text(
+            "Be the first. Record a clip for this community.",
+            fontSize = 14.sp,
+            color = B.txt2,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .height(46.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(B.magenta)
+                .clickable { onRecord() }
+                .padding(horizontal = 22.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Record a post", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = B.txt, modifier = modifier)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** "now" / "5m" / "3h" / "2d" — compact age. */
 private fun timeAgoShort(date: Date): String {
     val diff = ((System.currentTimeMillis() - date.time) / 1000).coerceAtLeast(0)
     return when {
@@ -877,423 +1692,6 @@ private fun timeAgoShort(date: Date): String {
         else -> "${diff / 86_400}d"
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Home Tab — Cards
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun GoLiveCTACard(onTap: () -> Unit) {
-    // Subtle pulse on the icon — mirrors iOS animation.
-    val transition = rememberInfiniteTransition(label = "goLivePulse")
-    val pulse by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pulse",
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(V2.red.copy(alpha = 0.18f), V2.orange.copy(alpha = 0.08f))
-                )
-            )
-            .border(0.5.dp, V2.red.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-            .clickable { onTap() }
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size((44f * pulse).dp)
-                .clip(CircleShape)
-                .background(V2.red.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.Podcasts,
-                contentDescription = null,
-                tint = V2.red,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                "Start a Live",
-                color = V2.txt,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                "Your community gets a push the moment you go on",
-                color = V2.txt2,
-                fontSize = 11.sp,
-            )
-        }
-        Text("›", color = V2.txt3, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun LiveBannerCard(creatorName: String, onJoin: () -> Unit) {
-    val transition = rememberInfiniteTransition(label = "liveDot")
-    val dotAlpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "dot",
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(V2.red.copy(alpha = 0.18f), V2.purple.copy(alpha = 0.10f))
-                )
-            )
-            .border(0.5.dp, V2.red.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .background(V2.red.copy(alpha = dotAlpha), CircleShape),
-                )
-                Text("LIVE NOW", color = V2.red, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(
-                "$creatorName is LIVE!",
-                color = V2.txt,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(V2.red)
-                .clickable { onJoin() }
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-        ) {
-            Text("Join", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun StatsRow(
-    communityItem: CommunityListItem,
-    membership: CommunityMembership?,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        StatBox(
-            num = formatShort(communityItem.memberCount),
-            label = "MEMBERS",
-            color = V2.cyan,
-            modifier = Modifier.weight(1f),
-        )
-        // "YOUR LEVEL" → "TODAY": level already shows in the leaderboard, so the
-        // tile was redundant. APPROX: no real posts-today signal yet (client proxy).
-        StatBox(
-            num = "0",
-            label = "TODAY",
-            color = V2.gold,
-            modifier = Modifier.weight(1f),
-        )
-        StatBox(
-            num = "${membership?.dailyLoginStreak ?: 0}d",
-            label = "STREAK",
-            color = V2.purple,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun StatBox(
-    num: String,
-    label: String,
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(10.dp))
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(num, color = color, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = V2.txt3, fontSize = 8.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp)
-    }
-}
-
-@Composable
-private fun QuickLinksRow(
-    onLeaderboard: () -> Unit,
-    onBadges: () -> Unit,
-    onSupporters: () -> Unit,
-    onHighlight: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Chip(Icons.Default.BarChart, "Leaderboard", onLeaderboard)
-        Chip(Icons.Default.Star, "Badges", onBadges)
-        Chip(Icons.Default.Favorite, "Supporters", onSupporters)
-        Chip(Icons.Default.AutoAwesome, "Highlights", onHighlight)
-    }
-}
-
-@Composable
-private fun Chip(icon: ImageVector, label: String, onTap: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(8.dp))
-            .clickable { onTap() }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(icon, null, tint = V2.txt2, modifier = Modifier.size(12.dp))
-        Text(label, color = V2.txt2, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun LeaderboardPreviewCard(
-    topMembers: List<CommunityMembership>,
-    membership: CommunityMembership?,
-    onTap: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(14.dp))
-            .clickable { onTap() }
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.BarChart, null, tint = V2.cyan, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Leaderboard", color = V2.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            Text("See all", color = V2.cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        }
-        if (topMembers.isEmpty()) {
-            Text("No members ranked yet", color = V2.txt3, fontSize = 11.sp)
-        } else {
-            topMembers.take(3).forEachIndexed { idx, m ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${idx + 1}", color = V2.txt3, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("@${m.username}", color = V2.txt, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.weight(1f))
-                    Text("Lv ${m.level}", color = V2.cyan, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-        // Your own standing — always shown, in brand pink, separated by a rule, so
-        // you see where you rank even outside the top 3 (tightening pass).
-        membership?.let { me ->
-            val myRank = topMembers.indexOfFirst { it.userID == me.userID }.takeIf { it >= 0 }?.plus(1)
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.07f)))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(myRank?.toString() ?: "—", color = V2.pink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("You", color = V2.pink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                Text("Lv ${me.level}", color = V2.pink, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun TopSupportersPreviewCard(
-    topMembers: List<CommunityMembership>,
-    onTap: () -> Unit,
-) {
-    val sorted = remember(topMembers) {
-        topMembers.sortedByDescending { it.totalHypesGiven }
-    }
-    val medals = listOf("🥇", "🥈", "🥉")
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(14.dp))
-            .clickable { onTap() }
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Favorite, null, tint = V2.orange, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Top supporters", color = V2.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            Text("See all", color = V2.orange, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        }
-        val top3 = sorted.take(3)
-        if (top3.isEmpty() || top3.all { it.totalHypesGiven == 0 }) {
-            Text("No supporters yet — be the first", color = V2.txt3, fontSize = 11.sp)
-        } else {
-            top3.forEachIndexed { idx, m ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(medals[idx.coerceAtMost(2)], fontSize = 13.sp, modifier = Modifier.width(20.dp))
-                    Text("@${m.username}", color = V2.txt, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.weight(1f))
-                    Text("${m.totalHypesGiven} 🔥", color = V2.orange, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BadgesPreviewCard(
-    earnedCount: Int,
-    modifier: Modifier = Modifier,
-    onTap: () -> Unit,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(14.dp))
-            .clickable { onTap() }
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Star, null, tint = V2.gold, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Badges", color = V2.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Text(earnedCount.toString(), color = V2.gold, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text("earned", color = V2.txt3, fontSize = 10.sp)
-    }
-}
-
-@Composable
-private fun HighlightReelPreviewCard(
-    modifier: Modifier = Modifier,
-    onTap: () -> Unit,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(V2.card)
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(14.dp))
-            .clickable { onTap() }
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.AutoAwesome, null, tint = V2.purple, modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Highlights", color = V2.txt, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Icon(Icons.Default.PlayCircleFilled, null, tint = V2.purple, modifier = Modifier.size(24.dp))
-        Text("Tap to watch", color = V2.txt3, fontSize = 10.sp)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tab Bar + FAB
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun V2ChannelNav(active: V2Tab, onSelect: (V2Tab) -> Unit, onRecord: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(V2.bg.copy(alpha = 0.98f))
-            .border(0.5.dp, V2.cardBorder, RoundedCornerShape(0.dp))
-            // The app tab bar used to sit on top of this row, so it never needed
-            // insets. Now that Community is genuinely full screen the nav is the
-            // bottom-most chrome and has to clear the system nav / gesture bar.
-            .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        listOf(V2Tab.HOME, V2Tab.THREADS).forEach { t ->
-            val isActive = active == t
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (isActive) Color.White else Color.White.copy(alpha = 0.09f))
-                    .clickable { onSelect(t) }
-                    .padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    t.label,
-                    color = if (isActive) Color(0xFF0A0A0D) else Color.White.copy(alpha = 0.55f),
-                    fontSize = 13.sp,
-                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
-                )
-            }
-        }
-        // Record FAB (pink) beside the pills.
-        V2FAB(icon = active.fabIcon, onClick = onRecord)
-    }
-}
-
-@Composable
-private fun V2FAB(icon: ImageVector, onClick: () -> Unit) {
-    FloatingActionButton(
-        onClick = onClick,
-        containerColor = V2.pink,   // record FAB recolored cyan → pink (tightening pass)
-        shape = CircleShape,
-        modifier = Modifier.size(48.dp),
-    ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 private fun formatShort(n: Int): String = when {
     n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
